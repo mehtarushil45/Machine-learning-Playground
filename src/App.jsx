@@ -1,7 +1,6 @@
 import { useState } from "react";
 import DataUpload from "./components/DataUpload";
 import DataPreview from "./components/DataPreview";
-import "./App.css";
 
 function App() {
   const [dataset, setDataset] = useState(null);

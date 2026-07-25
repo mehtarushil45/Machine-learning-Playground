@@ -1,42 +1,36 @@
-import Papa from "papaparse";
+import { useState } from "react";
+import { parseCsvFile } from "../services/csvService.js";
+import { validateCsvFile } from "../utils/validation.js";
 
 function DataUpload({ onDataLoaded }) {
-  const handleFileChange = (event) => {
+  const [error, setError] = useState(null);
+
+  const handleFileChange = async (event) => {
     const file = event.target.files[0];
+
+    setError(null);
 
     if (!file) return;
 
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      alert("Please upload a valid CSV file.");
+    const fileValidation = validateCsvFile(file);
+    if (!fileValidation.valid) {
+      setError(fileValidation.message);
       return;
     }
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: true,
-      complete: (results) => {
-        if (!results.data.length || !results.meta.fields?.length) {
-          alert("The CSV file is empty or invalid.");
-          return;
-        }
-
-        onDataLoaded({
-          rows: results.data,
-          columns: results.meta.fields,
-          fileName: file.name,
-        });
-      },
-      error: () => {
-        alert("Unable to read the CSV file.");
-      },
-    });
+    try {
+      const dataset = await parseCsvFile(file);
+      onDataLoaded(dataset);
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   return (
     <section>
       <h2>Upload Dataset</h2>
       <input type="file" accept=".csv" onChange={handleFileChange} />
+      {error ? <p>{error}</p> : null}
     </section>
   );
 }
