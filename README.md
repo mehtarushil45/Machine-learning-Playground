@@ -1,16 +1,67 @@
-# React + Vite
+# ml-playground
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An organisation-grade ML learning and lab management platform.
 
-Currently, two official plugins are available:
+## Monorepo layout
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```
+ml-playground/
+├── apps/
+│   └── web/              # React + TypeScript frontend (Vite)
+├── services/
+│   ├── api/              # FastAPI backend  (Batch 3)
+│   └── worker/           # Celery + Redis ML worker  (Batch 4)
+├── packages/
+│   └── shared-types/     # Shared TypeScript types  (future)
+├── infra/                # Docker Compose, nginx  (Batch 3+)
+├── pnpm-workspace.yaml
+└── .env.example
+```
 
-## React Compiler
+## Prerequisites
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Tool | Minimum version |
+|---|---|
+| Node.js | 20 LTS |
+| pnpm | 9 |
+| Docker + Compose | 24 |
+| Python | 3.12 |
 
-## Expanding the ESLint configuration
+## Quick start (frontend only)
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+pnpm install
+pnpm dev          # starts Vite at http://localhost:5173
+```
+
+## Available scripts (run from repo root)
+
+| Command | What it does |
+|---|---|
+| `pnpm dev` | Start the frontend dev server |
+| `pnpm build` | Production build → `apps/web/dist/` |
+| `pnpm lint` | ESLint across the web app |
+| `pnpm preview` | Preview the production build locally |
+
+## Working features
+
+- CSV upload with file-type and content validation
+- Dataset preview (first 10 rows, "Missing" for blank cells)
+- Automatic numeric-column detection
+- Feature column (multi-select) and target column (single) selection with mutual-exclusion
+
+## Architecture decisions
+
+- **Auth:** FastAPI OAuth2 / JWT — access token + refresh token
+- **Multi-tenancy:** Organisation-scoped + user-scoped datasets and jobs
+- **Object storage:** MinIO locally; AWS S3-compatible API in production
+- **ML:** scikit-learn first; PyTorch added later; all training in the Python worker
+- **Frontend state:** React local state until shared state is actually needed
+
+## Environment variables
+
+Copy `.env.example` to `.env` and fill in values before running services:
+
+```bash
+cp .env.example .env
+```
