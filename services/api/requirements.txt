@@ -1,0 +1,22 @@
+# Web framework
+fastapi==0.140.0
+uvicorn[standard]==0.51.0
+python-multipart==0.0.32
+
+# Database
+sqlalchemy[asyncio]==2.0.51
+asyncpg==0.31.0
+alembic==1.18.5
+
+# Data validation / settings
+pydantic==2.13.4
+pydantic-settings==2.14.2
+email-validator==2.3.0  # required by pydantic EmailStr
+
+# Authentication
+PyJWT==2.13.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.3.0       # passlib 1.7.4 is tested against bcrypt <5.0; pin 4.x
+
+# Cache / broker
+redis==8.0.1
