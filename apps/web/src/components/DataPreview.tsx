@@ -1,9 +1,15 @@
-function DataPreview({ dataset }) {
+import type { Dataset } from '../types/dataset'
+
+interface DataPreviewProps {
+  dataset: Dataset | null
+}
+
+function DataPreview({ dataset }: DataPreviewProps) {
   if (!dataset) {
-    return <p>No dataset uploaded yet.</p>;
+    return <p>No dataset uploaded yet.</p>
   }
 
-  const previewRows = dataset.rows.slice(0, 10);
+  const previewRows = dataset.rows.slice(0, 10)
 
   return (
     <section>
@@ -14,12 +20,13 @@ function DataPreview({ dataset }) {
       </p>
 
       <p>
-        <strong>Rows:</strong> {dataset.rows.length} |{" "}
+        <strong>Rows:</strong> {dataset.rows.length} |{' '}
         <strong>Columns:</strong> {dataset.columns.length}
       </p>
 
-      <div style={{ overflowX: "auto" }}>
-        <table border="1" cellPadding="8">
+      <div style={{ overflowX: 'auto' }}>
+        {/* border / cellPadding are numeric attrs in React's HTMLTableElement */}
+        <table border={1} cellPadding={8}>
           <thead>
             <tr>
               {dataset.columns.map((column) => (
@@ -35,8 +42,8 @@ function DataPreview({ dataset }) {
                   <td key={`${rowIndex}-${column}`}>
                     {row[column] === null ||
                     row[column] === undefined ||
-                    row[column] === ""
-                      ? "Missing"
+                    row[column] === ''
+                      ? 'Missing'
                       : String(row[column])}
                   </td>
                 ))}
@@ -46,7 +53,7 @@ function DataPreview({ dataset }) {
         </table>
       </div>
     </section>
-  );
+  )
 }
 
-export default DataPreview;
+export default DataPreview
