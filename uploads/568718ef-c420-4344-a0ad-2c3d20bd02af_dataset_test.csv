@@ -1,0 +1,5 @@
+id,feature1,feature2,target
+1,10.5,0.2,class_a
+2,12.1,0.5,class_b
+3,9.8,0.1,class_a
+4,14.3,0.8,class_b

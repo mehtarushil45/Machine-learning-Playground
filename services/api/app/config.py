@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     s3_secret_key: str = "minioadmin"
     s3_bucket_name: str = "ml-datasets"
 
+    # ── Dataset Upload Settings ───────────────────────────────────────────────
+    max_upload_size_bytes: int = 50 * 1024 * 1024  # 50 MB
+    upload_dir: str = "uploads"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

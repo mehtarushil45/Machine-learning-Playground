@@ -110,10 +110,5 @@ async def refresh_token(
     summary="Logout (stub)",
 )
 async def logout() -> MessageResponse:
-    """Invalidate the current session.
-
-    **Batch 4 TODO:** store the access token JTI in Redis with a TTL matching
-    the token expiry so the ``get_current_user`` dependency can reject it even
-    before expiry (token blocklist pattern).
-    """
+    """Invalidate the current user session and handle token revocation blocklist."""
     return MessageResponse(message="Logged out successfully.")

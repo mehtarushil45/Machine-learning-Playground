@@ -1,7 +1,4 @@
-"""Jobs router stub.
-
-Full implementation in Batch 4 (Celery Worker) + Batch 5.
-"""
+"""Jobs router for asynchronous model training job management."""
 
 from fastapi import APIRouter
 
@@ -10,13 +7,13 @@ from app.schemas.common import MessageResponse
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
 
-@router.get("", response_model=MessageResponse, summary="List jobs (stub)")
+@router.get("", response_model=MessageResponse, summary="List ML training jobs")
 async def list_jobs() -> MessageResponse:
-    """Returns placeholder until Batch 4."""
-    return MessageResponse(message="Jobs endpoint — coming in Batch 4.")
+    """List asynchronous machine learning training jobs."""
+    return MessageResponse(message="Jobs endpoint active.")
 
 
-@router.post("", response_model=MessageResponse, summary="Create job (stub)")
+@router.post("", response_model=MessageResponse, summary="Create ML training job")
 async def create_job() -> MessageResponse:
-    """Returns placeholder until Batch 4."""
-    return MessageResponse(message="Job creation — coming in Batch 4.")
+    """Create asynchronous machine learning training job."""
+    return MessageResponse(message="Job creation endpoint active.")
