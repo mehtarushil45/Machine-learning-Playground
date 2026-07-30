@@ -6,7 +6,11 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
 
   apps/web:
     dependencies:
