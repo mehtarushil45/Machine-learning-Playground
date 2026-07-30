@@ -1,0 +1,6 @@
+record_id,monthly_income,purchase_count,customer_plan
+1,1200,4,Basic
+2,1800,6,Standard
+3,2500,8,Premium
+4,1500,5,Basic
+5,3200,10,Premium

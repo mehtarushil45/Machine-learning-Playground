@@ -1,0 +1,19 @@
+{
+  "model_id": "model-24281d74",
+  "job_id": "24281d74-d100-45aa-a48f-0f89715e7ab3",
+  "dataset_id": "sample_dataset.csv",
+  "algorithm": "Random Forest Regressor",
+  "target_column": "target",
+  "feature_columns": [
+    "feature1",
+    "feature2"
+  ],
+  "created_at": "2026-07-30T18:10:23.679052+00:00",
+  "filename": "24281d74-d100-45aa-a48f-0f89715e7ab3_random_forest_regressor.joblib",
+  "metrics": {
+    "mae": 21500.0,
+    "rmse": 27976.0612,
+    "r2_score": 0.9217
+  },
+  "model_path": "C:\\Users\\mehta\\OneDrive\\Desktop\\ml-playground\\services\\api\\uploads\\models\\24281d74-d100-45aa-a48f-0f89715e7ab3_random_forest_regressor.joblib"
+}

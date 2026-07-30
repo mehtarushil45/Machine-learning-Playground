@@ -14,6 +14,15 @@ from app.schemas.dataset import (
     NumericStatistics,
     TargetSuggestion,
 )
+from app.schemas.job import (
+    JobCancelResponse,
+    JobListResponse,
+    JobProgressResponse,
+    JobResponse,
+    JobRetryResponse,
+    JobStatusEnum,
+    TrainingRequest,
+)
 from app.schemas.user import UserCreate, UserRead
 
 __all__ = [
@@ -33,6 +42,13 @@ __all__ = [
     "ColumnProfile",
     "NumericStatistics",
     "CategoricalStatistics",
+    "JobStatusEnum",
+    "TrainingRequest",
+    "JobResponse",
+    "JobProgressResponse",
+    "JobListResponse",
+    "JobCancelResponse",
+    "JobRetryResponse",
     "UserCreate",
     "UserRead",
 ]

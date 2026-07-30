@@ -1,8 +1,10 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import type { Dataset, DatasetHealthReport, DatasetProfile, DatasetRecommendations } from '../../types/dataset'
+import type { JobEntity, TrainingRequestPayload } from '../../types/job'
 import { computeClientProfile, fetchDatasetProfile } from '../../services/profilerService'
 import { computeClientHealth, fetchDatasetHealth } from '../../services/healthService'
 import { computeClientRecommendations, fetchDatasetRecommendations } from '../../services/recommendationService'
+import { cancelJob, createTrainingJob, deleteJob, fetchJobs, retryJob } from '../../services/jobService'
 
 import { DataUpload } from './DataUpload'
 import { ExecutiveSummaryBar } from './ExecutiveSummaryBar'
@@ -14,9 +16,17 @@ import { DatasetSummary } from './DatasetSummary'
 import { DataPreview } from './DataPreview'
 import { ColumnSelector } from './ColumnSelector'
 import { SectionErrorCard } from './SectionErrorCard'
+
+import { TrainingConfigurationPanel } from '../jobs/TrainingConfigurationPanel'
+import { TrainingJobCard } from '../jobs/TrainingJobCard'
+import { TrainingJobList } from '../jobs/TrainingJobList'
+import { TrainingHistoryDrawer } from '../jobs/TrainingHistoryDrawer'
+import { TrainingStatusBadge } from '../jobs/TrainingStatusBadge'
+
 import { Badge } from '../../components/ui/Badge'
 import { Skeleton } from '../../components/ui/Skeleton'
 import { Card, CardContent } from '../../components/ui/Card'
+import { Button } from '../../components/ui/Button'
 
 export interface EnterpriseWorkspaceProps {
   dataset: Dataset | null
@@ -41,7 +51,25 @@ export const EnterpriseWorkspace = memo(function EnterpriseWorkspace({
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Job Orchestration State
+  const [activeJob, setActiveJob] = useState<JobEntity | null>(null)
+  const [jobsList, setJobsList] = useState<JobEntity[]>([])
+  const [isLaunchingJob, setIsLaunchingJob] = useState<boolean>(false)
+  const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState<boolean>(false)
+
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Load active jobs list from API on mount
+  useEffect(() => {
+    async function loadJobs() {
+      const data = await fetchJobs()
+      setJobsList(data.jobs)
+      if (data.jobs.length > 0) {
+        setActiveJob((current) => current || data.jobs[0])
+      }
+    }
+    loadJobs()
+  }, [])
 
   // Centralized Orchestration & Race Condition Prevention Effect
   useEffect(() => {
@@ -135,6 +163,50 @@ export const EnterpriseWorkspace = memo(function EnterpriseWorkspace({
       elem.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }, [])
+
+  // Job Orchestration Event Handlers
+  const handleLaunchJob = useCallback(async (payload: TrainingRequestPayload) => {
+    setIsLaunchingJob(true)
+    try {
+      const createdJob = await createTrainingJob(payload)
+      setActiveJob(createdJob)
+      setJobsList((prev) => [createdJob, ...prev.filter((j) => j.job_id !== createdJob.job_id)])
+      setIsLaunchingJob(false)
+      scrollToSection('section-job-card')
+    } catch (err) {
+      setIsLaunchingJob(false)
+      throw err
+    }
+  }, [scrollToSection])
+
+  const handleRefreshJobs = useCallback(async () => {
+    const data = await fetchJobs()
+    setJobsList(data.jobs)
+  }, [])
+
+  const handleCancelJobInList = useCallback(async (jobId: string) => {
+    const res = await cancelJob(jobId)
+    if (res) {
+      handleRefreshJobs()
+    }
+  }, [handleRefreshJobs])
+
+  const handleRetryJobInList = useCallback(async (jobId: string) => {
+    const res = await retryJob(jobId)
+    if (res) {
+      handleRefreshJobs()
+    }
+  }, [handleRefreshJobs])
+
+  const handleDeleteJobInList = useCallback(async (jobId: string) => {
+    const ok = await deleteJob(jobId)
+    if (ok) {
+      setJobsList((prev) => prev.filter((j) => j.job_id !== jobId))
+      if (activeJob?.job_id === jobId) {
+        setActiveJob(null)
+      }
+    }
+  }, [activeJob])
 
   return (
     <div className="space-y-6 pb-12">
@@ -299,6 +371,114 @@ export const EnterpriseWorkspace = memo(function EnterpriseWorkspace({
                   onSelectedFeaturesChange={onSelectedFeaturesChange}
                   onSelectedTargetChange={onSelectedTargetChange}
                 />
+              </CollapsibleSection>
+
+              {/* Section 8: ML Model Training Configuration */}
+              <CollapsibleSection
+                id="section-training-config"
+                title="ML Model Training Setup"
+                description="Configure algorithm choices, train/test split ratio, cross validation, and hyperparameters"
+                icon="cpu"
+                defaultExpanded={true}
+                badge={
+                  selectedTarget ? (
+                    <Badge variant="primary" icon="layers" size="sm">
+                      Ready to Train
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" size="sm">
+                      Setup Required
+                    </Badge>
+                  )
+                }
+              >
+                <TrainingConfigurationPanel
+                  dataset={dataset}
+                  selectedFeatures={selectedFeatures}
+                  selectedTarget={selectedTarget}
+                  recommendations={recommendations}
+                  onLaunchJob={handleLaunchJob}
+                  isLaunching={isLaunchingJob}
+                />
+              </CollapsibleSection>
+
+              {/* Section 9: Active Training Job Telemetry (Rendered when job active/selected) */}
+              {activeJob && (
+                <CollapsibleSection
+                  id="section-job-card"
+                  title="Live ML Job Orchestration & Progress"
+                  description="Real-time telemetry, stage progression, and job cancellation/retry controls"
+                  icon="activity"
+                  defaultExpanded={true}
+                  badge={<TrainingStatusBadge status={activeJob.status} size="sm" />}
+                >
+                  <TrainingJobCard
+                    job={activeJob}
+                    onJobUpdated={(updated) => {
+                      setActiveJob(updated)
+                      setJobsList((prev) =>
+                        prev.map((j) => (j.job_id === updated.job_id ? updated : j)),
+                      )
+                    }}
+                    onJobRetried={(newJob) => {
+                      setActiveJob(newJob)
+                      setJobsList((prev) => [newJob, ...prev])
+                    }}
+                  />
+                </CollapsibleSection>
+              )}
+
+              {/* Section 10: ML Job History Log */}
+              <CollapsibleSection
+                id="section-job-history"
+                title="ML Job History & Audit Log"
+                description="Complete execution history of training jobs in this session"
+                icon="clock"
+                defaultExpanded={false}
+                badge={
+                  <Badge variant="outline" size="sm">
+                    {jobsList.length} History Jobs
+                  </Badge>
+                }
+              >
+                <div className="space-y-4">
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      leftIcon="clock"
+                      onClick={() => setIsHistoryDrawerOpen(true)}
+                    >
+                      Open Full History Drawer
+                    </Button>
+                  </div>
+
+                  <TrainingJobList
+                    jobs={jobsList}
+                    onSelectJob={(j) => {
+                      setActiveJob(j)
+                      scrollToSection('section-job-card')
+                    }}
+                    onCancelJob={handleCancelJobInList}
+                    onRetryJob={handleRetryJobInList}
+                    onDeleteJob={handleDeleteJobInList}
+                  />
+
+                  <TrainingHistoryDrawer
+                    jobs={jobsList}
+                    isOpen={isHistoryDrawerOpen}
+                    onClose={() => setIsHistoryDrawerOpen(false)}
+                    onSelectJob={(j) => {
+                      setActiveJob(j)
+                      setIsHistoryDrawerOpen(false)
+                      scrollToSection('section-job-card')
+                    }}
+                    onCancelJob={handleCancelJobInList}
+                    onRetryJob={handleRetryJobInList}
+                    onDeleteJob={handleDeleteJobInList}
+                    onRefresh={handleRefreshJobs}
+                  />
+                </div>
               </CollapsibleSection>
             </>
           )}

@@ -1,6 +1,7 @@
 """Services module."""
 
 from app.services.health import DatasetHealthService, health_service
+from app.services.job_service import JobService, job_service
 from app.services.profiler import (
     DatasetProfilerService,
     TabularDataContainer,
@@ -19,4 +20,6 @@ __all__ = [
     "health_service",
     "RecommendationEngineService",
     "recommendation_service",
+    "JobService",
+    "job_service",
 ]

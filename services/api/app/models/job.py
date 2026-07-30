@@ -1,18 +1,36 @@
-"""Job model stub.
+"""Job model.
 
-Represents an ML training or processing job dispatched to the Celery worker.
+Represents an ML training or processing job managed by the Job Orchestration Layer.
 Scoped to both organisation and user.
 """
 
-import uuid
 import enum
 from datetime import datetime
+from typing import Any
+import uuid
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
+
+
+class JobStatusEnum(str, enum.Enum):
+    """Deterministic Job Lifecycle Statuses."""
+
+    PENDING = "PENDING"
+    QUEUED = "QUEUED"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    VALIDATING = "VALIDATING"
+    TRAINING = "TRAINING"
+    EVALUATING = "EVALUATING"
+    SAVING_MODEL = "SAVING_MODEL"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    RETRYING = "RETRYING"
 
 
 class JobType(str, enum.Enum):
@@ -24,54 +42,55 @@ class JobType(str, enum.Enum):
     profiling = "profiling"
 
 
-class JobStatus(str, enum.Enum):
-    """Celery task lifecycle states."""
-
-    queued = "queued"
-    running = "running"
-    succeeded = "succeeded"
-    failed = "failed"
-    cancelled = "cancelled"
-
-
 class Job(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     __tablename__ = "jobs"
 
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    job_type: Mapped[JobType] = mapped_column(nullable=False)
-    status: Mapped[JobStatus] = mapped_column(default=JobStatus.queued, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="ML Training Job")
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False, default="training")
+    status: Mapped[str] = mapped_column(String(64), default=JobStatusEnum.PENDING.value, nullable=False)
 
-    # ── Celery task reference ─────────────────────────────────────────────────
-    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # ── Job Configuration & Details ──────────────────────────────────────────
+    dataset_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    algorithm: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_column: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    feature_columns: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
 
-    # ── Result / error ────────────────────────────────────────────────────────
-    result_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)  # object-storage key
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── Progress & Execution Stage ────────────────────────────────────────────
+    progress: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    current_stage: Mapped[str] = mapped_column(String(255), default="Initialized", nullable=False)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    estimated_seconds: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # ── Timestamps & Lifecycle ────────────────────────────────────────────────
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # ── Input FK ─────────────────────────────────────────────────────────────
-    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("datasets.id", ondelete="SET NULL"),
+    # ── Error & Retries ───────────────────────────────────────────────────────
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # ── Celery & Storage references ───────────────────────────────────────────
+    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    result_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    # ── Ownership & Metadata ──────────────────────────────────────────────────
+    owner_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    job_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    # ── Foreign Keys & Multi-tenancy ──────────────────────────────────────────
+    organisation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organisations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
 
-    # ── Multi-tenancy & ownership FKs ─────────────────────────────────────────
-    organisation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("organisations.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=False,
-        index=True,
-    )
-
-    # ── Relationships ─────────────────────────────────────────────────────────
-    organisation: Mapped["Organisation"] = relationship(back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
-    created_by: Mapped["User"] = relationship(back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
-    dataset: Mapped["Dataset"] = relationship(back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
-
     def __repr__(self) -> str:
-        return f"<Job id={self.id} type={self.job_type} status={self.status}>"
+        return f"<Job id={self.id} algorithm={self.algorithm} status={self.status} progress={self.progress}%>"

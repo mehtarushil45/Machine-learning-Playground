@@ -1,0 +1,21 @@
+{
+  "model_id": "model-03c6cfb5",
+  "job_id": "03c6cfb5-f8c5-41b1-9d8d-86028b74ef08",
+  "dataset_id": "ds-sample",
+  "algorithm": "Random Forest Classifier",
+  "target_column": "category",
+  "feature_columns": [
+    "feature1",
+    "feature2"
+  ],
+  "created_at": "2026-07-30T18:09:40.059890+00:00",
+  "filename": "03c6cfb5-f8c5-41b1-9d8d-86028b74ef08_random_forest_classifier.joblib",
+  "metrics": {
+    "accuracy": 0.0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1_score": 0.0,
+    "roc_auc": null
+  },
+  "model_path": "C:\\Users\\mehta\\OneDrive\\Desktop\\ml-playground\\services\\api\\uploads\\models\\03c6cfb5-f8c5-41b1-9d8d-86028b74ef08_random_forest_classifier.joblib"
+}

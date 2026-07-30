@@ -34,6 +34,8 @@ export type IconName =
   | 'loader-2'
   | 'shield'
   | 'activity'
+  | 'clock'
+  | 'trash-2'
 
 export interface IconProps extends React.SVGProps<SVGSVGElement> {
   name: IconName
@@ -75,6 +77,8 @@ const iconMap: Record<IconName, React.ComponentType<LucideIcons.LucideProps>> = 
   'loader-2': LucideIcons.Loader2,
   shield: LucideIcons.Shield,
   activity: LucideIcons.Activity,
+  clock: LucideIcons.Clock,
+  'trash-2': LucideIcons.Trash2,
 }
 
 export function Icon({ name, size = 18, className = '', ...props }: IconProps) {
