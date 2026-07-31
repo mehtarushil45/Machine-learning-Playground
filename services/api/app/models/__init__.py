@@ -7,9 +7,9 @@ Import every model here so that:
 Order matters: import parent tables before child tables.
 """
 
-from services.api.app.models.organisation import Organisation  # noqa: F401
-from services.api.app.models.user import User  # noqa: F401
-from services.api.app.models.dataset import Dataset  # noqa: F401
-from services.api.app.models.job import Job  # noqa: F401
+from app.models.organisation import Organisation  # noqa: F401
+from app.models.user import User  # noqa: F401
+from app.models.dataset import Dataset  # noqa: F401
+from app.models.job import Job  # noqa: F401
 
 __all__ = ["Organisation", "User", "Dataset", "Job"]

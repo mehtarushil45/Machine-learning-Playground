@@ -14,7 +14,7 @@ import uuid
 
 from fastapi import HTTPException, status
 
-from services.api.app.schemas.job import (
+from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
     JobProgressResponse,
@@ -103,7 +103,7 @@ class JobService:
                 logger.warning(f"Celery dispatch failed: {exc}. Using async engine fallback.")
 
         # Fallback to in-process async model training execution engine
-        from services.api.app.ml.engine import execute_ml_training_pipeline_async
+        from app.ml.engine import execute_ml_training_pipeline_async
         asyncio.create_task(execute_ml_training_pipeline_async(job_id, config))
         logger.info(f"Dispatched job {job_id} to async ML training engine.")
 

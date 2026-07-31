@@ -9,7 +9,7 @@ import math
 import re
 from typing import Any, Sequence
 
-from services.api.app.schemas.dataset import ColumnProfile, DatasetProfileResponse
+from app.schemas.dataset import ColumnProfile, DatasetProfileResponse
 
 # Datetime pattern matcher (ISO-8601, YYYY-MM-DD, MM/DD/YYYY, etc.)
 DATETIME_REGEX = re.compile(

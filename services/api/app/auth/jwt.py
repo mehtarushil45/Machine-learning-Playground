@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 
-from services.api.app.config import settings
+from app.config import settings
 
 _ALGORITHM = "HS256"
 

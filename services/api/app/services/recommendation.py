@@ -6,7 +6,7 @@ and produces deterministic, explainable, and reproducible ML recommendations.
 No LLM calls. No randomness. Pure, deterministic recommendation algorithms.
 """
 
-from services.api.app.schemas.dataset import (
+from app.schemas.dataset import (
     DatasetHealthResponse,
     DatasetProfileResponse,
     DatasetRecommendationResponse,

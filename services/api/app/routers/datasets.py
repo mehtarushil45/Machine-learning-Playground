@@ -12,17 +12,17 @@ import uuid
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
-from services.api.app.config import settings
-from services.api.app.schemas.common import MessageResponse
-from services.api.app.schemas.dataset import (
+from app.config import settings
+from app.schemas.common import MessageResponse
+from app.schemas.dataset import (
     DatasetHealthResponse,
     DatasetProfileResponse,
     DatasetRecommendationResponse,
     DatasetUploadResponse,
 )
-from services.api.app.services.health import health_service
-from services.api.app.services.profiler import TabularDataContainer, profiler_service
-from services.api.app.services.recommendation import recommendation_service
+from app.services.health import health_service
+from app.services.profiler import TabularDataContainer, profiler_service
+from app.services.recommendation import recommendation_service
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
 

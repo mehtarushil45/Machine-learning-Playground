@@ -13,10 +13,16 @@ from typing import Any, Dict
 
 from sklearn.pipeline import Pipeline
 
-# Ensure services directory is in PYTHONPATH
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
+# Ensure services/api is in sys.path so 'from app.' imports resolve,
+# and repo root is in sys.path so 'from services.worker.' imports resolve.
+_engine_dir = os.path.dirname(os.path.abspath(__file__))
+_services_api_dir = os.path.abspath(os.path.join(_engine_dir, "..", ".."))      # services/api/
+_repo_root_dir = os.path.abspath(os.path.join(_engine_dir, "..", "..", "..", ".."))  # repo root
+for _p in (_services_api_dir, _repo_root_dir):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-from services.api.app.schemas.job import JobStatusEnum
+from app.schemas.job import JobStatusEnum
 from services.worker.core.dataset_loader import load_and_preprocess_dataset
 from services.worker.core.metrics import compute_metrics
 from services.worker.core.model_factory import create_model
@@ -38,7 +44,7 @@ def update_job_state(
 ) -> None:
     """Safely updates JobService in-memory and database state."""
     try:
-        from services.api.app.services.job_service import _JOBS_STORE
+        from app.services.job_service import _JOBS_STORE
 
         if job_id not in _JOBS_STORE:
             return

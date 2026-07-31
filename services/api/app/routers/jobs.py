@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Query, status
 
-from services.api.app.schemas.job import (
+from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
     JobProgressResponse,
@@ -10,7 +10,7 @@ from services.api.app.schemas.job import (
     JobRetryResponse,
     TrainingRequest,
 )
-from services.api.app.services.job_service import job_service
+from app.services.job_service import job_service
 
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 

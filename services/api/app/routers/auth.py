@@ -20,16 +20,16 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api.app.auth.jwt import (
+from app.auth.jwt import (
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
 )
-from services.api.app.auth.password import verify_password
-from services.api.app.dependencies import get_db
-from services.api.app.models.user import User
-from services.api.app.schemas.auth import RefreshTokenRequest, TokenResponse
-from services.api.app.schemas.common import MessageResponse
+from app.auth.password import verify_password
+from app.dependencies import get_db
+from app.models.user import User
+from app.schemas.auth import RefreshTokenRequest, TokenResponse
+from app.schemas.common import MessageResponse
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 

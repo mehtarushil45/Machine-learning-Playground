@@ -9,8 +9,8 @@ import uuid
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from services.api.app.database import Base
-from services.api.app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
+from app.database import Base
+from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
 
 
 class Organisation(UUIDPrimaryKeyMixin, TimeStampMixin, Base):

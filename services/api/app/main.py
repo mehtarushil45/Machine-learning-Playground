@@ -1,7 +1,8 @@
 """ML Platform — FastAPI application entry point.
 
-Start locally:
+Start locally (from repo root):
     uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    (run from services/api/ directory)
 
 In Docker:
     docker compose -f infra/docker-compose.yml up api
@@ -10,7 +11,7 @@ In Docker:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.api.app.routers import auth, datasets, health, jobs
+from app.routers import auth, datasets, health, jobs
 
 app = FastAPI(
     title="ML Platform API",
@@ -35,17 +36,11 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-app.include_router(health.router)
-app.include_router(auth.router)
-app.include_router(datasets.router)
-app.include_router(jobs.router)
+# All application routes are served under /api/v1 to match the frontend contract.
+# The health endpoint is mounted at root for Docker/k8s liveness probes.
+API_V1_PREFIX = "/api/v1"
 
-# Mount API v1 prefixes
-app.include_router(datasets.router, prefix="/api/v1")
-app.include_router(auth.router, prefix="/api/v1")
-app.include_router(jobs.router, prefix="/api/v1")
-print("\n========== REGISTERED ROUTES ==========")
-for route in app.routes:
-    methods = ",".join(route.methods)
-    print(f"{methods:15} {route.path}")
-print("=======================================\n")
+app.include_router(health.router)
+app.include_router(auth.router, prefix=API_V1_PREFIX)
+app.include_router(datasets.router, prefix=API_V1_PREFIX)
+app.include_router(jobs.router, prefix=API_V1_PREFIX)

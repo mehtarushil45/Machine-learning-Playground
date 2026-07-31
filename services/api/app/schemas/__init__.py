@@ -1,8 +1,8 @@
 """Central schema exports."""
 
-from services.api.app.schemas.auth import RefreshTokenRequest, TokenData, TokenResponse
-from services.api.app.schemas.common import ErrorResponse, HealthResponse, MessageResponse
-from services.api.app.schemas.dataset import (
+from app.schemas.auth import RefreshTokenRequest, TokenData, TokenResponse
+from app.schemas.common import ErrorResponse, HealthResponse, MessageResponse
+from app.schemas.dataset import (
     CategoricalStatistics,
     ColumnProfile,
     DatasetHealthResponse,
@@ -14,7 +14,7 @@ from services.api.app.schemas.dataset import (
     NumericStatistics,
     TargetSuggestion,
 )
-from services.api.app.schemas.job import (
+from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
     JobProgressResponse,
@@ -23,7 +23,7 @@ from services.api.app.schemas.job import (
     JobStatusEnum,
     TrainingRequest,
 )
-from services.api.app.schemas.user import UserCreate, UserRead
+from app.schemas.user import UserCreate, UserRead
 
 __all__ = [
     "RefreshTokenRequest",

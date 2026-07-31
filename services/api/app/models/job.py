@@ -12,8 +12,8 @@ import uuid
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from services.api.app.database import Base
-from services.api.app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
+from app.database import Base
+from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
 
 
 class JobStatusEnum(str, enum.Enum):
