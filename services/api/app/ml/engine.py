@@ -13,14 +13,6 @@ from typing import Any, Dict
 
 from sklearn.pipeline import Pipeline
 
-# Ensure services/api is in sys.path so 'from app.' imports resolve,
-# and repo root is in sys.path so 'from services.worker.' imports resolve.
-_engine_dir = os.path.dirname(os.path.abspath(__file__))
-_services_api_dir = os.path.abspath(os.path.join(_engine_dir, "..", ".."))      # services/api/
-_repo_root_dir = os.path.abspath(os.path.join(_engine_dir, "..", "..", "..", ".."))  # repo root
-for _p in (_services_api_dir, _repo_root_dir):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from app.schemas.job import JobStatusEnum
 from services.worker.core.dataset_loader import load_and_preprocess_dataset

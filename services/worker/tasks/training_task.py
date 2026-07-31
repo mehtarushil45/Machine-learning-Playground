@@ -3,12 +3,7 @@
 Executes asynchronous Machine Learning training jobs in Celery worker processes.
 """
 
-import sys
-import os
 from typing import Any, Dict
-
-# Ensure project root is in PYTHONPATH
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from services.worker.celery_app import celery_app
 from services.api.app.ml.engine import execute_ml_training_pipeline_sync

@@ -5,11 +5,6 @@ heartbeat, and retry policies.
 """
 
 import os
-import sys
-
-# Ensure repository root directory is in sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-
 from celery import Celery
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")

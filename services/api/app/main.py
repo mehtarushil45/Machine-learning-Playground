@@ -1,8 +1,8 @@
 """ML Platform — FastAPI application entry point.
 
-Start locally (from repo root):
-    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-    (run from services/api/ directory)
+Start locally:
+    cd services/api
+    python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 In Docker:
     docker compose -f infra/docker-compose.yml up api
@@ -26,10 +26,9 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-# Lock this down in production via an environment variable.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Vite dev server
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
