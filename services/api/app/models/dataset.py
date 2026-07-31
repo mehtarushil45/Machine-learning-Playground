@@ -10,8 +10,8 @@ import enum
 from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.database import Base
-from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
+from services.api.app.database import Base
+from services.api.app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
 
 
 class DatasetStatus(str, enum.Enum):

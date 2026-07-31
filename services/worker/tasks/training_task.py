@@ -11,7 +11,7 @@ from typing import Any, Dict
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 from services.worker.celery_app import celery_app
-from app.ml.engine import execute_ml_training_pipeline_sync
+from services.api.app.ml.engine import execute_ml_training_pipeline_sync
 
 
 @celery_app.task(name="execute_ml_training_job", bind=True, max_retries=2)

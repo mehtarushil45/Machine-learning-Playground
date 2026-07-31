@@ -5,7 +5,7 @@ GET /health — always returns 200 while the process is alive.
 
 from fastapi import APIRouter
 
-from app.schemas.common import HealthResponse
+from services.api.app.schemas.common import HealthResponse
 
 router = APIRouter(tags=["Health"])
 

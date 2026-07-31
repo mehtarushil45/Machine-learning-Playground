@@ -7,7 +7,7 @@ Flow:
     DatasetProfileResponse -> DatasetHealthService -> DatasetHealthResponse
 """
 
-from app.schemas.dataset import (
+from services.api.app.schemas.dataset import (
     DatasetHealthResponse,
     DatasetProfileResponse,
     HealthIssue,

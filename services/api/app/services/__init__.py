@@ -1,13 +1,13 @@
 """Services module."""
 
-from app.services.health import DatasetHealthService, health_service
-from app.services.job_service import JobService, job_service
-from app.services.profiler import (
+from services.api.app.services.health import DatasetHealthService, health_service
+from services.api.app.services.job_service import JobService, job_service
+from services.api.app.services.profiler import (
     DatasetProfilerService,
     TabularDataContainer,
     profiler_service,
 )
-from app.services.recommendation import (
+from services.api.app.services.recommendation import (
     RecommendationEngineService,
     recommendation_service,
 )

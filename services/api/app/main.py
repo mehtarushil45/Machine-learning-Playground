@@ -10,7 +10,7 @@ In Docker:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, datasets, health, jobs
+from services.api.app.routers import auth, datasets, health, jobs
 
 app = FastAPI(
     title="ML Platform API",
@@ -44,3 +44,8 @@ app.include_router(jobs.router)
 app.include_router(datasets.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
+print("\n========== REGISTERED ROUTES ==========")
+for route in app.routes:
+    methods = ",".join(route.methods)
+    print(f"{methods:15} {route.path}")
+print("=======================================\n")

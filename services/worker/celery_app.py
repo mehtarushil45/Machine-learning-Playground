@@ -5,6 +5,11 @@ heartbeat, and retry policies.
 """
 
 import os
+import sys
+
+# Ensure repository root directory is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 from celery import Celery
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
@@ -27,6 +32,7 @@ celery_app.conf.update(
     task_time_limit=3600,
     task_soft_time_limit=3300,
     worker_prefetch_multiplier=1,
+    worker_pool="solo",
 )
 
 if __name__ == "__main__":

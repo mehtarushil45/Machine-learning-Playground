@@ -1,8 +1,8 @@
-"""ML Engine package."""
+"""Machine Learning package exports."""
 
-from app.ml.engine import (
-    execute_ml_training_pipeline_async,
+from services.api.app.ml.engine import (
     execute_ml_training_pipeline_sync,
+    execute_ml_training_pipeline_async,
 )
 
 __all__ = [

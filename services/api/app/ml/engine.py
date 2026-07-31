@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 # Ensure services directory is in PYTHONPATH
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
-from app.schemas.job import JobStatusEnum
+from services.api.app.schemas.job import JobStatusEnum
 from services.worker.core.dataset_loader import load_and_preprocess_dataset
 from services.worker.core.metrics import compute_metrics
 from services.worker.core.model_factory import create_model
@@ -38,7 +38,7 @@ def update_job_state(
 ) -> None:
     """Safely updates JobService in-memory and database state."""
     try:
-        from app.services.job_service import _JOBS_STORE
+        from services.api.app.services.job_service import _JOBS_STORE
 
         if job_id not in _JOBS_STORE:
             return

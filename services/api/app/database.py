@@ -7,7 +7,7 @@ Alembic can discover and migrate them.
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from app.config import settings
+from services.api.app.config import settings
 
 # ── Engine ────────────────────────────────────────────────────────────────────
 engine = create_async_engine(

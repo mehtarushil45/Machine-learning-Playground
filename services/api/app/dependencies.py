@@ -1,7 +1,7 @@
 """FastAPI dependency providers.
 
 Usage:
-    from app.dependencies import get_db, get_current_user
+    from services.api.app.dependencies import get_db, get_current_user
 
     @router.get("/me")
     async def me(current_user: User = Depends(get_current_active_user)):
@@ -18,10 +18,10 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.jwt import decode_access_token
-from app.auth.oauth2 import oauth2_scheme
-from app.database import AsyncSessionLocal
-from app.models.user import User
+from services.api.app.auth.jwt import decode_access_token
+from services.api.app.auth.oauth2 import oauth2_scheme
+from services.api.app.database import AsyncSessionLocal
+from services.api.app.models.user import User
 
 
 # ── Database session ──────────────────────────────────────────────────────────

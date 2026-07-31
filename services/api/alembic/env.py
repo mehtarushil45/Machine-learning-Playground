@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 # ── Import all models so Alembic sees every table ─────────────────────────────
-import app.models  # noqa: F401  (side-effect: registers models on Base.metadata)
-from app.database import Base
-from app.config import settings
+import services.api.app.models  # noqa: F401  (side-effect: registers models on Base.metadata)
+from services.api.app.database import Base
+from services.api.app.config import settings
 
 # ── Alembic config object ─────────────────────────────────────────────────────
 config = context.config
