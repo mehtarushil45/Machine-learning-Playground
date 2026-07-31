@@ -95,6 +95,9 @@ class JobService:
         """Dispatches job to Celery worker if Redis is active, or in-process ML training engine."""
         if is_redis_available():
             try:
+                _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+                if _repo_root not in sys.path:
+                    sys.path.insert(0, _repo_root)
                 from services.worker.tasks.training_task import execute_ml_training_job
                 execute_ml_training_job.delay(job_id, config)
                 logger.info(f"Dispatched job {job_id} to Celery worker.")

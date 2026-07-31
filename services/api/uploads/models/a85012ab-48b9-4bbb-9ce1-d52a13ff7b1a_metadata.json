@@ -1,0 +1,19 @@
+{
+  "model_id": "model-a85012ab",
+  "job_id": "a85012ab-48b9-4bbb-9ce1-d52a13ff7b1a",
+  "dataset_id": "ds-mlplayground_reset_test.csv",
+  "algorithm": "Random Forest Classifier",
+  "target_column": "monthly_income",
+  "feature_columns": [
+    "purchase_count",
+    "record_id"
+  ],
+  "created_at": "2026-07-31T17:04:34.364464+00:00",
+  "filename": "a85012ab-48b9-4bbb-9ce1-d52a13ff7b1a_random_forest_classifier.joblib",
+  "metrics": {
+    "mae": 40000.0,
+    "rmse": 46368.0925,
+    "r2_score": 0.957
+  },
+  "model_path": "C:\\Users\\mehta\\OneDrive\\Desktop\\ml-playground\\services\\api\\uploads\\models\\a85012ab-48b9-4bbb-9ce1-d52a13ff7b1a_random_forest_classifier.joblib"
+}
