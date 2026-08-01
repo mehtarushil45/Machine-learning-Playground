@@ -159,12 +159,7 @@ function AppContent() {
                       </span>
                       
                       {!isSidebarCollapsed && (
-                        <>
-                          <span className="flex-1 text-left truncate">{item.label}</span>
-                          <span className="text-[10px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/50">
-                            {item.shortcut}
-                          </span>
-                        </>
+                        <span className="flex-1 text-left truncate">{item.label}</span>
                       )}
 
                       {/* Active Indicator Bar */}
