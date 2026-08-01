@@ -14,8 +14,15 @@ from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
 
 
 class UserRole(str, enum.Enum):
-    """Roles control what a user can do within their organisation."""
+    """Roles control what a user can do within their organisation and institution."""
 
+    platform_admin = "platform_admin"
+    org_admin = "org_admin"
+    faculty = "faculty"
+    lab_coordinator = "lab_coordinator"
+    reviewer = "reviewer"
+    learner = "learner"
+    # Legacy aliases
     owner = "owner"
     admin = "admin"
     member = "member"

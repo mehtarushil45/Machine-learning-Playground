@@ -8,7 +8,7 @@ import uuid
 import enum
 
 from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
 
 from app.database import Base
 from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
@@ -54,7 +54,10 @@ class Dataset(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     # ── Relationships ─────────────────────────────────────────────────────────
     organisation: Mapped["Organisation"] = relationship(back_populates="datasets")  # type: ignore[name-defined]  # noqa: F821
     created_by: Mapped["User"] = relationship(back_populates="datasets")  # type: ignore[name-defined]  # noqa: F821
-    jobs: Mapped[list["Job"]] = relationship(back_populates="dataset")  # type: ignore[name-defined]  # noqa: F821
+    jobs: Mapped[list["Job"]] = relationship(
+        primaryjoin="foreign(Job.dataset_id) == type_coerce(Dataset.id, String)",
+        viewonly=True,
+    )  # type: ignore[name-defined]  # noqa: F821
 
     def __repr__(self) -> str:
         return f"<Dataset id={self.id} name={self.name!r} status={self.status}>"

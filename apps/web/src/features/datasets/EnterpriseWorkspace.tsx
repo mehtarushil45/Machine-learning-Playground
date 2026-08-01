@@ -209,7 +209,7 @@ export const EnterpriseWorkspace = memo(function EnterpriseWorkspace({
   }, [activeJob])
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="mlp-page mlp-anim-fadeInUp space-y-6 pb-12">
       {/* Step 1: Ingestion Upload Card */}
       <DataUpload onDataLoaded={onDataLoaded} />
 

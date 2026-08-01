@@ -1,7 +1,31 @@
 """Central schema exports."""
 
 from app.schemas.auth import RefreshTokenRequest, TokenData, TokenResponse
+from app.schemas.classroom import (
+    AssignmentCreate,
+    AssignmentResponse,
+    ClassroomCreate,
+    ClassroomMemberAdd,
+    ClassroomResponse,
+    CourseCreate,
+    CourseResponse,
+    FeedbackCreate,
+    MetricDifference,
+    PortfolioProjectCreate,
+    PortfolioProjectResponse,
+    ReproducibilityAuditRequest,
+    ReproducibilityReportResponse,
+    SubmissionCreate,
+    SubmissionResponse,
+)
 from app.schemas.common import ErrorResponse, HealthResponse, MessageResponse
+from app.schemas.deployment import (
+    DeploymentCreate,
+    DeploymentPredictRequest,
+    DeploymentPredictResponse,
+    DeploymentResponse,
+    IntegrationSnippets,
+)
 from app.schemas.dataset import (
     CategoricalStatistics,
     ColumnProfile,
@@ -14,6 +38,19 @@ from app.schemas.dataset import (
     NumericStatistics,
     TargetSuggestion,
 )
+from app.schemas.explainability import (
+    FairnessAuditRequest,
+    FairnessAuditResponse,
+    FairnessMetricItem,
+    FeatureContribution,
+    FeatureImpact,
+    GlobalExplainabilityRequest,
+    GlobalExplainabilityResponse,
+    LocalExplainabilityRequest,
+    LocalExplainabilityResponse,
+    WhatIfRequest,
+    WhatIfResponse,
+)
 from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
@@ -22,6 +59,15 @@ from app.schemas.job import (
     JobRetryResponse,
     JobStatusEnum,
     TrainingRequest,
+)
+from app.schemas.pipeline import (
+    CodeGenerationRequest,
+    CodeGenerationResponse,
+    CodeStepExplanation,
+    PipelineConnection,
+    PipelineDAG,
+    PipelineNodeConfig,
+    PipelineValidationResponse,
 )
 from app.schemas.prediction import (
     BatchPredictionRequest,

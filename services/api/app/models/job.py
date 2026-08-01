@@ -92,5 +92,9 @@ class Job(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
         index=True,
     )
 
+    # ── Relationships ─────────────────────────────────────────────────────────
+    organisation: Mapped["Organisation"] = relationship(back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
+    created_by: Mapped["User"] = relationship(back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
+
     def __repr__(self) -> str:
         return f"<Job id={self.id} algorithm={self.algorithm} status={self.status} progress={self.progress}%>"
