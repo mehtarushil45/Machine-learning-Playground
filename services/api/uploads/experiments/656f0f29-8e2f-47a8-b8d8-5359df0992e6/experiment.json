@@ -1,0 +1,35 @@
+{
+  "experiment_id": "656f0f29-8e2f-47a8-b8d8-5359df0992e6",
+  "job_id": "engine-test-s4",
+  "status": "completed",
+  "started_at": "2026-07-31T19:18:37.262422+00:00",
+  "completed_at": "2026-07-31T19:18:39.702122+00:00",
+  "algorithm": "Random Forest Classifier",
+  "dataset_id": "788328e3-e7bd-4b08-b7f8-535de5cbcd7d",
+  "problem_type": "BinaryClassification",
+  "model_id": "model-engine-t",
+  "model_path": "C:\\Users\\mehta\\OneDrive\\Desktop\\ml-playground\\services\\api\\uploads\\models\\engine-test-s4_random_forest_classifier.joblib",
+  "metrics_summary": {
+    "accuracy": 0.8333,
+    "precision": 0.8889,
+    "recall": 0.8333,
+    "f1_score": 0.8381,
+    "roc_auc": 0.9375
+  },
+  "model_version": "v1.0.0-random-forest-classi-656f0f29",
+  "dataset_version": "dv-bc47b0ec59",
+  "pipeline_hash": "98d6454ebcad",
+  "training_duration_seconds": 2.3844,
+  "cv_mean_score": 0.833333,
+  "hyperparameters": {
+    "max_depth": null,
+    "min_samples_split": 2,
+    "n_estimators": 100
+  },
+  "top_features": [
+    "feat_3",
+    "feat_0",
+    "feat_1",
+    "feat_2"
+  ]
+}

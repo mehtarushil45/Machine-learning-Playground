@@ -1,0 +1,38 @@
+{
+  "model_id": "model-caa64b8a",
+  "job_id": "caa64b8a-af91-4ff0-a276-858744cb2017",
+  "experiment_id": "1846c6f3-bbcd-4f05-81d5-83bb8be40cde",
+  "algorithm": "Random Forest Classifier",
+  "dataset_id": "94bc037f-ebba-4f29-a3ec-ad67c341bdd8",
+  "problem_type": "BinaryClassification",
+  "model_version": "v1.0.0-random-forest-classi-1846c6f3",
+  "dataset_version": "dv-1bc3c31e54",
+  "model_path": "C:\\Users\\mehta\\OneDrive\\Desktop\\ml-playground\\services\\api\\uploads\\models\\caa64b8a-af91-4ff0-a276-858744cb2017_random_forest_classifier.joblib",
+  "metrics": {
+    "accuracy": 0.8333,
+    "precision": 0.8889,
+    "recall": 0.8333,
+    "f1_score": 0.8381,
+    "roc_auc": 0.9375
+  },
+  "best_params": {
+    "max_depth": null,
+    "min_samples_split": 2,
+    "n_estimators": 50
+  },
+  "pipeline_hash": "4baeca78d4c4",
+  "training_timestamp": "2026-08-01T04:18:35.715370+00:00",
+  "registered_at": "2026-08-01T04:18:35.758519+00:00",
+  "version": "v1.0.0-random-forest-classi-1846c6f3",
+  "status": "ACTIVE",
+  "owner": "system",
+  "description": "",
+  "tags": [],
+  "accuracy": 0.8333,
+  "f1": 0.8381,
+  "auc": 0.9375,
+  "promoted_at": null,
+  "archived_at": null,
+  "archive_reason": null,
+  "deprecated_at": null
+}

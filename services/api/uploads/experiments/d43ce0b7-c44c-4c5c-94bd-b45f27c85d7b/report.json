@@ -1,0 +1,246 @@
+{
+  "experiment_id": "d43ce0b7-c44c-4c5c-94bd-b45f27c85d7b",
+  "job_id": "9cebd7bd-ef2d-41b4-8e64-a01ff3566a18",
+  "model_version": "v1.0.0-random-forest-classi-d43ce0b7",
+  "dataset_version": "dv-28bf569e51",
+  "training_timestamp": "2026-08-01T05:40:23.528867+00:00",
+  "random_seed": 10,
+  "algorithm": "Random Forest Classifier",
+  "problem_type": "MultiClassification",
+  "training_duration_seconds": 3.443,
+  "pipeline_hash": "4c85521b65e2",
+  "dataset_summary": {
+    "dataset_id": "ds-mlplayground_full_test.csv",
+    "file_path": "C:\\Users\\mehta\\OneDrive\\Desktop\\ml-playground\\services\\api\\uploads\\sample_dataset.csv",
+    "row_count": 10,
+    "column_count": 4,
+    "feature_count": 3,
+    "target_column": "target",
+    "feature_columns": [
+      "feature1",
+      "feature2",
+      "category"
+    ],
+    "numeric_columns": [
+      "feature1",
+      "feature2"
+    ],
+    "categorical_columns": [
+      "category"
+    ],
+    "boolean_columns": [],
+    "datetime_columns": [],
+    "total_missing_values": 0,
+    "missing_per_column": {
+      "feature1": 0,
+      "feature2": 0,
+      "category": 0,
+      "target": 0
+    }
+  },
+  "metrics": {
+    "accuracy": 0.0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1_score": 0.0,
+    "roc_auc": null
+  },
+  "cross_validation": {
+    "strategy": "KFold",
+    "n_splits": 3,
+    "scoring_metric": "accuracy",
+    "fold_scores": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "mean_score": 0.0,
+    "std_score": 0.0,
+    "all_scores": {
+      "accuracy": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "f1_weighted": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "precision_weighted": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "recall_weighted": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "all_scores_mean": {
+      "accuracy": 0.0,
+      "f1_weighted": 0.0,
+      "precision_weighted": 0.0,
+      "recall_weighted": 0.0
+    },
+    "all_scores_std": {
+      "accuracy": 0.0,
+      "f1_weighted": 0.0,
+      "precision_weighted": 0.0,
+      "recall_weighted": 0.0
+    }
+  },
+  "hyperparameters": {},
+  "feature_importance": [
+    {
+      "feature": "feature2",
+      "importance": 0.4671034,
+      "rank": 1,
+      "strategy": "tree"
+    },
+    {
+      "feature": "feature1",
+      "importance": 0.36535415,
+      "rank": 2,
+      "strategy": "tree"
+    },
+    {
+      "feature": "category_class_b",
+      "importance": 0.09335165,
+      "rank": 3,
+      "strategy": "tree"
+    },
+    {
+      "feature": "category_class_a",
+      "importance": 0.07419081,
+      "rank": 4,
+      "strategy": "tree"
+    }
+  ],
+  "classification_report": {
+    "190000.0": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 1.0
+    },
+    "210000.0": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 1.0
+    },
+    "320000.0": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 1.0
+    },
+    "350000.0": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 0.0
+    },
+    "390000.0": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 0.0
+    },
+    "610000.0": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 1.0
+    },
+    "810000.0": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 0.0
+    },
+    "accuracy": 0.0,
+    "macro avg": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 4.0
+    },
+    "weighted avg": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 4.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  ],
+  "roc_auc": null,
+  "pr_auc": null,
+  "regression_metrics": null
+}

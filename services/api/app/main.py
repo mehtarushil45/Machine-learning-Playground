@@ -11,7 +11,7 @@ In Docker:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, datasets, health, jobs
+from app.routers import auth, datasets, experiments, health, jobs, predictions
 
 app = FastAPI(
     title="ML Platform API",
@@ -43,3 +43,5 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix=API_V1_PREFIX)
 app.include_router(datasets.router, prefix=API_V1_PREFIX)
 app.include_router(jobs.router, prefix=API_V1_PREFIX)
+app.include_router(experiments.router, prefix=API_V1_PREFIX)
+app.include_router(predictions.router, prefix=API_V1_PREFIX)

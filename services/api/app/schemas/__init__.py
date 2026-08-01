@@ -23,6 +23,15 @@ from app.schemas.job import (
     JobStatusEnum,
     TrainingRequest,
 )
+from app.schemas.prediction import (
+    BatchPredictionRequest,
+    BatchPredictionResponse,
+    PredictionMetadata,
+    PredictionProbability,
+    PredictionRequest,
+    PredictionResponse,
+    ValidationErrorResponse,
+)
 from app.schemas.user import UserCreate, UserRead
 
 __all__ = [
@@ -49,6 +58,13 @@ __all__ = [
     "JobListResponse",
     "JobCancelResponse",
     "JobRetryResponse",
+    "PredictionRequest",
+    "BatchPredictionRequest",
+    "PredictionProbability",
+    "PredictionMetadata",
+    "PredictionResponse",
+    "BatchPredictionResponse",
+    "ValidationErrorResponse",
     "UserCreate",
     "UserRead",
 ]

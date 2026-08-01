@@ -1,0 +1,39 @@
+{
+  "model_id": "model-383c0a33",
+  "job_id": "383c0a33-b121-4673-a6fb-9cc514bc21d3",
+  "experiment_id": "78cedeb7-c809-40fb-a21d-f8c64e414199",
+  "algorithm": "Random Forest Classifier",
+  "dataset_id": "d210ac3b-112e-40d1-9e68-5ce816b2bc7d",
+  "problem_type": "BinaryClassification",
+  "model_version": "v1.0.0-random for-383c0a33",
+  "dataset_version": "",
+  "model_path": ".\\uploads\\models\\383c0a33-b121-4673-a6fb-9cc514bc21d3.joblib",
+  "metrics": {
+    "accuracy": 0.91,
+    "f1_score": 0.88,
+    "roc_auc": 0.95,
+    "precision": 0.91,
+    "recall": 0.91
+  },
+  "best_params": {
+    "n_estimators": 100
+  },
+  "pipeline_hash": "abc123",
+  "training_timestamp": "2026-08-01T05:15:59.598727+00:00",
+  "registered_at": "2026-08-01T05:15:59.616192+00:00",
+  "version": "v1.0.0-random for-383c0a33",
+  "status": "ACTIVE",
+  "owner": "test-user",
+  "description": "Test model for Random Forest Classifier",
+  "tags": [
+    "sprint5a",
+    "test"
+  ],
+  "accuracy": 0.91,
+  "f1": 0.88,
+  "auc": 0.95,
+  "promoted_at": "2026-08-01T05:15:59.634933+00:00",
+  "archived_at": null,
+  "archive_reason": null,
+  "deprecated_at": null
+}

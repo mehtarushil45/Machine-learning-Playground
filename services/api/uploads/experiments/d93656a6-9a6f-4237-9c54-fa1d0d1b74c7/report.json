@@ -1,0 +1,163 @@
+{
+  "experiment_id": "d93656a6-9a6f-4237-9c54-fa1d0d1b74c7",
+  "job_id": "sprint5a-regression-test",
+  "model_version": "v1.0.0-random-forest-classi-d93656a6",
+  "dataset_version": "dv-09870188d0",
+  "training_timestamp": "2026-08-01T05:16:04.888637+00:00",
+  "random_seed": 42,
+  "algorithm": "Random Forest Classifier",
+  "problem_type": "BinaryClassification",
+  "training_duration_seconds": 1.6374,
+  "pipeline_hash": "98d6454ebcad",
+  "dataset_summary": {
+    "dataset_id": "17ea963e-64f9-453a-b0b9-63eebcd16fa6",
+    "file_path": "C:\\Users\\mehta\\OneDrive\\Desktop\\ml-playground\\services\\api\\uploads\\17ea963e-64f9-453a-b0b9-63eebcd16fa6.csv",
+    "row_count": 80,
+    "column_count": 5,
+    "feature_count": 4,
+    "target_column": "target",
+    "feature_columns": [
+      "feat_0",
+      "feat_1",
+      "feat_2",
+      "feat_3"
+    ],
+    "numeric_columns": [
+      "feat_0",
+      "feat_1",
+      "feat_2",
+      "feat_3"
+    ],
+    "categorical_columns": [],
+    "boolean_columns": [],
+    "datetime_columns": [],
+    "total_missing_values": 0,
+    "missing_per_column": {
+      "feat_0": 0,
+      "feat_1": 0,
+      "feat_2": 0,
+      "feat_3": 0,
+      "target": 0
+    }
+  },
+  "metrics": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "roc_auc": 1.0
+  },
+  "cross_validation": {
+    "strategy": "StratifiedKFold",
+    "n_splits": 3,
+    "scoring_metric": "accuracy",
+    "fold_scores": [
+      0.863636,
+      0.952381,
+      0.952381
+    ],
+    "mean_score": 0.922799,
+    "std_score": 0.041835,
+    "all_scores": {
+      "accuracy": [
+        0.863636,
+        0.952381,
+        0.952381
+      ],
+      "f1_weighted": [
+        0.863354,
+        0.952381,
+        0.952163
+      ],
+      "precision_weighted": [
+        0.866667,
+        0.95671,
+        0.956349
+      ],
+      "recall_weighted": [
+        0.863636,
+        0.952381,
+        0.952381
+      ]
+    },
+    "all_scores_mean": {
+      "accuracy": 0.922799,
+      "f1_weighted": 0.922633,
+      "precision_weighted": 0.926575,
+      "recall_weighted": 0.922799
+    },
+    "all_scores_std": {
+      "accuracy": 0.041835,
+      "f1_weighted": 0.041916,
+      "precision_weighted": 0.042362,
+      "recall_weighted": 0.041835
+    }
+  },
+  "hyperparameters": {},
+  "feature_importance": [
+    {
+      "feature": "feat_1",
+      "importance": 0.68654884,
+      "rank": 1,
+      "strategy": "tree"
+    },
+    {
+      "feature": "feat_3",
+      "importance": 0.18354833,
+      "rank": 2,
+      "strategy": "tree"
+    },
+    {
+      "feature": "feat_0",
+      "importance": 0.08209598,
+      "rank": 3,
+      "strategy": "tree"
+    },
+    {
+      "feature": "feat_2",
+      "importance": 0.04780685,
+      "rank": 4,
+      "strategy": "tree"
+    }
+  ],
+  "classification_report": {
+    "0": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 9.0
+    },
+    "1": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 7.0
+    },
+    "accuracy": 1.0,
+    "macro avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 16.0
+    },
+    "weighted avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 16.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      9,
+      0
+    ],
+    [
+      0,
+      7
+    ]
+  ],
+  "roc_auc": 1.0,
+  "pr_auc": null,
+  "regression_metrics": null
+}

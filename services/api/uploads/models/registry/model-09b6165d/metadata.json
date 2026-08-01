@@ -1,0 +1,39 @@
+{
+  "model_id": "model-09b6165d",
+  "job_id": "09b6165d-f82b-431e-bb20-e4d6d5e21ac0",
+  "experiment_id": "30f2558f-e866-4b51-9cc6-be6c054a865e",
+  "algorithm": "Logistic Regression",
+  "dataset_id": "19ba90eb-05ae-4ddb-ab51-7fdc891d7dbe",
+  "problem_type": "BinaryClassification",
+  "model_version": "v1.0.0-logistic r-09b6165d",
+  "dataset_version": "",
+  "model_path": ".\\uploads\\models\\09b6165d-f82b-431e-bb20-e4d6d5e21ac0.joblib",
+  "metrics": {
+    "accuracy": 0.75,
+    "f1_score": 0.88,
+    "roc_auc": 0.95,
+    "precision": 0.75,
+    "recall": 0.75
+  },
+  "best_params": {
+    "n_estimators": 100
+  },
+  "pipeline_hash": "abc123",
+  "training_timestamp": "2026-08-01T04:18:21.915031+00:00",
+  "registered_at": "2026-08-01T04:18:21.916219+00:00",
+  "version": "v1.0.0-logistic r-09b6165d",
+  "status": "ACTIVE",
+  "owner": "test-user",
+  "description": "Test model for Logistic Regression",
+  "tags": [
+    "sprint5a",
+    "test"
+  ],
+  "accuracy": 0.75,
+  "f1": 0.88,
+  "auc": 0.95,
+  "promoted_at": null,
+  "archived_at": null,
+  "archive_reason": null,
+  "deprecated_at": null
+}

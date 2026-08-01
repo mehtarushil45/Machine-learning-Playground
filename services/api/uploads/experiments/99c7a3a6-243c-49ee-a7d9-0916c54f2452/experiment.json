@@ -1,0 +1,14 @@
+{
+  "experiment_id": "99c7a3a6-243c-49ee-a7d9-0916c54f2452",
+  "job_id": "job-search-a",
+  "status": "running",
+  "started_at": "2026-08-01T04:18:18.884514+00:00",
+  "completed_at": null,
+  "algorithm": "Gradient Boosting Classifier",
+  "dataset_id": "19ba90eb-05ae-4ddb-ab51-7fdc891d7dbe",
+  "problem_type": null,
+  "model_id": null,
+  "model_path": null,
+  "metrics_summary": {},
+  "tags": []
+}

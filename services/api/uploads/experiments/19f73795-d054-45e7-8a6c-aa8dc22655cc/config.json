@@ -1,0 +1,16 @@
+{
+  "dataset_id": "2ae5e8a2-6fa1-4d35-82be-9aca6ddbbdcb",
+  "target_column": "target",
+  "feature_columns": [
+    "feat_0",
+    "feat_1",
+    "feat_2",
+    "feat_3"
+  ],
+  "algorithm": "Random Forest Classifier",
+  "train_test_split": 0.8,
+  "random_seed": 42,
+  "normalization": true,
+  "enable_cv": false,
+  "enable_tuning": false
+}
