@@ -1,4 +1,16 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import {
+  GraduationCap,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
+  FileText,
+  Sliders,
+  ShieldCheck,
+  Search,
+  Activity
+} from 'lucide-react';
 import { ClassroomService, ReproducibilityReportResponse } from '../../services/api';
 
 export const ClassroomHub: React.FC = () => {
@@ -22,155 +34,168 @@ export const ClassroomHub: React.FC = () => {
   };
 
   return (
-    <div className="mlp-page mlp-anim-fadeInUp">
-      <div className="mlp-page-header">
-        <div className="mlp-page-title">🎓 Classroom System & Reproducibility Engine</div>
-        <p className="mlp-page-subtitle">
-          Faculty and reviewers can 1-click re-execute student submissions in an isolated worker and verify metric reproducibility with variance tolerance controls.
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="p-8 max-w-[1600px] mx-auto space-y-8"
+    >
+      {/* Page Header */}
+      <div className="border-b border-slate-800/80 pb-6">
+        <h1 className="text-2xl font-extrabold tracking-tight gradient-heading flex items-center gap-2.5">
+          <GraduationCap className="w-6 h-6 text-cyan-400" /> Classroom System & Submission Reproducibility Engine
+        </h1>
+        <p className="text-sm text-slate-400 mt-1">
+          Faculty & reviewers can 1-click re-execute learner submissions in isolated worker containers to verify metric reproducibility and prevent plagiarism.
         </p>
       </div>
 
-      {error && <div className="mlp-alert mlp-alert-error" style={{ marginBottom: 24 }}>{error}</div>}
+      {error && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium">
+          {error}
+        </div>
+      )}
 
-      <div className="mlp-grid-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        {/* Left 5 Cols: Controls & Process Explainer */}
+        <div className="lg:col-span-5 space-y-6">
+          <div className="glass-panel p-6 rounded-2xl space-y-5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Search className="w-4 h-4 text-cyan-400" /> Audit Learner Submission
+            </h3>
 
-        {/* Left — Controls panel */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-          {/* Audit form */}
-          <div className="mlp-card">
-            <div className="mlp-section-title">🔬 Audit Learner Submission</div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label className="mlp-label">Submission UUID</label>
-              <input className="mlp-input" value={submissionId}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">Submission UUID</label>
+              <input
+                type="text"
+                value={submissionId}
                 onChange={(e) => setSubmissionId(e.target.value)}
-                placeholder="sub-xxxxxxxx-xxxx-xxxx" />
+                placeholder="sub-sample-001"
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-400 font-mono"
+              />
             </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <label className="mlp-label" style={{ margin: 0 }}>Variance Tolerance</label>
-                <span style={{
-                  fontSize: 12, fontWeight: 700, fontFamily: 'JetBrains Mono',
-                  color: 'var(--brand-violet)', background: 'rgba(124,90,247,0.12)',
-                  padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                }}>
-                  ±{(tolerance * 100).toFixed(1)}%
-                </span>
+            <div>
+              <div className="flex justify-between text-xs font-semibold mb-1.5">
+                <span className="text-slate-300">Variance Tolerance Threshold</span>
+                <span className="text-cyan-400 font-mono">±{(tolerance * 100).toFixed(1)}%</span>
               </div>
-              <input type="range" min="0.001" max="0.05" step="0.001" value={tolerance}
-                onChange={(e) => setTolerance(parseFloat(e.target.value))} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                <span>0.1% (Strict)</span><span>5.0% (Lenient)</span>
+              <input
+                type="range"
+                min="0.001"
+                max="0.05"
+                step="0.001"
+                value={tolerance}
+                onChange={(e) => setTolerance(parseFloat(e.target.value))}
+                className="w-full accent-cyan-400"
+              />
+              <div className="flex justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                <span>0.1% (Strict Audit)</span>
+                <span>5.0% (Lenient)</span>
               </div>
             </div>
 
-            <button className="mlp-btn mlp-btn-cyan mlp-btn-full" onClick={handleVerify} disabled={loading}>
-              {loading ? '⏳ Re-Executing Pipeline…' : '🔬 Run 1-Click Reproducibility Verification'}
+            <button
+              onClick={handleVerify}
+              disabled={loading}
+              className="w-full py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-cyan-600/30 transition-all cursor-pointer hover:scale-[1.01]"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Re-Executing Pipeline Worker...
+                </>
+              ) : (
+                '🔬 Run 1-Click Reproducibility Verification'
+              )}
             </button>
           </div>
 
-          {/* Info card */}
-          <div className="mlp-card" style={{ padding: '18px 20px' }}>
-            <div className="mlp-section-title">How It Works</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {[
-                { icon: '📥', text: 'Retrieve original submission pipeline and dataset snapshot.' },
-                { icon: '⚙️', text: 'Re-execute the full training pipeline in an isolated worker.' },
-                { icon: '📊', text: 'Compare claimed vs. re-executed metrics within tolerance.' },
-                { icon: '📋', text: 'Generate signed reproducibility audit report.' },
-              ].map((step, i) => (
-                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <span style={{ fontSize: 16, flexShrink: 0 }}>{step.icon}</span>
-                  <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{step.text}</span>
-                </div>
-              ))}
+          <div className="glass-panel p-6 rounded-2xl space-y-3">
+            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Automated Verification Protocol</h4>
+            <div className="space-y-2 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" /> Snapshot dataset version and hyperparameters.
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" /> Spawn isolated async training worker.
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Compute metric variance vs claimed metrics.
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Right — Audit report */}
-        <div className="mlp-card">
+        {/* Right 7 Cols: Metric Audit Table & Verification Report */}
+        <div className="lg:col-span-7 glass-panel p-6 rounded-2xl space-y-6">
           {auditReport ? (
-            <div className="mlp-anim-fadeIn">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-                <div className="mlp-section-title" style={{ margin: 0 }}>📋 Reproducibility Audit Report</div>
-                <span className={`mlp-badge ${auditReport.is_reproducible ? 'mlp-badge-pass' : 'mlp-badge-fail'}`}
-                  style={{ fontSize: 12, padding: '5px 14px' }}>
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-cyan-400" /> Submission Audit Report
+                  </h3>
+                  <div className="text-xs text-slate-400 font-mono mt-0.5">{auditReport.submission_id}</div>
+                </div>
+
+                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                  auditReport.is_reproducible
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                    : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                }`}>
                   {auditReport.verification_status}
                 </span>
               </div>
 
-              <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
-                <div style={{
-                  flex: 1, padding: '14px 16px', borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Submission ID</div>
-                  <div style={{ fontSize: 12, fontFamily: 'JetBrains Mono', color: 'var(--brand-cyan)', wordBreak: 'break-all' }}>{auditReport.submission_id}</div>
-                </div>
-                <div style={{
-                  flex: 1, padding: '14px 16px', borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-                }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Verified At</div>
-                  <div style={{ fontSize: 12, fontFamily: 'JetBrains Mono', color: 'var(--text-primary)' }}>
-                    {new Date(auditReport.verified_at).toLocaleTimeString()}
-                  </div>
-                </div>
+              <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300">
+                <strong className="text-white">Audit Summary:</strong> {auditReport.audit_summary}
               </div>
 
-              <div className="mlp-alert mlp-alert-info" style={{ marginBottom: 20 }}>
-                <strong>Audit Summary:</strong> {auditReport.audit_summary}
+              {/* Metric Difference Table */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Claimed vs Re-Executed Metrics</h4>
+                <div className="overflow-x-auto rounded-xl border border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="p-3">Metric Name</th>
+                        <th className="p-3">Claimed</th>
+                        <th className="p-3">Re-Executed</th>
+                        <th className="p-3">Δ Variance</th>
+                        <th className="p-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/80">
+                      {auditReport.metric_differences.map((m) => (
+                        <tr key={m.metric_name} className="hover:bg-slate-900/40">
+                          <td className="p-3 font-semibold text-slate-200">{m.metric_name}</td>
+                          <td className="p-3 font-mono text-slate-300">{m.claimed_value.toFixed(4)}</td>
+                          <td className="p-3 font-mono text-slate-300">{m.reproduced_value.toFixed(4)}</td>
+                          <td className={`p-3 font-mono ${m.within_tolerance ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {m.difference < 0 ? '' : '+'}{m.difference.toFixed(5)}
+                          </td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              m.within_tolerance ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                            }`}>
+                              {m.within_tolerance ? 'PASS ✓' : 'EXCEEDED ✗'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-
-              <div className="mlp-section-title">Claimed vs Re-Executed Metric Comparison</div>
-              <table className="mlp-table">
-                <thead>
-                  <tr>
-                    <th>Metric</th>
-                    <th>Claimed</th>
-                    <th>Re-Executed</th>
-                    <th>Δ Difference</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {auditReport.metric_differences.map((m) => (
-                    <tr key={m.metric_name}>
-                      <td style={{ fontWeight: 700 }}>{m.metric_name}</td>
-                      <td style={{ fontFamily: 'JetBrains Mono', fontSize: 12 }}>{m.claimed_value.toFixed(4)}</td>
-                      <td style={{ fontFamily: 'JetBrains Mono', fontSize: 12 }}>{m.reproduced_value.toFixed(4)}</td>
-                      <td style={{
-                        fontFamily: 'JetBrains Mono', fontSize: 12,
-                        color: m.within_tolerance ? 'var(--brand-green)' : 'var(--brand-red)',
-                      }}>
-                        {m.difference < 0 ? '' : '+'}{m.difference.toFixed(5)}
-                      </td>
-                      <td>
-                        <span className={`mlp-badge ${m.within_tolerance ? 'mlp-badge-pass' : 'mlp-badge-fail'}`}>
-                          {m.within_tolerance ? 'PASS ✓' : 'EXCEEDED ✗'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           ) : (
-            <div className="mlp-empty" style={{ minHeight: 400 }}>
-              <span className="mlp-empty-icon">🔬</span>
-              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4 }}>
-                No Audit Report Yet
-              </div>
-              <span className="mlp-empty-text">
-                Enter a submission UUID and click "Run 1-Click Reproducibility Verification" to generate a full metric audit report.
-              </span>
+            <div className="text-xs text-slate-400 text-center py-20">
+              Enter a submission UUID and click verification button to re-execute student pipeline.
             </div>
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
