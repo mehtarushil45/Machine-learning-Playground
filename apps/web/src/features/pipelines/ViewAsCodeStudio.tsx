@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Code2,
-  Play,
   Copy,
   Check,
   Zap,
@@ -12,10 +11,10 @@ import {
   Sparkles,
   ChevronDown,
   ChevronRight,
-  Terminal,
   CheckCircle2,
   HelpCircle,
-  FileCode
+  FileCode,
+  ArrowRight
 } from 'lucide-react';
 import { PipelineService, PipelineDAG, CodeGenerationResponse } from '../../services/api';
 
@@ -74,11 +73,11 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
   };
 
   const nodeChain = [
-    { id: 1, title: 'Dataset Input', desc: `y: ${targetColumn}`, icon: <Database className="w-4 h-4 text-cyan-400" />, badge: 'Input' },
-    { id: 2, title: 'Missing Value Imputer', desc: `strategy: ${imputerStrategy}`, icon: <Layers className="w-4 h-4 text-indigo-400" />, badge: 'Preprocess' },
-    { id: 3, title: 'Feature Scaler', desc: `scaler: ${scalerType}`, icon: <Sliders className="w-4 h-4 text-purple-400" />, badge: 'Preprocess' },
-    { id: 4, title: 'Train/Test Split', desc: `ratio: ${(testSize * 100).toFixed(0)}% test`, icon: <Zap className="w-4 h-4 text-amber-400" />, badge: 'Split' },
-    { id: 5, title: algorithm.replace('Classifier', '').replace('Regression', ''), desc: 'Model Trainer', icon: <Sparkles className="w-4 h-4 text-emerald-400" />, badge: 'Model' },
+    { id: 1, title: 'Dataset Input', desc: `y: ${targetColumn}`, icon: <Database className="w-4 h-4 text-[#00D4FF]" />, badge: 'Input' },
+    { id: 2, title: 'Missing Value Imputer', desc: `strategy: ${imputerStrategy}`, icon: <Layers className="w-4 h-4 text-[#7B5CF5]" />, badge: 'Preprocess' },
+    { id: 3, title: 'Feature Scaler', desc: `scaler: ${scalerType}`, icon: <Sliders className="w-4 h-4 text-[#7B5CF5]" />, badge: 'Preprocess' },
+    { id: 4, title: 'Train/Test Split', desc: `ratio: ${(testSize * 100).toFixed(0)}% test`, icon: <Zap className="w-4 h-4 text-[#F5A623]" />, badge: 'Split' },
+    { id: 5, title: algorithm.replace('Classifier', '').replace('Regression', ''), desc: 'Model Trainer', icon: <Sparkles className="w-4 h-4 text-[#00F5A0]" />, badge: 'Model' },
   ];
 
   return (
@@ -86,37 +85,34 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="p-8 max-w-[1600px] mx-auto space-y-8"
+      className="space-y-8"
     >
       {/* Studio Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[rgba(0,212,255,0.08)] pb-6">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight gradient-heading flex items-center gap-2.5">
-            <Code2 className="w-6 h-6 text-indigo-400" /> Bi-Directional View-as-Code Studio
+          <h1 className="heading-display text-2xl flex items-center gap-2.5">
+            <Code2 className="w-6 h-6 text-[#00D4FF]" /> Bi-Directional View-as-Code Studio
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-[#94A3B8] mt-1">
             Build machine learning DAG pipelines visually. Adjust node parameters to watch production-ready Python scikit-learn code compile in real-time.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           {generatedCode?.is_valid_syntax && (
-            <span className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-1.5 shadow-[0_0_12px_rgba(16,185,129,0.15)]">
+            <span className="badge-running flex items-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5" /> AST Syntax Validated
             </span>
           )}
-          <button
-            onClick={copyCode}
-            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer hover:scale-[1.02]"
-          >
-            {copied ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+          <button onClick={copyCode} className="btn-secondary">
+            {copied ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
             {copied ? 'Copied to Clipboard' : 'Copy Python Code'}
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium">
+        <div className="badge-failed p-4 border rounded-xl text-xs font-medium">
           {error}
         </div>
       )}
@@ -128,40 +124,45 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
         <div className="lg:col-span-5 space-y-6">
           
           {/* Controls Card */}
-          <div className="glass-panel p-6 rounded-2xl space-y-5">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <Sliders className="w-4 h-4 text-indigo-400" /> Pipeline Controls
-            </h3>
+          <div className="quantum-card space-y-5">
+            <div className="flex items-center justify-between">
+              <h3 className="micro-label flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-[#00D4FF]" /> Pipeline Controls
+              </h3>
+              <button onClick={handleGenerateCode} disabled={loading} className="btn-primary !py-1.5 !px-3 !text-xs">
+                {loading ? 'Compiling...' : 'Run Pipeline →'}
+              </button>
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Target Column (y)</label>
+                <label className="micro-label block mb-1.5">Target Column (y)</label>
                 <input
                   type="text"
                   value={targetColumn}
                   onChange={(e) => setTargetColumn(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className="quantum-input"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Feature Columns (X)</label>
+                <label className="micro-label block mb-1.5">Feature Columns (X)</label>
                 <input
                   type="text"
                   value={featureColumns}
                   onChange={(e) => setFeatureColumns(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className="quantum-input"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Missing Imputer</label>
+                <label className="micro-label block mb-1.5">Missing Imputer</label>
                 <select
                   value={imputerStrategy}
                   onChange={(e) => setImputerStrategy(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className="quantum-input"
                 >
                   <option value="median">Median Imputer</option>
                   <option value="mean">Mean Imputer</option>
@@ -170,11 +171,11 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Feature Scaler</label>
+                <label className="micro-label block mb-1.5">Feature Scaler</label>
                 <select
                   value={scalerType}
                   onChange={(e) => setScalerType(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                  className="quantum-input"
                 >
                   <option value="standard">StandardScaler</option>
                   <option value="minmax">MinMaxScaler [0,1]</option>
@@ -184,11 +185,11 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">Classifier Model</label>
+              <label className="micro-label block mb-1.5">Classifier Model</label>
               <select
                 value={algorithm}
                 onChange={(e) => setAlgorithm(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                className="quantum-input"
               >
                 <option value="RandomForestClassifier">Random Forest Classifier</option>
                 <option value="LogisticRegression">Logistic Regression</option>
@@ -198,8 +199,8 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
 
             <div>
               <div className="flex justify-between text-xs font-semibold mb-1.5">
-                <span className="text-slate-300">Test Split Ratio</span>
-                <span className="text-indigo-400 font-mono">{(testSize * 100).toFixed(0)}% Test / {((1 - testSize) * 100).toFixed(0)}% Train</span>
+                <span className="text-[#94A3B8]">Test Split Ratio</span>
+                <span className="text-[#00D4FF] font-mono">{(testSize * 100).toFixed(0)}% Test / {((1 - testSize) * 100).toFixed(0)}% Train</span>
               </div>
               <input
                 type="range"
@@ -208,37 +209,37 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
                 step="0.05"
                 value={testSize}
                 onChange={(e) => setTestSize(parseFloat(e.target.value))}
-                className="w-full accent-indigo-500"
+                className="w-full accent-[#00D4FF]"
               />
             </div>
           </div>
 
           {/* Visual DAG Node Chain */}
-          <div className="glass-panel p-6 rounded-2xl space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-indigo-400" /> Visual Pipeline Graph
+          <div className="quantum-card space-y-4">
+            <h3 className="micro-label flex items-center gap-2">
+              <Layers className="w-4 h-4 text-[#00D4FF]" /> Visual Pipeline Graph
             </h3>
 
             <div className="space-y-3">
               {nodeChain.map((node, idx) => (
                 <React.Fragment key={node.id}>
-                  <div className="glass-panel-interactive p-3.5 rounded-xl flex items-center justify-between">
+                  <div className="p-3.5 rounded-xl bg-[#040912] border border-[rgba(255,255,255,0.06)] flex items-center justify-between hover:border-[#00D4FF]/30 transition-all">
                     <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 shrink-0">
+                      <div className="p-2 rounded-lg bg-[#101E36] border border-[#152540] shrink-0">
                         {node.icon}
                       </div>
                       <div>
                         <div className="text-xs font-bold text-slate-100">{node.title}</div>
-                        <div className="text-[11px] text-slate-400 font-mono mt-0.5">{node.desc}</div>
+                        <div className="text-[11px] text-[#64748B] font-mono mt-0.5">{node.desc}</div>
                       </div>
                     </div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/60">
+                    <span className="badge-idle !text-[10px]">
                       {node.badge}
                     </span>
                   </div>
                   {idx < nodeChain.length - 1 && (
                     <div className="flex justify-center py-0.5">
-                      <ChevronDown className="w-4 h-4 text-slate-600" />
+                      <ChevronDown className="w-4 h-4 text-[#334155]" />
                     </div>
                   )}
                 </React.Fragment>
@@ -251,39 +252,35 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
         <div className="lg:col-span-7 space-y-6">
           
           {/* Synchronized Terminal Window */}
-          <div className="code-terminal rounded-2xl overflow-hidden shadow-2xl">
-            {/* Window Header Bar */}
-            <div className="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+          <div className="quantum-terminal rounded-xl overflow-hidden shadow-2xl">
+            {/* Top window bar: 3 dots (red/yellow/green) + tab name in mono */}
+            <div className="px-4 py-3 bg-[#0C1A30] border-b border-[rgba(0,212,255,0.1)] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-rose-500/80" />
-                <div className="w-3 h-3 rounded-full bg-amber-500/80" />
-                <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
-                <span className="ml-2 text-xs font-mono text-slate-400 flex items-center gap-1.5">
-                  <FileCode className="w-3.5 h-3.5 text-cyan-400" /> pipeline_generated.py
+                <div className="w-3 h-3 rounded-full bg-[#FF4D6D]" />
+                <div className="w-3 h-3 rounded-full bg-[#F5A623]" />
+                <div className="w-3 h-3 rounded-full bg-[#00F5A0]" />
+                <span className="ml-2 text-xs font-mono text-[#00D4FF] flex items-center gap-1.5">
+                  <FileCode className="w-3.5 h-3.5" /> pipeline_generated.py
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[11px] font-mono text-slate-500">Python 3.10 / scikit-learn</span>
-                <button
-                  onClick={copyCode}
-                  className="text-slate-400 hover:text-white p-1 rounded transition-colors"
-                  title="Copy code"
-                >
-                  {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                <span className="text-[11px] font-mono text-[#475569]">Python 3.10 / scikit-learn</span>
+                <button onClick={copyCode} className="btn-icon" title="Copy code">
+                  {copied ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
             {/* Code Viewport */}
-            <pre className="p-6 text-xs leading-relaxed text-slate-200 overflow-x-auto max-h-[460px] font-mono">
+            <pre className="p-6 text-xs leading-relaxed text-[#E2E8F0] overflow-x-auto max-h-[460px] font-mono">
               <code>{generatedCode?.python_code || '# Compiling scikit-learn pipeline code...'}</code>
             </pre>
           </div>
 
           {/* Learning Mode Step Breakdown */}
-          <div className="glass-panel p-6 rounded-2xl space-y-4">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <HelpCircle className="w-4 h-4 text-indigo-400" /> Learning Mode — Step Breakdown
+          <div className="quantum-card space-y-4">
+            <h3 className="micro-label flex items-center gap-2">
+              <HelpCircle className="w-4 h-4 text-[#7B5CF5]" /> Learning Mode — Step Breakdown
             </h3>
 
             <div className="space-y-2">
@@ -292,22 +289,22 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
                 return (
                   <div
                     key={step.step_number}
-                    className="border border-slate-800 rounded-xl overflow-hidden transition-all"
+                    className="border border-[#152540] rounded-xl overflow-hidden transition-all bg-[#040912]"
                   >
                     <button
                       onClick={() => setActiveStep(isOpen ? null : step.step_number)}
-                      className="w-full px-4 py-3 bg-slate-900/60 hover:bg-slate-900 flex items-center justify-between text-left cursor-pointer"
+                      className="w-full px-4 py-3 hover:bg-[#101E36] flex items-center justify-between text-left cursor-pointer"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 text-xs font-bold flex items-center justify-center border border-indigo-500/30 shrink-0">
+                        <span className="w-5 h-5 rounded-full bg-[#7B5CF5]/20 text-[#7B5CF5] text-xs font-bold flex items-center justify-center border border-[#7B5CF5]/30 shrink-0">
                           {step.step_number}
                         </span>
                         <span className="text-xs font-bold text-slate-200">{step.title}</span>
                       </div>
-                      {isOpen ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+                      {isOpen ? <ChevronDown className="w-4 h-4 text-[#64748B]" /> : <ChevronRight className="w-4 h-4 text-[#64748B]" />}
                     </button>
                     {isOpen && (
-                      <div className="p-4 bg-slate-950/60 text-xs text-slate-400 leading-relaxed border-t border-slate-800/80">
+                      <div className="p-4 text-xs text-[#94A3B8] leading-relaxed border-t border-[#152540]">
                         {step.explanation}
                       </div>
                     )}

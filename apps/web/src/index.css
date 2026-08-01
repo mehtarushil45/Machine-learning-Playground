@@ -1,84 +1,302 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap');
 @import "tailwindcss";
 
 /* ============================================================
-   MLPlayground Tier-1 Enterprise Design System — Deep Space Dark
+   ML PLAYGROUND — MISSION CONTROL / QUANTUM LAB UI SYSTEM (60-30-10)
    ============================================================ */
 
 :root {
-  --bg-deep:          #030712; /* slate-950 */
-  --bg-surface:       #0f172a; /* slate-900 */
-  --bg-elevated:      #1e293b; /* slate-800 */
-  --bg-card-glass:    rgba(15, 23, 42, 0.65);
-  
-  --brand-violet:     #8b5cf6;
-  --brand-indigo:     #6366f1;
-  --brand-cyan:       #06b6d4;
-  --brand-emerald:    #10b981;
-  --brand-amber:      #f59e0b;
-  --brand-rose:       #f43f5e;
+  /* 60% — Primary (Dominant Canvas) */
+  --void-black:      #040912;
+  --deep-space:      #070E1C;
 
-  --border-subtle:    rgba(255, 255, 255, 0.08);
-  --border-glass:     rgba(255, 255, 255, 0.12);
-  --border-glow:      rgba(99, 102, 241, 0.4);
+  /* 30% — Secondary (Structure & Depth) */
+  --midnight-slate:  #0C1A30;
+  --nebula-surface:  #101E36;
+  --orbit-rim:       #152540;
+  --ghost-layer:     rgba(16, 30, 54, 0.6);
 
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  /* 10% — Accent (Energy & Interaction) */
+  --quantum-cyan:    #00D4FF;
+  --neural-violet:   #7B5CF5;
+  --plasma-green:    #00F5A0;
+  --alert-amber:     #F5A623;
+  --critical-red:    #FF4D6D;
+
+  /* Fonts */
+  --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-sans:    'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #030712; }
-::-webkit-scrollbar-thumb { background: #334155; border-radius: 9999px; }
-::-webkit-scrollbar-thumb:hover { background: #6366f1; }
-
-/* Custom Glow & Glass Utility Classes */
-.glass-panel {
-  background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+/* ── Neural Grid Canvas Animation ───────────────────────────── */
+.neural-grid-bg {
+  background-color: var(--void-black);
+  background-image: radial-gradient(rgba(0, 212, 255, 0.09) 1px, transparent 1px);
+  background-size: 32px 32px;
+  animation: gridDrift 20s linear infinite;
 }
 
-.glass-panel-interactive {
-  background: rgba(15, 23, 42, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+@keyframes gridDrift {
+  0%   { background-position: 0 0; }
+  100% { background-position: 32px 32px; }
 }
-.glass-panel-interactive:hover {
-  border-color: rgba(99, 102, 241, 0.4);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+
+/* ── Scanline Sweep Effect ──────────────────────────────────── */
+.scanline-sweep {
+  position: relative;
+  overflow: hidden;
+}
+.scanline-sweep::after {
+  content: '';
+  position: absolute;
+  top: -100%;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(180deg, rgba(0, 212, 255, 0) 0%, rgba(0, 212, 255, 0.35) 50%, rgba(0, 212, 255, 0) 100%);
+  animation: sweep 6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes sweep {
+  0%   { top: -10%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 110%; opacity: 0; }
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.4); }
+
+/* ── Typography & Headings ───────────────────────────────────── */
+.font-display { font-family: 'Space Grotesk', system-ui, sans-serif; }
+.font-sans    { font-family: 'Inter', system-ui, sans-serif; }
+.font-mono    { font-family: 'JetBrains Mono', monospace; }
+
+.micro-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748B;
+}
+
+.heading-display {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #FFFFFF;
+}
+
+/* ── 4 BUTTON REDESIGN SPECS ────────────────────────────────── */
+
+/* 1. PRIMARY ACTION BUTTON */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #00D4FF 0%, #7B5CF5 100%);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  color: #FFFFFF;
+  cursor: pointer;
+  box-shadow: 0 0 0 0 transparent;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.45), 0 0 40px rgba(123, 92, 245, 0.2);
   transform: translateY(-1px);
 }
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.gradient-heading {
-  background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 50%, #8b5cf6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* 2. SECONDARY / GHOST BUTTON */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  color: #00D4FF;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(0, 212, 255, 0.08);
+  border-color: #00D4FF;
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.2), inset 0 0 12px rgba(0, 212, 255, 0.04);
+}
+.btn-secondary:active:not(:disabled) { transform: scale(0.98); }
+.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 3. ICON ACTION BUTTON */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px;
+  color: #94A3B8;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-icon:hover:not(:disabled) {
+  background: rgba(0, 212, 255, 0.1);
+  border-color: rgba(0, 212, 255, 0.3);
+  color: #00D4FF;
 }
 
-.gradient-brand-text {
-  background: linear-gradient(135deg, #818cf8 0%, #c084fc 50%, #38bdf8 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* 4. DANGER / DESTRUCTIVE BUTTON */
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(255, 77, 109, 0.1);
+  border: 1px solid rgba(255, 77, 109, 0.3);
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 14px;
+  color: #FF4D6D;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-danger:hover:not(:disabled) {
+  background: rgba(255, 77, 109, 0.2);
+  box-shadow: 0 0 16px rgba(255, 77, 109, 0.25);
 }
 
-/* Code Highlighting */
-.code-terminal {
-  background: #090d16;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+/* ── CARDS & PANELS ─────────────────────────────────────────── */
+.quantum-card {
+  background: #101E36;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 20px 24px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.quantum-card-interactive:hover {
+  border-color: rgba(0, 212, 255, 0.25);
+  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.1);
+}
+
+/* Premium Glassmorphism Card */
+.quantum-glass-hero {
+  background: rgba(16, 30, 54, 0.5);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 212, 255, 0.15);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* ── INPUT FIELDS & TEXTAREAS ───────────────────────────────── */
+.quantum-input {
+  width: 100%;
+  background: rgba(4, 9, 18, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 14px;
   font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: #E2E8F0;
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.quantum-input::placeholder { color: #334155; }
+.quantum-input:focus {
+  border-color: rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
 }
 
-/* Pulse Glows */
-@keyframes neonPulse {
-  0%, 100% { opacity: 0.6; transform: scale(1); }
-  50% { opacity: 0.9; transform: scale(1.05); }
+/* ── CODE / TERMINAL BLOCKS ─────────────────────────────────── */
+.quantum-terminal {
+  background: #040912;
+  border: 1px solid rgba(0, 212, 255, 0.1);
+  border-radius: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
 }
-.animate-neon-pulse {
-  animation: neonPulse 3s ease-in-out infinite;
+
+/* ── BADGES & STATUS TAGS ───────────────────────────────────── */
+.badge-running {
+  background: rgba(0, 245, 160, 0.1);
+  border: 1px solid rgba(0, 245, 160, 0.3);
+  color: #00F5A0;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badge-pending {
+  background: rgba(245, 166, 35, 0.1);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  color: #F5A623;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badge-failed {
+  background: rgba(255, 77, 109, 0.1);
+  border: 1px solid rgba(255, 77, 109, 0.3);
+  color: #FF4D6D;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badge-idle {
+  background: rgba(148, 163, 184, 0.07);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  color: #64748B;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Pulse animation for running dot */
+@keyframes dotPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.6; }
+}
+.animate-dot-pulse {
+  animation: dotPulse 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
