@@ -1,6 +1,18 @@
 """Datasets router.
 
 Provides endpoints for uploading, validating, profiling, health scoring, recommendations, and managing datasets.
+
+Version 1  (existing, untouched):
+    POST /upload              — upload + immediate validate + parse + store
+    POST /                    — alias for /upload
+    GET  /{dataset_id}/profile
+    GET  /{dataset_id}/health
+    GET  /{dataset_id}/recommendations
+
+Version 2  (new, additive):
+    POST /upload/v2           — streaming upload → background Celery ingestion pipeline
+                                Returns HTTP 202 Accepted + poll_url immediately.
+    Polling:  GET /api/v1/jobs/{job_id}/progress  (existing endpoint, unchanged)
 """
 
 import csv
@@ -19,8 +31,10 @@ from app.schemas.dataset import (
     DatasetProfileResponse,
     DatasetRecommendationResponse,
     DatasetUploadResponse,
+    DatasetUploadV2Response,
 )
 from app.services.health import health_service
+from app.services.ingestion_service import ingestion_service
 from app.services.profiler import TabularDataContainer, profiler_service
 from app.services.recommendation import recommendation_service
 
@@ -277,3 +291,56 @@ async def get_dataset_recommendations(dataset_id: str) -> DatasetRecommendationR
     profile = await get_dataset_profile(dataset_id)
     health = health_service.evaluate_health(profile)
     return recommendation_service.generate_recommendations(profile, health)
+
+
+# ---------------------------------------------------------------------------
+# Version 2 — Streaming ingestion endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/upload/v2",
+    response_model=DatasetUploadV2Response,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Stream-upload a CSV dataset via the v2 ingestion pipeline",
+    description=(
+        "Upload a CSV file using the Version 2 enterprise ingestion pipeline. "
+        "The endpoint performs a fast pre-screen (extension, MIME, header row) "
+        "and streams the file to storage in 64 KB chunks — the full file content "
+        "is never loaded into memory simultaneously. "
+        "Returns HTTP 202 Accepted immediately. "
+        "The background pipeline (Celery or daemon thread fallback) runs CSV "
+        "validation, schema fingerprinting, and statistical profiling. "
+        "Poll the returned ``poll_url`` for live progress via the existing "
+        "``GET /api/v1/jobs/{job_id}/progress`` endpoint."
+    ),
+    response_description=(
+        "202 Accepted — ingestion job queued. "
+        "Poll poll_url for status; dataset_id is available for profile/health "
+        "endpoints once the job reaches COMPLETED status."
+    ),
+)
+async def upload_dataset_v2(
+    file: UploadFile = File(
+        ...,
+        description="CSV file to ingest (max 50 MB, UTF-8 or ISO-8859-1 encoded).",
+    ),
+) -> DatasetUploadV2Response:
+    """Stream-ingest a CSV file and queue a background validation + profiling job.
+
+    Unlike the v1 ``/upload`` endpoint which blocks until parsing completes,
+    this endpoint returns immediately after the file is safely on disk.
+    The background job performs:
+
+    1. Full streaming CSV validation (encoding, delimiter, header, row count).
+    2. Deterministic schema fingerprint generation from column metadata.
+    3. Statistical column profiling via the shared ``profiler_service``.
+
+    **HTTP Statuses**:
+    - ``202 Accepted``: File stored; ingestion pipeline queued.
+    - ``400 Bad Request``: Invalid extension, MIME type, or encoding.
+    - ``413 Payload Too Large``: File exceeds the 50 MB limit.
+    - ``422 Unprocessable Entity``: Missing or blank CSV header row.
+    - ``500 Internal Server Error``: Disk write failure.
+    """
+    return await ingestion_service.create_ingestion_job(file)

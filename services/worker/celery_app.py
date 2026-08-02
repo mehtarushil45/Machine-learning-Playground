@@ -13,7 +13,10 @@ celery_app = Celery(
     "apex_ml_worker",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["services.worker.tasks.training_task"],
+    include=[
+        "services.worker.tasks.training_task",
+        "services.worker.tasks.ingestion_task",   # v2 dataset ingestion pipeline
+    ],
 )
 
 celery_app.conf.update(

@@ -129,3 +129,40 @@ class DatasetRecommendationResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Version 2 ingestion schemas
+# ---------------------------------------------------------------------------
+
+
+class DatasetUploadV2Response(BaseModel):
+    """Response returned immediately by POST /api/v1/datasets/upload/v2.
+
+    The endpoint returns HTTP 202 Accepted.  The caller should poll
+    ``poll_url`` (which resolves to the existing
+    ``GET /api/v1/jobs/{job_id}/progress`` endpoint) for live status.
+
+    Attributes:
+        job_id:      UUID of the ingestion job in the shared job store.
+        dataset_id:  UUID that will be used to reference this dataset in
+                     subsequent API calls (e.g. /profile, /health).
+        status:      Initial job status (always ``"QUEUED"`` on success).
+        filename:    Sanitised filename stored on disk.
+        size_bytes:  Total bytes written to storage.
+        version_id:  Schema version identifier (``None`` until the
+                     background pipeline completes schema fingerprinting).
+        message:     Human-readable status message.
+        poll_url:    Relative URL to poll for ingestion progress.
+    """
+
+    job_id: str
+    dataset_id: str
+    status: str
+    filename: str
+    size_bytes: int
+    version_id: str | None = None
+    message: str
+    poll_url: str
+
+    model_config = {"from_attributes": True}
