@@ -104,7 +104,7 @@ function AppContent() {
         className="relative z-30 flex flex-col transition-all duration-300 ease-in-out shrink-0"
       >
         {/* Logo Area */}
-        <div className="flex items-center justify-between h-[56px] px-4 border-b border-[rgba(0,212,255,0.08)]">
+        <div className="flex items-center justify-between h-14 px-4 border-b border-[rgba(0,212,255,0.08)]">
           <div className="flex items-center gap-3 overflow-hidden">
             <div className="text-[#00D4FF] text-xl font-bold drop-shadow-[0_0_10px_rgba(0,212,255,0.6)] shrink-0">
               ◈
@@ -153,7 +153,7 @@ function AppContent() {
                               color: '#64748B',
                             }
                       }
-                      className={`w-full h-[44px] px-3 flex items-center gap-3 rounded-r-lg text-xs font-medium transition-all duration-150 cursor-pointer ${
+                      className={`w-full h-11 px-3 flex items-center gap-3 rounded-r-lg text-xs font-medium transition-all duration-150 cursor-pointer ${
                         !isActive ? 'hover:bg-[rgba(255,255,255,0.04)] hover:text-slate-200' : ''
                       }`}
                       title={isSidebarCollapsed ? item.label : undefined}
@@ -214,7 +214,7 @@ function AppContent() {
           {/* Right Header Controls */}
           <div className="flex items-center gap-4">
             {/* Model Selector Pill */}
-            <button className="btn-secondary !py-1.5 !px-3 text-xs flex items-center gap-2">
+            <button className="btn-secondary py-1.5! px-3! text-xs flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#00F5A0] shadow-[0_0_8px_#00F5A0]" />
               Random Forest v2.4
             </button>
@@ -234,7 +234,7 @@ function AppContent() {
         </header>
 
         {/* Dynamic Page Views */}
-        <main className="flex-1 overflow-y-auto p-6 max-w-[1400px] w-full mx-auto space-y-8">
+        <main className="flex-1 overflow-y-auto p-6 max-w-7xl w-full mx-auto space-y-8">
           {activeTab === 'workspace' && (
             <EnterpriseWorkspace
               dataset={dataset}
