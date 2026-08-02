@@ -50,7 +50,8 @@ function AppContent() {
     setDataset(loadedDataset);
     setSelectedFeatures([]);
     setSelectedTarget(null);
-    showToast('Dataset Ingested', `Successfully loaded dataset with ${loadedDataset.rowCount || 0} rows.`);
+    const count = loadedDataset.rowCount ?? loadedDataset.rows?.length ?? 0;
+    showToast('Dataset Ingested', `Successfully loaded dataset with ${count} rows.`);
   };
 
   // Keyboard Navigation Shortcuts (⌘1 through ⌘6)

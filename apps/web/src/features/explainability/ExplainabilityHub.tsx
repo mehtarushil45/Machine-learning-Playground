@@ -8,8 +8,6 @@ import {
   Sliders,
   TrendingUp,
   Grid,
-  CheckCircle2,
-  XCircle,
   Info
 } from 'lucide-react';
 import { ExplainabilityService, GlobalExplainabilityResponse, FairnessAuditResponse, WhatIfResponse } from '../../services/api';

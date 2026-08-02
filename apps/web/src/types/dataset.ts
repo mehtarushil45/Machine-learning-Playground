@@ -17,6 +17,8 @@ export interface Dataset {
   fileName: string
   /** Optional server dataset ID if uploaded to API. */
   datasetId?: string
+  /** Optional row count for parsed or API datasets. */
+  rowCount?: number
 }
 
 export interface ColumnProfile {

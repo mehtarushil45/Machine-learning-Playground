@@ -13,8 +13,7 @@ import {
   ChevronRight,
   CheckCircle2,
   HelpCircle,
-  FileCode,
-  ArrowRight
+  FileCode
 } from 'lucide-react';
 import { PipelineService, PipelineDAG, CodeGenerationResponse } from '../../services/api';
 

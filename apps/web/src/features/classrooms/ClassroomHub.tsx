@@ -4,8 +4,7 @@ import {
   GraduationCap,
   RefreshCw,
   FileText,
-  Search,
-  CheckCircle2
+  Search
 } from 'lucide-react';
 import { ClassroomService, ReproducibilityReportResponse } from '../../services/api';
 
