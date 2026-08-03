@@ -68,23 +68,41 @@ class MinIOStorageBackend:
         self._secret_key: str = secret_key or settings.s3_secret_key
         self._bucket: str = bucket_name or settings.s3_bucket_name
 
+        logger.info(
+            "MinIOStorageBackend initialising — endpoint=%s bucket=%s",
+            self._endpoint_url,
+            self._bucket,
+        )
+
         # Ensure the bucket exists at startup — idempotent.
         try:
             client = self._make_client()
             try:
                 client.head_bucket(Bucket=self._bucket)
+                logger.info(
+                    "MinIOStorageBackend: bucket '%s' verified at %s.",
+                    self._bucket,
+                    self._endpoint_url,
+                )
             except client.exceptions.ClientError:
                 client.create_bucket(Bucket=self._bucket)
                 logger.info(
-                    "MinIOStorageBackend: created bucket '%s'.", self._bucket
+                    "MinIOStorageBackend: created bucket '%s' at %s.",
+                    self._bucket,
+                    self._endpoint_url,
                 )
         except Exception as exc:
-            # Non-fatal at import time — will fail loudly on first use if
-            # MinIO is genuinely unreachable.
-            logger.warning(
-                "MinIOStorageBackend: could not verify/create bucket '%s': %s",
+            # Log at ERROR so operators know MinIO is unreachable at startup.
+            # This is non-fatal (MinIO may start after the API) but every
+            # subsequent upload attempt will fail loudly via save_stream().
+            logger.error(
+                "MinIOStorageBackend: STARTUP FAILURE — cannot reach MinIO "
+                "at %s (bucket='%s'): %s: %s",
+                self._endpoint_url,
                 self._bucket,
+                type(exc).__name__,
                 exc,
+                exc_info=True,
             )
 
     # ------------------------------------------------------------------

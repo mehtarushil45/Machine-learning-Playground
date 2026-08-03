@@ -4,7 +4,18 @@ All values come from the .env file at the repo root.
 See /.env.example for the full list and expected formats.
 """
 
+import os
+
 from pydantic_settings import BaseSettings
+
+# Absolute path to the uploads directory, anchored to this file's location.
+# This file lives at: services/api/app/config.py
+# uploads/ lives at: services/api/uploads/
+# Resolving relative to __file__ makes the path deterministic regardless of
+# the CWD used to launch uvicorn (repo root vs services/api/).
+_DEFAULT_UPLOAD_DIR: str = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "uploads")
+)
 
 
 class Settings(BaseSettings):
@@ -27,7 +38,9 @@ class Settings(BaseSettings):
 
     # ── Dataset Upload Settings ───────────────────────────────────────────────
     max_upload_size_bytes: int = 50 * 1024 * 1024  # 50 MB
-    upload_dir: str = "uploads"
+    # upload_dir is an absolute path so it is CWD-independent.
+    # Override by setting UPLOAD_DIR=/absolute/path in .env.
+    upload_dir: str = _DEFAULT_UPLOAD_DIR
 
     # ── Storage Backend Selector ──────────────────────────────────────────────
     # Allowed values: "local" | "minio"

@@ -39,6 +39,7 @@ from app.config import settings
 from app.ingestion.storage_backend import (
     LocalFileSystemBackend,
     StorageBackend,
+    StorageError,
     get_configured_backend,
 )
 from app.schemas.dataset import DatasetUploadV2Response
@@ -131,6 +132,12 @@ class IngestionService:
         job_id = str(uuid.uuid4())
         safe_name = _sanitize_filename(file.filename or "dataset.csv")
 
+        logger.info(
+            "Ingestion job starting — backend=%s file='%s'",
+            type(self._backend).__name__,
+            safe_name,
+        )
+
         # ── 2. First-chunk header pre-screen (8 KB, no full read) ─────────
         first_chunk = await file.read(_PRE_SCREEN_CHUNK)
         if not first_chunk:
@@ -140,13 +147,27 @@ class IngestionService:
             )
         self._validate_header_row(first_chunk)
 
-        # ── 3. Stream entire file to storage (64 KB at a time) ────────────
-        dest_path = self._backend.resolve_path(dataset_id, safe_name)
-        size_bytes = await self._stream_file_to_disk(
+        # ── 3. Stream entire file through the StorageBackend ──────────────
+        # NOTE: self._backend.save_stream() is the ONLY write path.
+        # For LocalFileSystemBackend: writes to upload_dir/ on disk.
+        # For MinIOStorageBackend:    uploads to MinIO via put_object.
+        # _stream_file_to_disk is NOT used — it was local-only and
+        # did not call save_stream(), so MinIO never received the file.
+        location = await self._store_upload(
             file=file,
             first_chunk=first_chunk,
-            dest_path=dest_path,
+            dataset_id=dataset_id,
+            filename=safe_name,
             max_bytes=settings.max_upload_size_bytes,
+        )
+        dest_path = location.path
+        size_bytes = location.size_bytes
+
+        logger.info(
+            "Upload stored — backend=%s path='%s' size=%d bytes",
+            location.backend,
+            dest_path,
+            size_bytes,
         )
 
         # ── 4. Register ingestion job in the shared _JOBS_STORE ───────────
@@ -176,6 +197,7 @@ class IngestionService:
                 "filename": safe_name,
                 "dataset_id": dataset_id,
                 "storage_path": dest_path,
+                "storage_backend": location.backend,
                 "size_bytes": size_bytes,
                 # Filled by the ingestion pipeline after schema validation:
                 "version_id": None,
@@ -199,6 +221,7 @@ class IngestionService:
             "dataset_id": dataset_id,
             "filename": safe_name,
             "storage_path": dest_path,
+            "storage_backend": location.backend,
             "size_bytes": size_bytes,
         }
         self._dispatch_ingestion_job(job_id, ingestion_config)
@@ -278,79 +301,92 @@ class IngestionService:
             )
 
     # ------------------------------------------------------------------
-    # Private: streaming write
+    # Private: backend-aware upload store
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def _stream_file_to_disk(
+    async def _store_upload(
+        self,
         file: UploadFile,
         first_chunk: bytes,
-        dest_path: str,
+        dataset_id: str,
+        filename: str,
         max_bytes: int,
-    ) -> int:
-        """Stream UploadFile to dest_path in 64 KB async reads.
+    ) -> "StorageLocation":  # noqa: F821  (forward ref resolved at runtime)
+        """Read the UploadFile in chunks and persist via ``self._backend.save_stream()``.
 
-        The ``first_chunk`` (already read for header pre-screening) is
-        written first, then subsequent chunks are read with ``await
-        file.read(_STREAM_CHUNK)`` until EOF.  This means the maximum
-        memory held at any time is two chunks (~128 KB), not the full file.
+        This is the single write path for all storage backends.  The backend
+        decides where and how to persist the data — callers never call
+        ``open()`` directly.  Prior to this fix, ``_stream_file_to_disk``
+        always called ``open(dest_path, 'wb')`` regardless of the active
+        backend, which meant MinIO's ``save_stream()`` was never invoked.
+
+        Reads the UploadFile in ``_STREAM_CHUNK``-byte increments.  The
+        ``first_chunk`` (already read for header pre-screening) is yielded
+        first so the backend sees the complete byte stream.
 
         Args:
             file:        FastAPI UploadFile (stream positioned after first_chunk).
-            first_chunk: Already-read initial bytes.
-            dest_path:   Absolute target path on disk.
-            max_bytes:   Hard size limit; excess triggers HTTP 413 and cleanup.
+            first_chunk: Already-read initial bytes (from header pre-screen).
+            dataset_id:  UUID string — forwarded to ``backend.save_stream()``.
+            filename:    Sanitised filename — forwarded to ``backend.save_stream()``.
+            max_bytes:   Hard size limit; excess triggers HTTP 413.
 
         Returns:
-            Total bytes written to disk.
+            ``StorageLocation`` from the backend (path, size, backend identifier).
 
         Raises:
             HTTPException 413: File exceeds max_bytes.
-            HTTPException 500: Disk write failure.
+            HTTPException 500: Any storage failure (OSError, StorageError, etc.).
         """
-        os.makedirs(
-            os.path.dirname(os.path.abspath(dest_path)) or ".", exist_ok=True
-        )
-        written = 0
+        from app.ingestion.storage_backend import StorageLocation  # noqa: PLC0415
 
+        # ── Collect all chunks, enforcing the size limit ───────────────────
+        chunks: list[bytes] = [first_chunk]
+        total = len(first_chunk)
+
+        while True:
+            chunk = await file.read(_STREAM_CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                max_mb = max_bytes // (1024 * 1024)
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=(
+                        f"File size exceeds the {max_mb} MB upload limit. "
+                        f"({total:,} bytes received before abort)."
+                    ),
+                )
+            chunks.append(chunk)
+
+        # ── Persist through the backend ────────────────────────────────────
         try:
-            with open(dest_path, "wb") as fout:
-                # Write the pre-read first chunk
-                fout.write(first_chunk)
-                written += len(first_chunk)
-
-                # Stream remainder in 64 KB increments
-                while True:
-                    chunk = await file.read(_STREAM_CHUNK)
-                    if not chunk:
-                        break
-                    written += len(chunk)
-                    if written > max_bytes:
-                        # Clean up partial file before raising
-                        fout.close()
-                        try:
-                            os.remove(dest_path)
-                        except OSError:
-                            pass
-                        max_mb = max_bytes // (1024 * 1024)
-                        raise HTTPException(
-                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                            detail=(
-                                f"File size exceeds the {max_mb} MB upload limit. "
-                                f"({written:,} bytes received before abort)."
-                            ),
-                        )
-                    fout.write(chunk)
-
-        except HTTPException:
-            raise
+            location = self._backend.save_stream(
+                chunks=iter(chunks),
+                dataset_id=dataset_id,
+                filename=filename,
+            )
+        except StorageError as exc:
+            logger.error(
+                "StorageBackend failed for dataset_id=%s file='%s': %s",
+                dataset_id, filename, exc,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to store uploaded dataset: {exc}",
+            ) from exc
         except OSError as exc:
+            logger.error(
+                "OSError storing dataset_id=%s file='%s': %s",
+                dataset_id, filename, exc,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to store uploaded dataset on disk: {exc}",
             ) from exc
 
-        return written
+        return location
 
     # ------------------------------------------------------------------
     # Private: dispatch

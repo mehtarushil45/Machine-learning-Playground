@@ -137,14 +137,59 @@ def ingestion_pipeline_sync(
     from services.api.app.services.job_service import _JOBS_STORE  # noqa: PLC0415
 
     storage_path: str = config["storage_path"]
+    storage_backend_name: str = config.get("storage_backend", "local")
     dataset_id: str = config["dataset_id"]
     filename: str = config["filename"]
     size_bytes: int = int(config.get("size_bytes", 0))
 
     logger.info(
-        "Ingestion pipeline starting — job_id=%s file='%s'",
-        job_id, storage_path,
+        "Ingestion pipeline starting — job_id=%s backend=%s file='%s'",
+        job_id, storage_backend_name, storage_path,
     )
+
+    # ── Resolve a local filesystem path once, before any stage ────────────────
+    # For the local backend: storage_path is already a real filesystem path.
+    # For MinIO: storage_path is an object key (e.g. "abc-123_churn.csv").
+    #   os.path.getsize() and open() cannot use object keys.
+    #   Download to a temp file here so ALL stages use a real path.
+    # The temp file is cleaned up in the finally block below.
+    _tmp_path: str | None = None
+    try:
+        from services.api.app.ingestion.storage_backend import get_configured_backend  # noqa: PLC0415
+        from services.api.app.ingestion.minio_backend import MinIOStorageBackend  # noqa: PLC0415
+        _backend = get_configured_backend()
+        if isinstance(_backend, MinIOStorageBackend):
+            logger.info(
+                "MinIO backend detected — downloading '%s' to temp file for pipeline.",
+                storage_path,
+            )
+            _tmp_path = _backend.download_to_temp(dataset_id, filename)
+            _local_path = _tmp_path
+            logger.info(
+                "MinIO download complete — temp file '%s' (%s).",
+                _local_path, storage_path,
+            )
+        else:
+            _local_path = storage_path
+    except Exception as exc:
+        logger.error(
+            "Failed to resolve local path for pipeline (storage_path='%s'): %s",
+            storage_path, exc, exc_info=True,
+        )
+        update_job_state(
+            job_id,
+            JobStatusEnum.FAILED.value,
+            0.0,
+            "Storage Error",
+            f"Could not retrieve dataset file: {exc}",
+            error_msg=str(exc),
+        )
+        if _tmp_path:
+            try:
+                os.remove(_tmp_path)
+            except OSError:
+                pass
+        return {"status": "failed", "job_id": job_id, "errors": [str(exc)]}
 
     try:
         # ── Stage 1: Full CSV streaming validation (0 → 20%) ──────────────
@@ -159,7 +204,7 @@ def ingestion_pipeline_sync(
 
         from services.api.app.ingestion.csv_validator import CSVValidationResult  # noqa: PLC0415
         validation: CSVValidationResult = validate_csv_file(
-            file_path=storage_path,
+            file_path=_local_path,  # always a real filesystem path
             max_size_bytes=settings.max_upload_size_bytes,
         )
 
@@ -176,14 +221,27 @@ def ingestion_pipeline_sync(
                 f"CSV validation failed: {error_summary}",
                 error_msg=error_summary,
             )
-            # Remove the invalid file to free disk space
-            try:
-                os.remove(storage_path)
-                logger.info("Removed invalid file '%s'.", storage_path)
-            except OSError as rm_exc:
-                logger.warning(
-                    "Could not remove invalid file '%s': %s", storage_path, rm_exc
-                )
+            # For local backend: remove the invalid file to free disk space.
+            # For MinIO: the object was already uploaded; delete it via the backend.
+            if storage_backend_name == "local":
+                try:
+                    os.remove(_local_path)
+                    logger.info("Removed invalid local file '%s'.", _local_path)
+                except OSError as rm_exc:
+                    logger.warning(
+                        "Could not remove invalid file '%s': %s", _local_path, rm_exc
+                    )
+            else:
+                try:
+                    _backend.delete(dataset_id, filename)
+                    logger.info(
+                        "Deleted invalid MinIO object '%s'.", storage_path
+                    )
+                except Exception as rm_exc:
+                    logger.warning(
+                        "Could not delete invalid MinIO object '%s': %s",
+                        storage_path, rm_exc
+                    )
             return {"status": "failed", "job_id": job_id, "errors": validation.errors}
 
         update_job_state(
@@ -241,24 +299,12 @@ def ingestion_pipeline_sync(
         )
 
         rows: list[dict[str, str]] = []
-        _tmp_path: str | None = None  # temp file created for MinIO downloads
-
         try:
-            # Resolve the local path for CSV reading.
-            # For the local backend: storage_path is already a filesystem path.
-            # For MinIO: storage_path is an object key — download to a temp file.
-            from services.api.app.ingestion.storage_backend import get_configured_backend  # noqa: PLC0415
-            _backend = get_configured_backend()
-
-            from services.api.app.ingestion.minio_backend import MinIOStorageBackend  # noqa: PLC0415
-            if isinstance(_backend, MinIOStorageBackend):
-                _tmp_path = _backend.download_to_temp(dataset_id, filename)
-                _read_path = _tmp_path
-            else:
-                _read_path = storage_path
-
+            # _local_path is already a real filesystem path (resolved before Stage 1).
+            # For local backend: it equals storage_path.
+            # For MinIO backend: it is the temp file downloaded before Stage 1.
             with open(
-                _read_path,
+                _local_path,
                 encoding=validation.encoding,
                 errors="replace",
                 newline="",
@@ -272,13 +318,6 @@ def ingestion_pipeline_sync(
             raise RuntimeError(
                 f"Failed to open stored CSV for profiling: {exc}"
             ) from exc
-        finally:
-            # Clean up temp file created for MinIO download
-            if _tmp_path is not None:
-                try:
-                    os.remove(_tmp_path)
-                except OSError:
-                    pass
 
         container = TabularDataContainer(
             dataset_id=dataset_id,
@@ -383,3 +422,11 @@ def ingestion_pipeline_sync(
             error_msg=str(exc),
         )
         raise
+    finally:
+        # Clean up MinIO temp file regardless of success or failure.
+        if _tmp_path is not None:
+            try:
+                os.remove(_tmp_path)
+                logger.debug("Cleaned up temp file '%s'.", _tmp_path)
+            except OSError:
+                pass
