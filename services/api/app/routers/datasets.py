@@ -2,7 +2,7 @@
 
 Provides endpoints for uploading, validating, profiling, health scoring, recommendations, and managing datasets.
 
-Version 1  (existing, untouched):
+Version 1  (existing, untouched API surface):
     POST /upload              — upload + immediate validate + parse + store
     POST /                    — alias for /upload
     GET  /{dataset_id}/profile
@@ -13,18 +13,27 @@ Version 2  (new, additive):
     POST /upload/v2           — streaming upload → background Celery ingestion pipeline
                                 Returns HTTP 202 Accepted + poll_url immediately.
     Polling:  GET /api/v1/jobs/{job_id}/progress  (existing endpoint, unchanged)
+
+Integration note (v3 / StorageBackend):
+    POST /upload now delegates file persistence to ``get_configured_backend()``
+    instead of hardcoded ``open()`` calls.  This ensures ALL dataset uploads
+    (v1 and v2) use the same storage abstraction, so setting
+    ``STORAGE_BACKEND=minio`` in ``.env`` routes files to MinIO without any
+    frontend changes.
 """
 
 import csv
-from datetime import datetime, timezone
 import io
+import logging
 import os
 import re
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from app.config import settings
+from app.ingestion.storage_backend import StorageError, get_configured_backend
 from app.schemas.common import MessageResponse
 from app.schemas.dataset import (
     DatasetHealthResponse,
@@ -39,6 +48,8 @@ from app.services.profiler import TabularDataContainer, profiler_service
 from app.services.recommendation import recommendation_service
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
+
+logger = logging.getLogger("apex_ingestion.router")
 
 
 def sanitize_filename(filename: str) -> str:
@@ -178,21 +189,52 @@ async def upload_dataset(
             detail=f"Malformed CSV: Failed to parse tabular structure ({str(exc)}).",
         ) from exc
 
-    # 5. Safe Filename & Storage
+    # 5. Safe Filename & Storage — delegated to StorageBackend
     dataset_id = uuid.uuid4()
     safe_filename = sanitize_filename(file.filename)
+    backend = get_configured_backend()
+
+    logger.info(
+        "POST /upload — selected StorageBackend: %s (type=%s)",
+        type(backend).__name__,
+        getattr(backend, "_backend", type(backend).__name__),
+    )
 
     try:
-        os.makedirs(settings.upload_dir, exist_ok=True)
-        file_path = os.path.join(settings.upload_dir, f"{dataset_id}_{safe_filename}")
-
-        with open(file_path, "wb") as f:
-            f.write(content)
-    except Exception as exc:
+        location = backend.save_stream(
+            chunks=[content],
+            dataset_id=str(dataset_id),
+            filename=safe_filename,
+        )
+    except StorageError as exc:
+        logger.error(
+            "POST /upload — storage FAILED backend=%s file='%s': %s",
+            type(backend).__name__,
+            safe_filename,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to store uploaded dataset on server: {str(exc)}",
+            detail=f"Failed to store uploaded dataset: {exc}",
         ) from exc
+    except OSError as exc:
+        logger.error(
+            "POST /upload — OSError backend=%s file='%s': %s",
+            type(backend).__name__,
+            safe_filename,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to store uploaded dataset on server: {exc}",
+        ) from exc
+
+    logger.info(
+        "POST /upload — stored OK backend=%s path='%s' size=%d bytes",
+        location.backend,
+        location.path,
+        location.size_bytes,
+    )
 
     uploaded_at = datetime.now(timezone.utc)
 
