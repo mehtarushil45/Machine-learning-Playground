@@ -241,9 +241,24 @@ def ingestion_pipeline_sync(
         )
 
         rows: list[dict[str, str]] = []
+        _tmp_path: str | None = None  # temp file created for MinIO downloads
+
         try:
+            # Resolve the local path for CSV reading.
+            # For the local backend: storage_path is already a filesystem path.
+            # For MinIO: storage_path is an object key — download to a temp file.
+            from services.api.app.ingestion.storage_backend import get_configured_backend  # noqa: PLC0415
+            _backend = get_configured_backend()
+
+            from services.api.app.ingestion.minio_backend import MinIOStorageBackend  # noqa: PLC0415
+            if isinstance(_backend, MinIOStorageBackend):
+                _tmp_path = _backend.download_to_temp(dataset_id, filename)
+                _read_path = _tmp_path
+            else:
+                _read_path = storage_path
+
             with open(
-                storage_path,
+                _read_path,
                 encoding=validation.encoding,
                 errors="replace",
                 newline="",
@@ -257,6 +272,13 @@ def ingestion_pipeline_sync(
             raise RuntimeError(
                 f"Failed to open stored CSV for profiling: {exc}"
             ) from exc
+        finally:
+            # Clean up temp file created for MinIO download
+            if _tmp_path is not None:
+                try:
+                    os.remove(_tmp_path)
+                except OSError:
+                    pass
 
         container = TabularDataContainer(
             dataset_id=dataset_id,

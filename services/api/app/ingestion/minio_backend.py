@@ -1,0 +1,275 @@
+"""MinIO (S3-compatible) StorageBackend implementation.
+
+Implements the ``StorageBackend`` Protocol using ``boto3`` against a
+MinIO endpoint (or any S3-compatible API).  The API surface is identical
+to ``LocalFileSystemBackend`` so all callers are completely unaware of
+which backend is active.
+
+Design notes
+------------
+- ``save_stream``: Collects all chunks into a single ``io.BytesIO`` buffer
+  (chunks are guaranteed ≤ ``settings.max_upload_size_bytes`` by the
+  pre-screen in ``IngestionService``), then issues a single ``put_object``
+  call.  This avoids the multi-part upload complexity while staying within
+  memory constraints (max 50 MB buffer per upload).
+- ``download_to_temp``: Downloads the object to a local ``NamedTemporaryFile``
+  so that existing code that needs a local file path (e.g. the profiling
+  stage in ``ingestion_task.py``) can continue to use ``open()`` without
+  modification to anything else.
+- ``resolve_path``: Returns the S3-style object key
+  ``{dataset_id}_{filename}`` — consistent with the Local backend convention.
+- Bucket creation is idempotent — called once in ``__init__`` and silent
+  if the bucket already exists.
+- All MinIO/boto3 exceptions are mapped to ``StorageError`` so callers
+  receive a typed, backend-agnostic exception.
+
+Thread safety
+-------------
+``boto3.client`` instances are NOT thread-safe.  A new client is created
+inside each method call so that Celery workers (multi-process) and FastAPI
+request handlers (async) cannot share a stale connection.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+import tempfile
+import os
+from typing import Iterable
+
+from app.config import settings
+from app.ingestion.storage_backend import StorageError, StorageLocation
+
+logger = logging.getLogger("apex_ingestion.minio_backend")
+
+
+class MinIOStorageBackend:
+    """Concrete StorageBackend that persists dataset files to a MinIO bucket.
+
+    Satisfies the ``StorageBackend`` Protocol via structural subtyping.
+
+    Args:
+        endpoint_url:  MinIO endpoint (default: ``settings.s3_endpoint_url``).
+        access_key:    MinIO access key (default: ``settings.s3_access_key``).
+        secret_key:    MinIO secret key (default: ``settings.s3_secret_key``).
+        bucket_name:   Target bucket name (default: ``settings.s3_bucket_name``).
+    """
+
+    def __init__(
+        self,
+        endpoint_url: str | None = None,
+        access_key: str | None = None,
+        secret_key: str | None = None,
+        bucket_name: str | None = None,
+    ) -> None:
+        self._endpoint_url: str = endpoint_url or settings.s3_endpoint_url
+        self._access_key: str = access_key or settings.s3_access_key
+        self._secret_key: str = secret_key or settings.s3_secret_key
+        self._bucket: str = bucket_name or settings.s3_bucket_name
+
+        # Ensure the bucket exists at startup — idempotent.
+        try:
+            client = self._make_client()
+            try:
+                client.head_bucket(Bucket=self._bucket)
+            except client.exceptions.ClientError:
+                client.create_bucket(Bucket=self._bucket)
+                logger.info(
+                    "MinIOStorageBackend: created bucket '%s'.", self._bucket
+                )
+        except Exception as exc:
+            # Non-fatal at import time — will fail loudly on first use if
+            # MinIO is genuinely unreachable.
+            logger.warning(
+                "MinIOStorageBackend: could not verify/create bucket '%s': %s",
+                self._bucket,
+                exc,
+            )
+
+    # ------------------------------------------------------------------
+    # StorageBackend interface
+    # ------------------------------------------------------------------
+
+    def save_stream(
+        self,
+        chunks: Iterable[bytes],
+        dataset_id: str,
+        filename: str,
+    ) -> StorageLocation:
+        """Buffer all chunks and upload as a single object to MinIO.
+
+        The total data is bounded by ``settings.max_upload_size_bytes``
+        (pre-screened by ``IngestionService``) so the in-memory buffer
+        never exceeds the configured limit (default 50 MB).
+
+        Args:
+            chunks:     Iterator of raw byte chunks.
+            dataset_id: UUID string used as the object key prefix.
+            filename:   Sanitised original filename.
+
+        Returns:
+            ``StorageLocation`` with ``backend="minio"`` and
+            ``path=object_key``.
+
+        Raises:
+            StorageError: On any boto3 / MinIO error.
+        """
+        object_key = self._build_key(dataset_id, filename)
+        buffer = io.BytesIO()
+        written = 0
+
+        for chunk in chunks:
+            buffer.write(chunk)
+            written += len(chunk)
+
+        buffer.seek(0)
+
+        try:
+            client = self._make_client()
+            client.put_object(
+                Bucket=self._bucket,
+                Key=object_key,
+                Body=buffer,
+                ContentLength=written,
+                ContentType="text/csv",
+            )
+        except Exception as exc:
+            raise StorageError(
+                f"MinIOStorageBackend: failed uploading '{object_key}' "
+                f"to bucket '{self._bucket}': {exc}"
+            ) from exc
+
+        logger.info(
+            "MinIOStorageBackend: uploaded object '%s' (%d bytes).",
+            object_key,
+            written,
+        )
+
+        return StorageLocation(
+            backend="minio",
+            path=object_key,
+            size_bytes=written,
+            dataset_id=dataset_id,
+            filename=filename,
+        )
+
+    def resolve_path(self, dataset_id: str, filename: str) -> str:
+        """Return the object key for ``(dataset_id, filename)``.
+
+        No I/O is performed.  The key format mirrors the local backend
+        convention (``{dataset_id}_{filename}``) so ``find_dataset_path()``
+        in the worker can match it if needed.
+        """
+        return self._build_key(dataset_id, filename)
+
+    def exists(self, dataset_id: str, filename: str) -> bool:
+        """Return ``True`` if the object exists in MinIO."""
+        object_key = self._build_key(dataset_id, filename)
+        try:
+            client = self._make_client()
+            client.head_object(Bucket=self._bucket, Key=object_key)
+            return True
+        except Exception:
+            return False
+
+    def delete(self, dataset_id: str, filename: str) -> None:
+        """Delete the object from MinIO.  No-op if the object is absent."""
+        object_key = self._build_key(dataset_id, filename)
+        try:
+            client = self._make_client()
+            client.delete_object(Bucket=self._bucket, Key=object_key)
+            logger.info(
+                "MinIOStorageBackend: deleted object '%s'.", object_key
+            )
+        except Exception as exc:
+            raise StorageError(
+                f"MinIOStorageBackend: failed deleting '{object_key}': {exc}"
+            ) from exc
+
+    def download_to_temp(self, dataset_id: str, filename: str) -> str:
+        """Download an object from MinIO to a local temporary file.
+
+        Returns the absolute path to the temp file.  The caller is
+        responsible for deleting it when done.
+
+        This method is NOT part of the ``StorageBackend`` Protocol because
+        local backends have no need for it.  It is called explicitly by
+        ``ingestion_pipeline_sync`` when the configured backend is MinIO,
+        so the CSV parsing and profiling code can use ``open()`` without
+        any changes.
+
+        Args:
+            dataset_id: UUID string (object key prefix).
+            filename:   Sanitised original filename.
+
+        Returns:
+            Absolute path to the downloaded temporary file.
+
+        Raises:
+            StorageError: If the download fails.
+        """
+        object_key = self._build_key(dataset_id, filename)
+        suffix = os.path.splitext(filename)[1] or ".csv"
+
+        try:
+            client = self._make_client()
+            response = client.get_object(Bucket=self._bucket, Key=object_key)
+            body = response["Body"].read()
+        except Exception as exc:
+            raise StorageError(
+                f"MinIOStorageBackend: failed downloading '{object_key}' "
+                f"from bucket '{self._bucket}': {exc}"
+            ) from exc
+
+        # Write to a named temp file — delete=False so the caller can open it
+        with tempfile.NamedTemporaryFile(
+            suffix=suffix, delete=False, prefix="apex_ingestion_"
+        ) as tmp:
+            tmp.write(body)
+            tmp_path = tmp.name
+
+        logger.debug(
+            "MinIOStorageBackend: downloaded '%s' → temp file '%s' (%d bytes).",
+            object_key,
+            tmp_path,
+            len(body),
+        )
+
+        return tmp_path
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _make_client(self):  # type: ignore[return]
+        """Create a new boto3 S3 client for this call.
+
+        A new client per call avoids thread-safety issues with shared
+        boto3 session state in multi-threaded Celery workers.
+        """
+        try:
+            import boto3  # noqa: PLC0415  (lazy import — boto3 is optional)
+        except ImportError as exc:
+            raise StorageError(
+                "boto3 is not installed.  Run: pip install boto3"
+            ) from exc
+
+        return boto3.client(
+            "s3",
+            endpoint_url=self._endpoint_url,
+            aws_access_key_id=self._access_key,
+            aws_secret_access_key=self._secret_key,
+            region_name="us-east-1",  # required by boto3 even for MinIO
+        )
+
+    def _build_key(self, dataset_id: str, filename: str) -> str:
+        """Construct the object key ``{dataset_id}_{filename}``."""
+        return f"{dataset_id}_{filename}"
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"MinIOStorageBackend("
+            f"endpoint={self._endpoint_url!r}, "
+            f"bucket={self._bucket!r})"
+        )

@@ -36,7 +36,11 @@ from typing import Any
 from fastapi import HTTPException, UploadFile, status
 
 from app.config import settings
-from app.ingestion.storage_backend import LocalFileSystemBackend, StorageBackend
+from app.ingestion.storage_backend import (
+    LocalFileSystemBackend,
+    StorageBackend,
+    get_configured_backend,
+)
 from app.schemas.dataset import DatasetUploadV2Response
 from app.schemas.job import JobResponse, JobStatusEnum
 from app.services.job_service import _JOBS_STORE, is_redis_available
@@ -91,7 +95,7 @@ class IngestionService:
     """
 
     def __init__(self, backend: StorageBackend | None = None) -> None:
-        self._backend: StorageBackend = backend or LocalFileSystemBackend()
+        self._backend: StorageBackend = backend or get_configured_backend()
 
     # ------------------------------------------------------------------
     # Public API

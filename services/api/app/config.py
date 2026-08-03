@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     max_upload_size_bytes: int = 50 * 1024 * 1024  # 50 MB
     upload_dir: str = "uploads"
 
+    # ── Storage Backend Selector ──────────────────────────────────────────────
+    # Allowed values: "local" | "minio"
+    # Set STORAGE_BACKEND=minio in .env to activate the MinIO backend.
+    # All other code reads only the StorageBackend Protocol — never this value.
+    storage_backend: str = "local"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

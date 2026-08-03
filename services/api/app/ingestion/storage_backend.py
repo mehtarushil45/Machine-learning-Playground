@@ -203,3 +203,38 @@ class LocalFileSystemBackend:
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"LocalFileSystemBackend(base_dir={self._base_dir!r})"
+
+
+# ---------------------------------------------------------------------------
+# Backend factory  (the only place settings.storage_backend is read)
+# ---------------------------------------------------------------------------
+
+
+def get_configured_backend() -> "StorageBackend":
+    """Return the storage backend instance selected by ``settings.storage_backend``.
+
+    This is the single configuration point for storage backend selection.
+    All callers receive a ``StorageBackend`` Protocol instance and have
+    no knowledge of which concrete implementation is active.
+
+    Supported values of ``settings.storage_backend``:
+        ``"local"``  → ``LocalFileSystemBackend`` (default, no extra deps)
+        ``"minio"``  → ``MinIOStorageBackend``    (requires boto3 + running MinIO)
+
+    Raises:
+        ValueError: If ``settings.storage_backend`` is not a recognised value.
+    """
+    backend_name = settings.storage_backend.lower().strip()
+
+    if backend_name == "local":
+        return LocalFileSystemBackend()
+
+    if backend_name == "minio":
+        # Deferred import — boto3 is only required when MinIO backend is selected.
+        from app.ingestion.minio_backend import MinIOStorageBackend  # noqa: PLC0415
+        return MinIOStorageBackend()
+
+    raise ValueError(
+        f"Unrecognised storage backend '{backend_name}'. "
+        f"Set STORAGE_BACKEND to 'local' or 'minio' in your .env file."
+    )
