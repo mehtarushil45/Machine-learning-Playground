@@ -22,10 +22,12 @@ Progress milestones
     QUEUED     →  0%  (set by IngestionService before dispatch)
     VALIDATING → 10%  Starting validation pass
     VALIDATING → 20%  Full CSV streaming validation complete
-    RUNNING    → 35%  Schema fingerprint generation
-    RUNNING    → 50%  Schema fingerprint ready
-    RUNNING    → 55%  Launching profiler
-    RUNNING    → 80%  Statistical profiling complete
+    RUNNING    → 25%  Stage 1.5 START: data quality validation
+    RUNNING    → 40%  Stage 1.5 COMPLETE: context stored, score computed
+    RUNNING    → 45%  Schema fingerprint generation
+    RUNNING    → 55%  Schema fingerprint ready
+    RUNNING    → 60%  Launching profiler
+    RUNNING    → 85%  Statistical profiling complete
     COMPLETED  →100%  Metadata committed to _JOBS_STORE
 """
 
@@ -261,25 +263,101 @@ def ingestion_pipeline_sync(
             job_id, validation.row_count, len(validation.columns),
         )
 
-        # ── Stage 2: Schema fingerprint generation (20 → 50%) ─────────────
+        # ── Stage 1.5: Data Quality & ML Compatibility Validation (20 → 40%) ─
         update_job_state(
             job_id,
             JobStatusEnum.RUNNING.value,
-            35.0,
+            25.0,
+            "Data Quality Validation",
+            "Running schema integrity, data quality, and ML compatibility analysis",
+            estimated_seconds=4.0,
+        )
+
+        from services.api.app.ingestion.data_quality_validator import (  # noqa: PLC0415
+            run_data_quality_validation,
+        )
+        from services.api.app.ingestion.validation_context import (  # noqa: PLC0415
+            DatasetValidationContext,
+            store_validation_context,
+        )
+
+        assert validation.schema is not None, (  # invariant from validate_csv_file
+            "CSVValidationResult.schema must be set when is_valid=True"
+        )
+
+        vreport = run_data_quality_validation(
+            file_path=_local_path,
+            columns=validation.columns,
+            encoding=validation.encoding,
+            delimiter=validation.delimiter,
+            row_count=validation.row_count,
+            column_types=validation.schema.column_types,
+        )
+
+        # Build and persist the canonical DatasetValidationContext
+        # keyed by dataset_id — independent of the job lifecycle.
+        validated_at = datetime.now(timezone.utc)
+        ctx = DatasetValidationContext(
+            dataset_id=dataset_id,
+            job_id=job_id,
+            filename=filename,
+            validated_at=validated_at,
+            schema_version=validation.schema.schema_version,
+            column_names=validation.schema.column_names,
+            column_types=validation.schema.column_types,
+            delimiter=validation.delimiter,
+            encoding=validation.encoding,
+            row_count=validation.row_count,
+            column_count=len(validation.columns),
+            size_bytes=size_bytes,
+            ml_task_type=vreport.ml_task_type,
+            ml_confidence=vreport.ml_confidence,
+            ml_reasoning=vreport.ml_reasoning,
+            validation_score=vreport.validation_score,
+            validation_report=vreport,
+        )
+        store_validation_context(ctx)
+
+        update_job_state(
+            job_id,
+            JobStatusEnum.RUNNING.value,
+            40.0,
+            "Data Quality Report Ready",
+            (
+                f"Score: {vreport.validation_score:.0f}/100 — "
+                f"{vreport.errors} error(s), {vreport.warnings} warning(s) — "
+                f"ML task: {vreport.ml_task_type} "
+                f"({vreport.ml_confidence:.0%} confidence)"
+            ),
+            estimated_seconds=2.0,
+        )
+        logger.info(
+            "Stage 1.5 complete — job=%s score=%.1f errors=%d warnings=%d "
+            "ml_task=%s ml_conf=%.2f",
+            job_id,
+            vreport.validation_score,
+            vreport.errors,
+            vreport.warnings,
+            vreport.ml_task_type,
+            vreport.ml_confidence,
+        )
+
+        # ── Stage 2: Schema fingerprint generation (40 → 55%) ─────────────
+        update_job_state(
+            job_id,
+            JobStatusEnum.RUNNING.value,
+            45.0,
             "Schema Fingerprinting",
             "Computing deterministic schema fingerprint from metadata",
             estimated_seconds=2.0,
         )
 
-        assert validation.schema is not None, (  # invariant guaranteed by validate_csv_file
-            "CSVValidationResult.schema must be set when is_valid=True"
-        )
         version_id, sha256_hex = generate_schema_fingerprint(validation.schema)
 
         update_job_state(
             job_id,
             JobStatusEnum.RUNNING.value,
-            50.0,
+            55.0,
             "Schema Fingerprint Ready",
             f"Fingerprint computed: {version_id} (sha256:{sha256_hex[:16]}…)",
             estimated_seconds=2.0,
@@ -288,11 +366,11 @@ def ingestion_pipeline_sync(
             "Schema fingerprint — job=%s version_id=%s", job_id, version_id
         )
 
-        # ── Stage 3: Statistical column profiling (50 → 80%) ──────────────
+        # ── Stage 3: Statistical column profiling (55 → 85%) ──────────────
         update_job_state(
             job_id,
             JobStatusEnum.RUNNING.value,
-            55.0,
+            60.0,
             "Statistical Profiling",
             "Running column-level statistical analysis",
             estimated_seconds=4.0,
@@ -331,7 +409,7 @@ def ingestion_pipeline_sync(
         update_job_state(
             job_id,
             JobStatusEnum.RUNNING.value,
-            80.0,
+            85.0,
             "Profiling Complete",
             (
                 f"Profiled {profile.row_count:,} rows, {profile.column_count} columns; "
@@ -344,7 +422,7 @@ def ingestion_pipeline_sync(
             job_id, profile.row_count, profile.column_count,
         )
 
-        # ── Stage 4: Commit final metadata to _JOBS_STORE (80 → 100%) ─────
+        # ── Stage 4: Commit final metadata to _JOBS_STORE (85 → 100%) ─────
         now = datetime.now(timezone.utc)
         if job_id in _JOBS_STORE:
             current_job = _JOBS_STORE[job_id]
@@ -364,6 +442,30 @@ def ingestion_pipeline_sync(
                         "duplicate_columns": profile.duplicate_columns,
                         "empty_columns": profile.empty_columns,
                         "total_missing_values": profile.total_missing_values,
+                    },
+                    # ── V4 additions — additive, never overwrite existing keys ──
+                    "validation_score": vreport.validation_score,
+                    "ml_task_type": vreport.ml_task_type,
+                    "validation_report": {
+                        "passed": vreport.passed,
+                        "validation_score": vreport.validation_score,
+                        "warnings": vreport.warnings,
+                        "errors": vreport.errors,
+                        "ml_task_type": vreport.ml_task_type,
+                        "ml_confidence": vreport.ml_confidence,
+                        "ml_reasoning": vreport.ml_reasoning,
+                        "duplicate_row_count": vreport.duplicate_row_count,
+                        "missing_cell_pct": vreport.missing_cell_pct,
+                        "issue_count": len(vreport.issues),
+                        "issues": [
+                            {
+                                "severity": issue.severity,
+                                "category": issue.category,
+                                "message": issue.message,
+                                "column_name": issue.column_name,
+                            }
+                            for issue in vreport.issues
+                        ],
                     },
                 }
             )

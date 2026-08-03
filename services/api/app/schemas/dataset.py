@@ -166,3 +166,73 @@ class DatasetUploadV2Response(BaseModel):
     poll_url: str
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Version 4: Validation Report Schemas
+# ---------------------------------------------------------------------------
+
+
+class ValidationIssueSchema(BaseModel):
+    """Serialised representation of a single ``ValidationIssue`` finding.
+
+    Attributes:
+        severity:    ``"info"`` | ``"warning"`` | ``"error"`` | ``"critical"``
+        category:    ``"schema"`` | ``"data_quality"`` | ``"ml_compatibility"``
+        message:     Human-readable description of the finding.
+        column_name: Affected column name, or ``None`` for dataset-level issues.
+        detail:      Optional extra context (counts, percentages, samples).
+    """
+
+    severity: str
+    category: str
+    message: str
+    column_name: str | None = None
+    detail: str | None = None
+
+
+class DatasetValidationReport(BaseModel):
+    """API-serialisable summary of a V4 data quality validation pass.
+
+    Carried inside ``JobResponse.metadata["validation_report"]`` and exposed
+    by the Dataset Catalog once Dataset persistence is implemented.
+
+    Attributes:
+        passed:              ``True`` when zero ``"error"`` / ``"critical"`` issues.
+                             A failing report is **advisory** — it never blocks
+                             ingestion.
+        validation_score:    Informational quality score (0–100).
+                             Foundation for: Dataset Trust Score, AutoML
+                             readiness, Dataset Governance, enterprise
+                             quality dashboards.
+        warnings:            Count of ``"warning"`` severity issues.
+        errors:              Count of ``"error"`` + ``"critical"`` issues combined.
+        ml_task_type:        Detected ML task type.
+        ml_confidence:       Confidence of the ML task detection (0.0–1.0).
+        ml_reasoning:        Human-readable explanation.
+        issues:              Full ordered list of all findings.
+        row_count:           Total dataset rows.
+        column_count:        Total dataset columns.
+        duplicate_row_count: Estimated duplicate row count.
+        missing_cell_pct:    Overall missing cell percentage.
+    """
+
+    passed: bool
+    validation_score: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="Informational quality score 0–100. Never blocks ingestion.",
+    )
+    warnings: int = 0
+    errors: int = 0
+    ml_task_type: str = "unknown"
+    ml_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    ml_reasoning: str = ""
+    issues: list[ValidationIssueSchema] = Field(default_factory=list)
+    row_count: int = 0
+    column_count: int = 0
+    duplicate_row_count: int = 0
+    missing_cell_pct: float = 0.0
+
+    model_config = {"from_attributes": True}
