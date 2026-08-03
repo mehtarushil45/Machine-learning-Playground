@@ -17,6 +17,15 @@ _DEFAULT_UPLOAD_DIR: str = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "uploads")
 )
 
+# Deterministic search paths for .env relative to config.py location
+# Enables pydantic_settings to find .env whether uvicorn runs from
+# repo root, services/api/, or services/api/app/.
+_ENV_FILE_PATHS: tuple[str, ...] = (
+    ".env",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")),
+)
+
 
 class Settings(BaseSettings):
     # ── Database ─────────────────────────────────────────────────────────────
@@ -48,7 +57,11 @@ class Settings(BaseSettings):
     # All other code reads only the StorageBackend Protocol — never this value.
     storage_backend: str = "local"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": _ENV_FILE_PATHS,
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 # Module-level singleton — import this everywhere.
