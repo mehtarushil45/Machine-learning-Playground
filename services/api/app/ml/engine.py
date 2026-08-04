@@ -581,6 +581,16 @@ def execute_ml_training_pipeline_sync(
             model_path=save_info["model_path"],
         )
 
+        # ── V5B: Governance Initialisation (non-blocking) ─────────────────────
+        try:
+            from app.ml.model_governance import initialise_governance  # noqa: PLC0415
+            initialise_governance(model_id=model_id, lineage=lineage)
+        except Exception as _gov_exc:
+            logger.warning(
+                "V5B governance init failed for job %s (non-blocking): %s",
+                job_id, _gov_exc,
+            )
+
         # ── Stage 11: Completed ───────────────────────────────────────────────
         update_job_state(
             job_id,
