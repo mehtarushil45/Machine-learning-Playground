@@ -91,6 +91,10 @@ from app.ml.training_report import (
 # Sprint 5A modules
 from app.ml.artifact_manager import list_artifacts
 
+# V5A modules
+from app.ml.model_version_manager import next_version as allocate_version, _family_key as _mv_family_key
+from app.ml.model_lineage import build_lineage, record_lineage
+
 # Cross-package helpers — Sprint 2, untouched
 from services.worker.core.metrics import compute_metrics
 from services.worker.core.serialization import save_trained_model
@@ -486,24 +490,86 @@ def execute_ml_training_pipeline_sync(
             target_column=ctx.target_column,
         )
 
+        # ── V5A: Semantic Version + Lineage ────────────────────────────────
+        provisional_model_id = f"model-{job_id[:8]}"
+        semantic_version = allocate_version(
+            algorithm=algo_name,
+            dataset_id=dataset_id,
+            model_id=provisional_model_id,
+            bump="patch",
+        )
+        model_family = _mv_family_key(algo_name, dataset_id)
+
+        # Pull V4 DatasetValidationContext advisory data (non-blocking)
+        validation_score: float | None = None
+        ml_task_type: str | None = None
+        validation_context_summary: dict | None = None
+        try:
+            from app.ingestion.validation_context import get_validation_context  # noqa: PLC0415
+            vctx = get_validation_context(dataset_id)
+            if vctx is not None:
+                validation_score = vctx.validation_score
+                ml_task_type = vctx.ml_task_type
+                validation_context_summary = {
+                    "row_count":          vctx.row_count,
+                    "column_count":       vctx.column_count,
+                    "encoding":           vctx.encoding,
+                    "delimiter":          vctx.delimiter,
+                    "schema_version":     vctx.schema_version,
+                    "validation_passed":  vctx.validation_report.passed,
+                }
+        except Exception as _vctx_exc:
+            logger.debug("V4 validation context not available: %s", _vctx_exc)
+
+        lineage = build_lineage(
+            model_id=provisional_model_id,
+            job_id=job_id,
+            experiment_id=experiment_id,
+            algorithm=algo_name,
+            dataset_id=dataset_id,
+            dataset_version=dataset_version_str,
+            problem_type=problem_type.value,
+            semantic_version=semantic_version,
+            model_family=model_family,
+            training_timestamp=training_report["training_timestamp"],
+            hyperparameters=best_params,
+            metrics=metrics,
+            feature_columns=ctx.feature_columns,
+            target_column=ctx.target_column,
+            numeric_columns=ctx.numeric_columns,
+            categorical_columns=ctx.categorical_columns,
+            cv_results=cv_results,
+            pipeline_hash=training_report["pipeline_hash"],
+            random_seed=seed,
+            created_by="system",
+            validation_score=validation_score,
+            ml_task_type=ml_task_type,
+            validation_context_summary=validation_context_summary,
+        )
+        record_lineage(lineage)
+
         # Register in model registry
         model_id = register_model(
             {
-                "model_id": f"model-{job_id[:8]}",
-                "job_id": job_id,
-                "experiment_id": experiment_id,
-                "algorithm": algo_name,
-                "dataset_id": dataset_id,
-                "problem_type": problem_type.value,
-                "model_version": model_version,
-                "dataset_version": dataset_version_str,
-                "model_path": save_info["model_path"],
-                "feature_columns": ctx.feature_columns,
-                "target_column": ctx.target_column,
-                "metrics": metrics,
-                "best_params": best_params,
+                "model_id":         provisional_model_id,
+                "job_id":           job_id,
+                "experiment_id":    experiment_id,
+                "algorithm":        algo_name,
+                "dataset_id":       dataset_id,
+                "problem_type":     problem_type.value,
+                "model_version":    model_version,
+                "dataset_version":  dataset_version_str,
+                "model_path":       save_info["model_path"],
+                "feature_columns":  ctx.feature_columns,
+                "target_column":    ctx.target_column,
+                "metrics":          metrics,
+                "best_params":      best_params,
                 "training_timestamp": training_report["training_timestamp"],
-                "pipeline_hash": training_report["pipeline_hash"],
+                "pipeline_hash":    training_report["pipeline_hash"],
+                # V5A additions
+                "semantic_version": semantic_version,
+                "model_family":     model_family,
+                "lineage":          lineage,
             }
         )
 
@@ -531,11 +597,14 @@ def execute_ml_training_pipeline_sync(
                 "model_path": save_info["model_path"],
                 "problem_type": problem_type.value,
                 "experiment_id": experiment_id,
-                "model_id": model_id,
+                "model_id":        model_id,
                 "cv_mean_score": cv_results.get("mean_score") if cv_results and not cv_results.get("skipped") else None,
                 "feature_importance": feature_importance[:5] if feature_importance else [],
                 # Sprint 5A additions
-                "model_version": model_version,
+                "model_version":   model_version,
+                # V5A additions
+                "semantic_version": semantic_version,
+                "model_family":     model_family,
                 "artifact_manifest": list_artifacts(
                     model_id=model_id,
                     experiment_id=experiment_id,

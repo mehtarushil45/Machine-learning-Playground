@@ -1,4 +1,4 @@
-"""Model Version Registry — Sprint 4 Module 4.6, extended Sprint 5A Part 1.
+"""Model Version Registry — Sprint 4 Module 4.6, extended V5A.
 
 Filesystem-only model registry.  No database required.
 
@@ -143,33 +143,38 @@ def register_model(record: Dict[str, Any]) -> str:
     # Build full metadata with Sprint 5A lifecycle fields
     full_record: Dict[str, Any] = {
         # Sprint 4 core fields
-        "model_id": model_id,
-        "job_id": record.get("job_id"),
-        "experiment_id": record.get("experiment_id"),
-        "algorithm": record.get("algorithm", "Unknown"),
-        "dataset_id": record.get("dataset_id", ""),
-        "problem_type": record.get("problem_type", ""),
-        "model_version": record.get("model_version", ""),
-        "dataset_version": record.get("dataset_version", ""),
-        "model_path": record.get("model_path", ""),
-        "metrics": record.get("metrics", {}),
-        "best_params": record.get("best_params", {}),
-        "pipeline_hash": record.get("pipeline_hash", ""),
+        "model_id":           model_id,
+        "job_id":             record.get("job_id"),
+        "experiment_id":      record.get("experiment_id"),
+        "algorithm":          record.get("algorithm", "Unknown"),
+        "dataset_id":         record.get("dataset_id", ""),
+        "problem_type":       record.get("problem_type", ""),
+        "model_version":      record.get("model_version", ""),
+        "dataset_version":    record.get("dataset_version", ""),
+        "model_path":         record.get("model_path", ""),
+        "metrics":            record.get("metrics", {}),
+        "best_params":        record.get("best_params", {}),
+        "pipeline_hash":      record.get("pipeline_hash", ""),
         "training_timestamp": record.get("training_timestamp", ""),
-        "registered_at": datetime.now(timezone.utc).isoformat(),
+        "registered_at":      datetime.now(timezone.utc).isoformat(),
         # Sprint 5A lifecycle fields
-        "version": record.get("model_version") or record.get("version", "v1.0.0"),
-        "status": record.get("status", "ACTIVE"),
-        "owner": record.get("owner", "system"),
+        "version":     record.get("model_version") or record.get("version", "v1.0.0"),
+        "status":      record.get("status", "ACTIVE"),
+        "owner":       record.get("owner", "system"),
         "description": record.get("description", ""),
-        "tags": record.get("tags", []),
-        "accuracy": _extract_metric(record.get("metrics", {}), "accuracy"),
-        "f1": _extract_metric(record.get("metrics", {}), "f1_score"),
-        "auc": _extract_metric(record.get("metrics", {}), "roc_auc"),
-        "promoted_at": None,
-        "archived_at": None,
+        "tags":        record.get("tags", []),
+        "accuracy":    _extract_metric(record.get("metrics", {}), "accuracy"),
+        "f1":          _extract_metric(record.get("metrics", {}), "f1_score"),
+        "auc":         _extract_metric(record.get("metrics", {}), "roc_auc"),
+        "promoted_at":    None,
+        "archived_at":    None,
         "archive_reason": None,
-        "deprecated_at": None,
+        "deprecated_at":  None,
+        # V5A: Semantic versioning + Model Family
+        "semantic_version": record.get("semantic_version", ""),
+        "model_family":     record.get("model_family", ""),
+        # V5A: Embedded lineage reference (full record in lineage store)
+        "lineage": record.get("lineage", {}),
     }
 
     # Merge any extra caller-provided fields (non-destructively)
@@ -582,23 +587,26 @@ def _extract_metric(metrics: Dict[str, Any], key: str) -> Optional[float]:
 def _build_index_summary(full_record: Dict[str, Any]) -> Dict[str, Any]:
     """Build a lightweight index entry from full metadata."""
     return {
-        "model_id": full_record.get("model_id"),
-        "job_id": full_record.get("job_id"),
-        "experiment_id": full_record.get("experiment_id"),
-        "algorithm": full_record.get("algorithm"),
-        "dataset_id": full_record.get("dataset_id"),
-        "problem_type": full_record.get("problem_type"),
-        "model_version": full_record.get("model_version"),
-        "version": full_record.get("version"),
-        "model_path": full_record.get("model_path"),
-        "registered_at": full_record.get("registered_at"),
-        "status": full_record.get("status", "ACTIVE"),
-        "owner": full_record.get("owner", "system"),
-        "tags": full_record.get("tags", []),
-        "promoted_at": full_record.get("promoted_at"),
-        "archived_at": full_record.get("archived_at"),
+        "model_id":        full_record.get("model_id"),
+        "job_id":          full_record.get("job_id"),
+        "experiment_id":   full_record.get("experiment_id"),
+        "algorithm":       full_record.get("algorithm"),
+        "dataset_id":      full_record.get("dataset_id"),
+        "problem_type":    full_record.get("problem_type"),
+        "model_version":   full_record.get("model_version"),
+        "version":         full_record.get("version"),
+        # V5A semantic versioning
+        "semantic_version": full_record.get("semantic_version", ""),
+        "model_family":     full_record.get("model_family", ""),
+        "model_path":      full_record.get("model_path"),
+        "registered_at":   full_record.get("registered_at"),
+        "status":          full_record.get("status", "ACTIVE"),
+        "owner":           full_record.get("owner", "system"),
+        "tags":            full_record.get("tags", []),
+        "promoted_at":     full_record.get("promoted_at"),
+        "archived_at":     full_record.get("archived_at"),
         "metrics_summary": _metrics_summary(full_record.get("metrics", {})),
-        "accuracy": full_record.get("accuracy"),
-        "f1": full_record.get("f1"),
-        "auc": full_record.get("auc"),
+        "accuracy":        full_record.get("accuracy"),
+        "f1":              full_record.get("f1"),
+        "auc":             full_record.get("auc"),
     }

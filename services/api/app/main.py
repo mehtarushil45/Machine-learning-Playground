@@ -11,7 +11,7 @@ In Docker:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, pipelines, portfolios, predictions
+from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, pipelines, portfolios, predictions
 
 app = FastAPI(
     title="ML Platform API",
@@ -20,7 +20,7 @@ app = FastAPI(
         "Authentication: OAuth2 / JWT (access + refresh tokens). "
         "All data is scoped to an organisation and user."
     ),
-    version="0.1.0",
+    version="5A.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -50,3 +50,4 @@ app.include_router(portfolios.router, prefix=API_V1_PREFIX)
 app.include_router(pipelines.router, prefix=API_V1_PREFIX)
 app.include_router(explainability.router, prefix=API_V1_PREFIX)
 app.include_router(deployments.router, prefix=API_V1_PREFIX)
+app.include_router(models.router, prefix=API_V1_PREFIX)  # V5A: Model Versioning & Lineage
