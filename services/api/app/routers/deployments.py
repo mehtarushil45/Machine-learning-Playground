@@ -5,12 +5,12 @@ Endpoints for:
   - Listing active deployments: GET /api/v1/deployments
   - Retrieving deployment details: GET /api/v1/deployments/{id}
   - Public/API prediction inference: POST /api/v1/deployments/{id}/predict
-  - Generating SDK & Web Widget snippets: GET /api/v1/deployments/{id}/snippets
+  - Generating SDK & Web Widget snippets: GET /api/v1/deployments/{id}/snippet
   - Updating status (ACTIVE/PAUSED/REVOKED): PATCH /api/v1/deployments/{id}/status
 """
 
 from __future__ import annotations
-
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -183,8 +183,6 @@ from app.ml.deployment_manager import (
 )
 from app.ml.deployment_state_machine import (
     get_valid_transitions,
-    evaluate_deployment_policy,
-    STRATEGY_NAMES as _STRATEGY_NAMES,  # re-exported via strategies below
 )
 from app.ml.deployment_strategies import (
     get_strategy_schema,
@@ -741,3 +739,603 @@ async def v6a_deprecate_endpoint(endpoint_id: str) -> Dict[str, Any]:
             detail=f"Endpoint '{endpoint_id}' not found.",
         )
 
+
+# ============================================================================
+# V6B: Enterprise Model Monitoring & Continuous Learning
+# ============================================================================
+# All monitoring routes are nested under /v6a/{deployment_id}/monitoring/...
+# This preserves the deployment-centric URL hierarchy established in V6A.
+# A standalone /monitoring router may be introduced in V6C once V6B is canonical.
+# ============================================================================
+
+from app.ml.monitoring import monitoring_manager
+
+
+# ---------------------------------------------------------------------------
+# Monitor lifecycle
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring",
+    status_code=status.HTTP_201_CREATED,
+    summary="[V6B] Create monitoring config for a V6A deployment",
+    tags=["V6B Monitoring"],
+)
+async def v6b_create_monitor(
+    deployment_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Create a monitoring configuration for a deployed model.
+
+    Body fields:
+    - model_id (required): Model ID to monitor
+    - monitoring_name (optional): Human-readable name
+    - created_by (optional): Creator identifier
+    - enabled_checks (optional): {data_drift, performance, system}
+    - data_drift_config (optional): Drift detection thresholds
+    - performance_config (optional): Performance metric config
+    - system_config (optional): Latency/throughput thresholds
+    - alert_config (optional): Alert rules and channels
+    - scheduled_retraining_cron (optional): Cron expression (V6C architecture)
+    """
+    model_id = body.get("model_id")
+    if not model_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="'model_id' is required.",
+        )
+    monitoring_name = body.get("monitoring_name", f"monitor-{deployment_id[:8]}")
+    created_by = body.get("created_by", "api")
+    config_overrides = {
+        k: v for k, v in body.items()
+        if k in {"enabled_checks", "data_drift_config", "performance_config",
+                 "system_config", "alert_config", "scheduled_retraining_cron"}
+    }
+    try:
+        return monitoring_manager.create_monitor(
+            deployment_id=deployment_id,
+            model_id=model_id,
+            monitoring_name=monitoring_name,
+            config_overrides=config_overrides or None,
+            created_by=created_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+
+
+@router.get(
+    "/v6a/{deployment_id}/monitoring",
+    summary="[V6B] Get monitoring summary for a deployment",
+    tags=["V6B Monitoring"],
+)
+async def v6b_get_monitor(deployment_id: str) -> Dict[str, Any]:
+    """Get monitoring config, status, and latest report summaries for a deployment."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No monitoring config found for deployment '{deployment_id}'.",
+        )
+    monitoring_id = monitors[0]["monitoring_id"]
+    try:
+        return monitoring_manager.get_monitor_summary(monitoring_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/start",
+    summary="[V6B] Start monitoring (INACTIVE → ACTIVE via baseline computation)",
+    tags=["V6B Monitoring"],
+)
+async def v6b_start_monitoring(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Start monitoring for a deployment. Computes baselines, then transitions to ACTIVE."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    try:
+        return monitoring_manager.start_monitoring(monitoring_id, performed_by=performed_by)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/pause",
+    summary="[V6B] Pause monitoring",
+    tags=["V6B Monitoring"],
+)
+async def v6b_pause_monitoring(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Pause an ACTIVE or ALERTING monitor."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    reason = (body or {}).get("reason")
+    try:
+        return monitoring_manager.pause_monitoring(monitoring_id, performed_by, reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/resume",
+    summary="[V6B] Resume monitoring from PAUSED",
+    tags=["V6B Monitoring"],
+)
+async def v6b_resume_monitoring(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Resume a PAUSED monitor."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    try:
+        return monitoring_manager.resume_monitoring(monitoring_id, performed_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/stop",
+    summary="[V6B] Stop monitoring permanently (terminal)",
+    tags=["V6B Monitoring"],
+)
+async def v6b_stop_monitoring(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Stop a monitor permanently. STOPPED is a terminal state."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    reason = (body or {}).get("reason")
+    try:
+        return monitoring_manager.stop_monitoring(monitoring_id, performed_by, reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.get(
+    "/v6a/{deployment_id}/monitoring/history",
+    summary="[V6B] Get monitoring lifecycle event log",
+    tags=["V6B Monitoring"],
+)
+async def v6b_get_monitoring_history(deployment_id: str) -> Dict[str, Any]:
+    """Return the immutable monitoring lifecycle event log."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    return monitoring_manager.get_monitoring_history(monitoring_id)
+
+
+# ---------------------------------------------------------------------------
+# On-demand checks
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/check/drift",
+    summary="[V6B] Run on-demand drift check",
+    tags=["V6B Monitoring"],
+)
+async def v6b_run_drift_check(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run feature drift, schema drift, missing value drift, and distribution drift checks."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    try:
+        return monitoring_manager.run_drift_check(monitoring_id, performed_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/check/performance",
+    summary="[V6B] Run on-demand performance check",
+    tags=["V6B Monitoring"],
+)
+async def v6b_run_performance_check(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run performance metrics check. Requires submitted actuals for accuracy/F1."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    try:
+        return monitoring_manager.run_performance_check(monitoring_id, performed_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/check/system",
+    summary="[V6B] Run on-demand system metrics check",
+    tags=["V6B Monitoring"],
+)
+async def v6b_run_system_check(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run system metrics check: latency percentiles, throughput, error rate."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    try:
+        return monitoring_manager.run_system_check(monitoring_id, performed_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/check/all",
+    summary="[V6B] Run all enabled monitoring checks",
+    tags=["V6B Monitoring"],
+)
+async def v6b_run_full_check(
+    deployment_id: str,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Run all enabled checks (drift, performance, system) and return combined summary."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    performed_by = (body or {}).get("performed_by", "api")
+    try:
+        return monitoring_manager.run_full_check(monitoring_id, performed_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/v6a/{deployment_id}/monitoring/reports/drift",
+    summary="[V6B] List drift reports for a deployment",
+    tags=["V6B Monitoring"],
+)
+async def v6b_list_drift_reports(
+    deployment_id: str,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """List drift report summaries, newest first."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    reports = monitoring_registry.list_reports(monitoring_id, "drift", limit=limit)
+    return {"monitoring_id": monitoring_id, "reports": reports, "count": len(reports)}
+
+
+@router.get(
+    "/v6a/{deployment_id}/monitoring/reports/performance",
+    summary="[V6B] List performance reports for a deployment",
+    tags=["V6B Monitoring"],
+)
+async def v6b_list_performance_reports(
+    deployment_id: str,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """List performance report summaries, newest first."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    reports = monitoring_registry.list_reports(monitoring_id, "performance", limit=limit)
+    return {"monitoring_id": monitoring_id, "reports": reports, "count": len(reports)}
+
+
+@router.get(
+    "/v6a/{deployment_id}/monitoring/reports/system",
+    summary="[V6B] List system reports for a deployment",
+    tags=["V6B Monitoring"],
+)
+async def v6b_list_system_reports(
+    deployment_id: str,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """List system metric report summaries, newest first."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    reports = monitoring_registry.list_reports(monitoring_id, "system", limit=limit)
+    return {"monitoring_id": monitoring_id, "reports": reports, "count": len(reports)}
+
+
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/v6a/{deployment_id}/monitoring/alerts",
+    summary="[V6B] List alerts for a deployment",
+    tags=["V6B Monitoring"],
+)
+async def v6b_list_alerts(
+    deployment_id: str,
+    severity: Optional[str] = None,
+    resolved: Optional[bool] = None,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """List alerts. Filter by severity (INFO/WARNING/CRITICAL) and resolved status."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    alerts = monitoring_registry.list_alerts(monitoring_id, severity=severity, resolved=resolved, limit=limit)
+    return {"monitoring_id": monitoring_id, "alerts": alerts, "count": len(alerts)}
+
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/alerts/{alert_id}/resolve",
+    summary="[V6B] Resolve an active alert",
+    tags=["V6B Monitoring"],
+)
+async def v6b_resolve_alert(
+    deployment_id: str,
+    alert_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Resolve an active alert. Transitions ALERTING → ACTIVE if no CRITICAL alerts remain."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    resolved_by = body.get("resolved_by", "api")
+    resolution_note = body.get("resolution_note", "")
+    try:
+        return monitoring_manager.resolve_alert(monitoring_id, alert_id, resolved_by, resolution_note)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Actuals (ground truth for performance evaluation)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/actuals",
+    summary="[V6B] Submit ground truth labels for performance evaluation",
+    tags=["V6B Monitoring"],
+)
+async def v6b_submit_actuals(
+    deployment_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Submit ground truth labels linked to prediction log_ids.
+
+    Body: {"actuals": [{"log_id_ref": "<prediction_id>", "actual": <label>}, ...]}
+    Stores in daily JSONL files: actuals/YYYY-MM-DD.jsonl
+    """
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    actuals_list = body.get("actuals", [])
+    if not actuals_list:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="'actuals' list is required and must not be empty.",
+        )
+    try:
+        return monitoring_manager.submit_actuals(monitoring_id, actuals_list)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Retraining
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/v6a/{deployment_id}/monitoring/retraining/trigger",
+    status_code=status.HTTP_201_CREATED,
+    summary="[V6B] Manually trigger a retraining request",
+    tags=["V6B Monitoring"],
+)
+async def v6b_trigger_retraining(
+    deployment_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Create a MANUAL retraining request (status=PENDING, requires human approval).
+
+    Body: {"reason": "...", "requested_by": "mlops", "priority": "HIGH"}
+    """
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    reason = body.get("reason", "Manual retraining request")
+    requested_by = body.get("requested_by", "api")
+    priority = body.get("priority", "MEDIUM")
+    try:
+        return monitoring_manager.trigger_retraining(monitoring_id, reason, requested_by, priority)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.get(
+    "/v6a/{deployment_id}/monitoring/retraining",
+    summary="[V6B] List retraining requests for a deployment",
+    tags=["V6B Monitoring"],
+)
+async def v6b_list_retraining(
+    deployment_id: str,
+    req_status: Optional[str] = None,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    """List retraining requests. Filter by status (PENDING/APPROVED/REJECTED/etc.)."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    from app.ml.monitoring import retraining_manager
+    requests = retraining_manager.list_retraining_requests(
+        monitoring_id=monitoring_id, status=req_status, limit=limit
+    )
+    return {"monitoring_id": monitoring_id, "requests": requests, "count": len(requests)}
+
+
+@router.patch(
+    "/v6a/{deployment_id}/monitoring/retraining/{request_id}/approve",
+    summary="[V6B] Approve a PENDING retraining request",
+    tags=["V6B Monitoring"],
+)
+async def v6b_approve_retraining(
+    deployment_id: str,
+    request_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Approve a retraining request (PENDING → APPROVED)."""
+    from app.ml.monitoring import retraining_manager
+    approved_by = body.get("approved_by", "api")
+    try:
+        return retraining_manager.approve_retraining(request_id, approved_by)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.patch(
+    "/v6a/{deployment_id}/monitoring/retraining/{request_id}/reject",
+    summary="[V6B] Reject a PENDING retraining request",
+    tags=["V6B Monitoring"],
+)
+async def v6b_reject_retraining(
+    deployment_id: str,
+    request_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Reject a retraining request (PENDING → REJECTED)."""
+    from app.ml.monitoring import retraining_manager
+    rejected_by = body.get("rejected_by", "api")
+    reason = body.get("reason", "Rejected by reviewer")
+    try:
+        return retraining_manager.reject_retraining(request_id, rejected_by, reason)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.patch(
+    "/v6a/{deployment_id}/monitoring/config",
+    summary="[V6B] Update monitoring configuration",
+    tags=["V6B Monitoring"],
+)
+async def v6b_update_monitor_config(
+    deployment_id: str,
+    body: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Update monitoring configuration (thresholds, alert rules, enabled checks, etc.)."""
+    from app.ml.monitoring import monitoring_registry
+    monitors = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+    if not monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No monitor for deployment '{deployment_id}'.")
+    monitoring_id = monitors[0]["monitoring_id"]
+    try:
+        return monitoring_manager.update_monitor_config(monitoring_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Global monitoring endpoints (cross-deployment)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/v6a/monitoring/alerts",
+    summary="[V6B] List all alerts across all deployments",
+    tags=["V6B Monitoring Global"],
+)
+async def v6b_list_all_alerts(
+    severity: Optional[str] = None,
+    resolved: Optional[bool] = None,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Global alert list across all monitored deployments."""
+    return monitoring_manager.get_all_alerts(severity=severity, resolved=resolved, limit=limit)
+
+
+@router.get(
+    "/v6a/monitoring/monitors",
+    summary="[V6B] List all monitoring configs",
+    tags=["V6B Monitoring Global"],
+)
+async def v6b_list_all_monitors(
+    deployment_id: Optional[str] = None,
+    model_id: Optional[str] = None,
+    state: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """List all monitoring configurations with optional filters."""
+    return monitoring_manager.list_monitors(
+        deployment_id=deployment_id,
+        model_id=model_id,
+        state=state,
+        limit=limit,
+        offset=offset,
+    )

@@ -3,8 +3,9 @@
 Manages live model deployment endpoints, API key authentication, rate limits, request counters,
 and generates cURL, Python, JavaScript SDK snippets & HTML/JS embeddable web widgets.
 """
-
 from __future__ import annotations
+import logging
+logger = logging.getLogger(__name__)
 
 import json
 import logging
@@ -268,6 +269,7 @@ from app.ml.deployment_registry import (
 )
 from app.ml.deployment_state_machine import (
     validate_transition,
+    get_valid_transitions,
     make_deployment_event,
     event_type_for_state,
     evaluate_deployment_policy,
@@ -275,6 +277,7 @@ from app.ml.deployment_state_machine import (
     POLICY_BLOCK,
     POLICY_WARN,
     POLICY_ALLOW,
+    
 )
 from app.ml.deployment_strategies import (
     build_strategy_config,
@@ -544,6 +547,13 @@ def create_v6a_deployment(
 
     result = get_v6a_deployment(dep_id) or record
     result["endpoint_id"] = ep_id
+
+    # ── V6B: Non-blocking monitoring event hook ─────────────────────────────
+    # Notify the monitoring layer that a new deployment is available.
+    # This is purely advisory — does not affect deployment creation.
+    _notify_v6b_deployment_created(dep_id, model_id, record)
+    # ────────────────────────────────────────────────────────────────────────
+
     return result
 
 
@@ -1107,3 +1117,51 @@ def _patch_deployment_model(
     except Exception as _exc:
         _v6a_logger.warning("_patch_deployment_model failed: %s", _exc)
 
+
+# ============================================================================
+# V6B: Monitoring Integration Hook
+# ============================================================================
+# Called non-blockingly from create_v6a_deployment.
+# MUST NOT raise. MUST NOT block. Monitoring is optional and advisory.
+# ============================================================================
+
+import threading as _threading
+
+
+def _notify_v6b_deployment_created(
+    deployment_id: str,
+    model_id: str,
+    deployment_record: dict,
+) -> None:
+    """Fire-and-forget: notify monitoring layer that a deployment was created.
+
+    Runs in a daemon thread. Never raises. Never blocks the caller.
+    Monitoring is NOT auto-started — this just logs availability so operators
+    can call POST /v6a/{deployment_id}/monitoring to set up monitoring.
+    """
+    def _run() -> None:
+        try:
+            from app.ml.monitoring import monitoring_registry
+            existing = monitoring_registry.list_monitors(deployment_id=deployment_id, limit=1)
+            if existing:
+                _v6a_logger.debug(
+                    "V6B hook: deployment %s already has monitor=%s configured.",
+                    deployment_id,
+                    existing[0].get("monitoring_id"),
+                )
+            else:
+                _v6a_logger.info(
+                    "V6B hook: deployment %s (model=%s) created. "
+                    "Monitoring not yet configured — use POST /v6a/%s/monitoring to enable.",
+                    deployment_id, model_id, deployment_id,
+                )
+        except Exception as exc:
+            # Completely swallow — monitoring is non-critical to deployment
+            _v6a_logger.debug("V6B monitoring hook error (non-critical): %s", exc)
+
+    t = _threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"v6b-hook-{deployment_id[:8]}",
+    )
+    t.start()
