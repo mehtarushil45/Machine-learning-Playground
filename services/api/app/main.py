@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, pipelines, portfolios, predictions
+from app.routers import organizations, workspaces, users_v7a, api_keys, activity  # V7A
 
 app = FastAPI(
     title="ML Platform API",
@@ -20,7 +21,7 @@ app = FastAPI(
         "Authentication: OAuth2 / JWT (access + refresh tokens). "
         "All data is scoped to an organisation and user."
     ),
-    version="5A.0",
+    version="7A.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -51,3 +52,10 @@ app.include_router(pipelines.router, prefix=API_V1_PREFIX)
 app.include_router(explainability.router, prefix=API_V1_PREFIX)
 app.include_router(deployments.router, prefix=API_V1_PREFIX)
 app.include_router(models.router, prefix=API_V1_PREFIX)  # V5A: Model Versioning & Lineage
+
+# ── V7A: Enterprise Organizations, Workspaces & RBAC ─────────────────────────
+app.include_router(organizations.router, prefix=API_V1_PREFIX)
+app.include_router(workspaces.router, prefix=API_V1_PREFIX)
+app.include_router(users_v7a.router, prefix=API_V1_PREFIX)
+app.include_router(api_keys.router, prefix=API_V1_PREFIX)
+app.include_router(activity.router, prefix=API_V1_PREFIX)

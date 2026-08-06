@@ -29,9 +29,18 @@ def create_access_token(
     user_id: uuid.UUID,
     organisation_id: uuid.UUID,
     *,
+    workspace_id: uuid.UUID | None = None,
     expires_delta: timedelta | None = None,
 ) -> str:
-    """Return a signed JWT access token."""
+    """Return a signed JWT access token.
+
+    Args:
+        user_id: The user's UUID.
+        organisation_id: The user's organisation UUID.
+        workspace_id: Optional default workspace UUID (V7A). Encoded as ``wid``
+            claim.  Pre-V7A callers omit this and existing tokens remain valid.
+        expires_delta: Optional custom expiry.
+    """
     expire = _utcnow() + (
         expires_delta or timedelta(minutes=settings.access_token_expire_minutes)
     )
@@ -42,6 +51,8 @@ def create_access_token(
         "exp": expire,
         "iat": _utcnow(),
     }
+    if workspace_id is not None:
+        payload["wid"] = str(workspace_id)
     return jwt.encode(payload, settings.secret_key, algorithm=_ALGORITHM)
 
 

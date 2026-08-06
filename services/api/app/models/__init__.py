@@ -22,6 +22,11 @@ from app.models.classroom import (  # noqa: F401
     Submission,
     SubmissionStatus,
 )
+# V7A: Enterprise multi-tenant models (import order: parent before child)
+from app.models.workspace import Workspace, WorkspaceStatus, WorkspaceVisibility  # noqa: F401
+from app.models.workspace_settings import WorkspaceSettings, DefaultDeploymentPolicy  # noqa: F401
+from app.models.workspace_member import WorkspaceMember, WorkspaceRole, MemberStatus  # noqa: F401
+from app.models.api_key import ApiKey  # noqa: F401
 
 __all__ = [
     "Organisation",
@@ -38,4 +43,14 @@ __all__ = [
     "SubmissionStatus",
     "Feedback",
     "PortfolioProject",
+    # V7A
+    "Workspace",
+    "WorkspaceStatus",
+    "WorkspaceVisibility",
+    "WorkspaceSettings",
+    "DefaultDeploymentPolicy",
+    "WorkspaceMember",
+    "WorkspaceRole",
+    "MemberStatus",
+    "ApiKey",
 ]

@@ -16,13 +16,16 @@ from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
 class UserRole(str, enum.Enum):
     """Roles control what a user can do within their organisation and institution."""
 
-    platform_admin = "platform_admin"
-    org_admin = "org_admin"
+    # V7A Platform roles
+    platform_owner = "platform_owner"    # superuser across all orgs
+    org_admin      = "org_admin"         # full control within own org
+
+    # V1 legacy roles (preserved for backward compat)
+    platform_admin = "platform_admin"    # alias for platform_owner
     faculty = "faculty"
     lab_coordinator = "lab_coordinator"
     reviewer = "reviewer"
     learner = "learner"
-    # Legacy aliases
     owner = "owner"
     admin = "admin"
     member = "member"
@@ -49,6 +52,11 @@ class User(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     organisation: Mapped["Organisation"] = relationship(back_populates="users")  # type: ignore[name-defined]  # noqa: F821
     datasets: Mapped[list["Dataset"]] = relationship(back_populates="created_by")  # type: ignore[name-defined]  # noqa: F821
     jobs: Mapped[list["Job"]] = relationship(back_populates="created_by")  # type: ignore[name-defined]  # noqa: F821
+    # V7A: workspace memberships (back-populated by WorkspaceMember)
+    workspace_memberships: Mapped[list["WorkspaceMember"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="user",
+        foreign_keys="[WorkspaceMember.user_id]",
+    )
 
     def __repr__(self) -> str:
         return f"<User id={self.id} email={self.email!r} role={self.role}>"

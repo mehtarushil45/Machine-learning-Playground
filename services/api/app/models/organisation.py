@@ -24,6 +24,10 @@ class Organisation(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     users: Mapped[list["User"]] = relationship(back_populates="organisation")  # type: ignore[name-defined]  # noqa: F821
     datasets: Mapped[list["Dataset"]] = relationship(back_populates="organisation")  # type: ignore[name-defined]  # noqa: F821
     jobs: Mapped[list["Job"]] = relationship(back_populates="organisation")  # type: ignore[name-defined]  # noqa: F821
+    # V7A: workspace hierarchy
+    workspaces: Mapped[list["Workspace"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="organisation", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Organisation id={self.id} slug={self.slug!r}>"
