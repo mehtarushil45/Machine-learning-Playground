@@ -9,7 +9,12 @@ Usage:
 """
 
 import asyncio
+import os
+import sys
 from logging.config import fileConfig
+
+# Ensure the API directory is in the Python path regardless of execution directory
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
