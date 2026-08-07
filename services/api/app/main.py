@@ -13,6 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, pipelines, portfolios, predictions
 from app.routers import organizations, workspaces, users_v7a, api_keys, activity  # V7A
+from app.routers import admin  # V7B Part 1
+from app.routers import studio, explainability_v7b, portfolios_v7b, classrooms_v7b, workflow  # V7B Part 2
 
 app = FastAPI(
     title="ML Platform API",
@@ -21,7 +23,7 @@ app = FastAPI(
         "Authentication: OAuth2 / JWT (access + refresh tokens). "
         "All data is scoped to an organisation and user."
     ),
-    version="7A.0",
+    version="7B.2",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -59,3 +61,11 @@ app.include_router(workspaces.router, prefix=API_V1_PREFIX)
 app.include_router(users_v7a.router, prefix=API_V1_PREFIX)
 app.include_router(api_keys.router, prefix=API_V1_PREFIX)
 app.include_router(activity.router, prefix=API_V1_PREFIX)
+app.include_router(admin.router, prefix=API_V1_PREFIX)  # V7B Part 1
+
+# ── V7B Part 2: Enterprise Platform Completion ────────────────────────────────
+app.include_router(studio.router, prefix=API_V1_PREFIX)              # View-as-Code Studio
+app.include_router(explainability_v7b.router, prefix=API_V1_PREFIX)  # Ethics & Trust
+app.include_router(portfolios_v7b.router, prefix=API_V1_PREFIX)      # Portfolio+
+app.include_router(classrooms_v7b.router, prefix=API_V1_PREFIX)      # Classroom Analytics
+app.include_router(workflow.router, prefix=API_V1_PREFIX)             # E2E Workflow
