@@ -8,34 +8,70 @@ In Docker:
     docker compose -f infra/docker-compose.yml up api
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.middleware.blacklist import TokenBlacklistMiddleware
+from app.redis_client import close_redis, ping_redis
 
 from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, pipelines, portfolios, predictions
 from app.routers import organizations, workspaces, users_v7a, api_keys, activity  # V7A
 from app.routers import admin  # V7B Part 1
 from app.routers import studio, explainability_v7b, portfolios_v7b, classrooms_v7b, workflow  # V7B Part 2
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan — startup and shutdown hooks."""
+    # ── Startup ───────────────────────────────────────────────────────────────
+    redis_ok = await ping_redis()
+    if redis_ok:
+        import logging
+        logging.getLogger(__name__).info("Redis connection verified at startup.")
+    else:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Redis unreachable at startup — token blacklisting will fail-open."
+        )
+    yield
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    await close_redis()
+
+
 app = FastAPI(
     title="ML Platform API",
     description=(
         "Organisation-grade ML learning and lab management platform. "
-        "Authentication: OAuth2 / JWT (access + refresh tokens). "
+        "Authentication: OAuth2 / JWT (access + refresh tokens) with Redis-backed blacklisting. "
         "All data is scoped to an organisation and user."
     ),
     version="7B.2",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+# ── Middleware (order matters — added last, runs first) ───────────────────────
+# CORS must be outermost; blacklist runs inside CORS so it has parsed headers.
+#
+# IMPORTANT: allow_credentials=True requires an explicit origin list.
+# Wildcard "*" is rejected by browsers when credentials (cookies) are included.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_credentials=True,
+    allow_origins=[
+        "http://localhost:5173",    # Vite dev server
+        "http://127.0.0.1:5173",   # Vite dev server (loopback alias)
+        "http://localhost:4173",    # Vite preview
+        "http://localhost:3000",    # CRA / alternate dev port
+    ],
+    allow_credentials=True,        # ← Required for httpOnly cookie auth
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Set-Cookie"],  # ← Let browser JS see Set-Cookie in preflight
 )
+app.add_middleware(TokenBlacklistMiddleware)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 # All application routes are served under /api/v1 to match the frontend contract.

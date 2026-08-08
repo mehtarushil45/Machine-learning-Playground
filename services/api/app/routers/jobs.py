@@ -1,7 +1,26 @@
-"""Jobs router for ML Job Management and Training Pipeline Orchestration."""
+"""Jobs router for ML Job Management and Training Pipeline Orchestration.
+
+Authentication
+--------------
+Every endpoint requires a valid Bearer token via ``CurrentUser``.
+The authenticated user's ID is threaded through to the service layer so that:
+
+  - ``create_job``  stamps ``owner_id`` on the new job record.
+  - ``list_jobs``   returns only jobs owned by the calling user.
+  - ``get_job``     enforces read ownership (403 if caller is not the owner).
+  - ``cancel_job``  enforces write ownership (403 if caller is not the owner).
+  - ``retry_job``   inherits owner_id from the original job (ownership enforced).
+  - ``delete_job``  enforces ownership before soft-deleting.
+
+``get_job_progress`` is a read-only subset of ``get_job``; it shares the same
+ownership guard via the underlying ``get_job`` service call.
+"""
+
+from __future__ import annotations
 
 from fastapi import APIRouter, Query, status
 
+from app.dependencies import CurrentUser
 from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
@@ -21,9 +40,16 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
     status_code=status.HTTP_201_CREATED,
     summary="Create and queue a new ML training job",
 )
-async def create_training_job(request: TrainingRequest) -> JobResponse:
-    """Validate training configuration and queue a new Machine Learning job."""
-    return job_service.create_job(request)
+async def create_training_job(
+    request: TrainingRequest,
+    current_user: CurrentUser,
+) -> JobResponse:
+    """Validate training configuration and queue a new Machine Learning job.
+
+    The calling user's ID is stamped as ``owner_id`` on the created job.
+    Only the owner can later cancel, retry, or delete the job.
+    """
+    return job_service.create_job(request, user_id=str(current_user.id))
 
 
 @router.get(
@@ -32,11 +58,20 @@ async def create_training_job(request: TrainingRequest) -> JobResponse:
     summary="List ML training jobs",
 )
 async def list_jobs(
+    current_user: CurrentUser,
     skip: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(50, ge=1, le=100, description="Page limit size"),
 ) -> JobListResponse:
-    """List all active machine learning training jobs (newest first)."""
-    return job_service.list_jobs(skip=skip, limit=limit)
+    """List training jobs owned by the authenticated user (newest first).
+
+    Results are scoped to ``current_user.id`` — users cannot see each
+    other's jobs through this endpoint.
+    """
+    return job_service.list_jobs(
+        user_id=str(current_user.id),
+        skip=skip,
+        limit=limit,
+    )
 
 
 @router.get(
@@ -44,9 +79,15 @@ async def list_jobs(
     response_model=JobResponse,
     summary="Get job details by ID",
 )
-async def get_job(job_id: str) -> JobResponse:
-    """Retrieve complete metadata and status details for a specific Job ID."""
-    return job_service.get_job(job_id)
+async def get_job(
+    job_id: str,
+    current_user: CurrentUser,
+) -> JobResponse:
+    """Retrieve complete metadata and status details for a specific Job ID.
+
+    Returns 403 if the job exists but belongs to a different user.
+    """
+    return job_service.get_job(job_id, user_id=str(current_user.id))
 
 
 @router.get(
@@ -54,9 +95,15 @@ async def get_job(job_id: str) -> JobResponse:
     response_model=JobProgressResponse,
     summary="Get live job progress telemetry",
 )
-async def get_job_progress(job_id: str) -> JobProgressResponse:
-    """Return live execution stage and percentage progress for a running Job ID."""
-    return job_service.get_job_progress(job_id)
+async def get_job_progress(
+    job_id: str,
+    current_user: CurrentUser,
+) -> JobProgressResponse:
+    """Return live execution stage and percentage progress for a running Job ID.
+
+    Ownership is enforced — only the job owner can poll progress.
+    """
+    return job_service.get_job_progress(job_id, user_id=str(current_user.id))
 
 
 @router.post(
@@ -64,9 +111,15 @@ async def get_job_progress(job_id: str) -> JobProgressResponse:
     response_model=JobCancelResponse,
     summary="Cancel an active training job",
 )
-async def cancel_job(job_id: str) -> JobCancelResponse:
-    """Cancel an active or queued Machine Learning training job."""
-    return job_service.cancel_job(job_id)
+async def cancel_job(
+    job_id: str,
+    current_user: CurrentUser,
+) -> JobCancelResponse:
+    """Cancel an active or queued Machine Learning training job.
+
+    Only the owning user may cancel a job. Returns 403 for non-owners.
+    """
+    return job_service.cancel_job(job_id, user_id=str(current_user.id))
 
 
 @router.post(
@@ -74,15 +127,28 @@ async def cancel_job(job_id: str) -> JobCancelResponse:
     response_model=JobRetryResponse,
     summary="Retry a training job",
 )
-async def retry_job(job_id: str) -> JobRetryResponse:
-    """Re-queue a new job run using the original job's training configuration."""
-    return job_service.retry_job(job_id)
+async def retry_job(
+    job_id: str,
+    current_user: CurrentUser,
+) -> JobRetryResponse:
+    """Re-queue a new job run using the original job's training configuration.
+
+    The retry inherits the original job's ``owner_id``. Returns 403 if
+    the caller does not own the original job.
+    """
+    return job_service.retry_job(job_id, user_id=str(current_user.id))
 
 
 @router.delete(
     "/{job_id}",
     summary="Soft delete a job entity",
 )
-async def delete_job(job_id: str) -> dict[str, str]:
-    """Soft delete a job from active view while preserving database history."""
-    return job_service.delete_job(job_id)
+async def delete_job(
+    job_id: str,
+    current_user: CurrentUser,
+) -> dict[str, str]:
+    """Soft delete a job from active view while preserving database history.
+
+    Only the owning user may delete a job. Returns 403 for non-owners.
+    """
+    return job_service.delete_job(job_id, user_id=str(current_user.id))

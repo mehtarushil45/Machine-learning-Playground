@@ -64,8 +64,8 @@ class MinIOStorageBackend:
         bucket_name: str | None = None,
     ) -> None:
         self._endpoint_url: str = endpoint_url or settings.s3_endpoint_url
-        self._access_key: str = access_key or settings.s3_access_key
-        self._secret_key: str = secret_key or settings.s3_secret_key
+        self._access_key: str = access_key or settings.s3_access_key.get_secret_value()
+        self._secret_key: str = secret_key or settings.s3_secret_key.get_secret_value()
         self._bucket: str = bucket_name or settings.s3_bucket_name
 
         logger.info(

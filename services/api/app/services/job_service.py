@@ -1,15 +1,27 @@
 """Job Management Service.
 
 Handles ML Job creation, status transition, stage progress tracking,
-asynchronous scikit-learn model training execution, cancellation, retries, and soft-deletion.
+asynchronous scikit-learn model training execution, cancellation, retries,
+and soft-deletion.
+
+Ownership model
+---------------
+Every job record carries an ``owner_id`` (the ``str(user.id)`` of the creating
+user).  All mutating operations (cancel, retry, delete) and all read operations
+(get, progress, list) now require the caller to pass their ``user_id``.
+
+Ownership checks raise HTTP 403 so the caller cannot infer whether a job ID
+belonging to another user even exists.  This prevents enumeration attacks.
 """
 
 import asyncio
+import sys
 from datetime import datetime, timezone
 import logging
 import os
 import socket
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+
 import uuid
 
 from fastapi import HTTPException, status
@@ -26,7 +38,8 @@ from app.schemas.job import (
 
 logger = logging.getLogger("apex_job_service")
 
-# In-memory storage store (preserving session jobs for instant orchestration)
+# In-memory store — preserved across requests in the same process.
+# Key: job_id (str) → Value: JobResponse
 _JOBS_STORE: Dict[str, JobResponse] = {}
 
 
@@ -41,11 +54,34 @@ def is_redis_available(host: str = "localhost", port: int = 6379, timeout: float
         return False
 
 
+def _assert_owner(job: JobResponse, user_id: str) -> None:
+    """Raise HTTP 403 if *user_id* is not the job owner.
+
+    Returns 403 (Forbidden) rather than 404 so callers cannot determine
+    whether a job owned by another user exists (prevents enumeration).
+    """
+    if job.owner_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this job.",
+        )
+
+
 class JobService:
     """Enterprise ML Job Orchestration & Service Layer."""
 
-    def create_job(self, request: TrainingRequest) -> JobResponse:
-        """Create and queue a new Machine Learning training job."""
+    # ------------------------------------------------------------------
+    # Create
+    # ------------------------------------------------------------------
+
+    def create_job(self, request: TrainingRequest, *, user_id: str) -> JobResponse:
+        """Create and queue a new Machine Learning training job.
+
+        Args:
+            request: Validated ``TrainingRequest`` payload.
+            user_id: ID of the authenticated user creating the job.
+                     Stored as ``owner_id`` on the job record.
+        """
         job_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
@@ -80,60 +116,90 @@ class JobService:
             estimated_seconds=10.0,
             worker_id=f"worker-{uuid.uuid4().hex[:8]}",
             retry_count=0,
-            owner_id="user-default",
+            owner_id=user_id,          # ← stamped from the authenticated user
             metadata=config,
         )
 
         _JOBS_STORE[job_id] = job
+        logger.info("Job %s created by user %s.", job_id, user_id)
 
-        # Dispatch Asynchronous ML Training Execution Engine
         self._dispatch_job_execution(job_id, config)
-
         return job
 
+    # ------------------------------------------------------------------
+    # Internal dispatch
+    # ------------------------------------------------------------------
+
     def _dispatch_job_execution(self, job_id: str, config: Dict[str, Any]) -> None:
-        """Dispatches job to Celery worker if Redis is active, or in-process ML training engine."""
+        """Dispatch to Celery worker (if Redis is live) or async ML engine."""
         if is_redis_available():
             try:
-                _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+                _repo_root = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+                )
                 if _repo_root not in sys.path:
                     sys.path.insert(0, _repo_root)
                 from services.worker.tasks.training_task import execute_ml_training_job
+
                 execute_ml_training_job.delay(job_id, config)
-                logger.info(f"Dispatched job {job_id} to Celery worker.")
+                logger.info("Dispatched job %s to Celery worker.", job_id)
                 return
             except Exception as exc:
-                logger.warning(f"Celery dispatch failed: {exc}. Using async engine fallback.")
+                logger.warning("Celery dispatch failed: %s. Falling back to async engine.", exc)
 
-        # Fallback to in-process async model training execution engine
         from app.ml.engine import execute_ml_training_pipeline_async
-        asyncio.create_task(execute_ml_training_pipeline_async(job_id, config))
-        logger.info(f"Dispatched job {job_id} to async ML training engine.")
 
-    def list_jobs(self, skip: int = 0, limit: int = 50) -> JobListResponse:
-        """Return list of all non-deleted ML jobs, newest first."""
+        asyncio.create_task(execute_ml_training_pipeline_async(job_id, config))
+        logger.info("Dispatched job %s to async ML training engine.", job_id)
+
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
+
+    def list_jobs(
+        self,
+        *,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 50,
+    ) -> JobListResponse:
+        """Return paginated jobs belonging to *user_id*, newest first.
+
+        Users can only see their own jobs. Pass ``user_id`` from the
+        authenticated request; it is never inferred from the stored data.
+        """
         skip_val = int(getattr(skip, "default", skip)) if hasattr(skip, "default") else int(skip)
         limit_val = int(getattr(limit, "default", limit)) if hasattr(limit, "default") else int(limit)
 
-        all_jobs = list(_JOBS_STORE.values())
-        # Sort newest created_at first
-        all_jobs.sort(key=lambda j: j.created_at, reverse=True)
-        paginated = all_jobs[skip_val : skip_val + limit_val]
+        # Filter to the calling user's jobs only
+        user_jobs = [j for j in _JOBS_STORE.values() if j.owner_id == user_id]
+        user_jobs.sort(key=lambda j: j.created_at, reverse=True)
+        paginated = user_jobs[skip_val : skip_val + limit_val]
 
-        return JobListResponse(total=len(all_jobs), jobs=paginated)
+        return JobListResponse(total=len(user_jobs), jobs=paginated)
 
-    def get_job(self, job_id: str) -> JobResponse:
-        """Retrieve complete job details by Job ID."""
-        if job_id not in _JOBS_STORE:
+    def get_job(self, job_id: str, *, user_id: str) -> JobResponse:
+        """Retrieve complete job details by Job ID.
+
+        Raises:
+            HTTP 404: Job not found (only for jobs that don't exist).
+            HTTP 403: Job exists but belongs to a different user.
+        """
+        job = _JOBS_STORE.get(job_id)
+        if job is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"ML Job with ID '{job_id}' not found.",
             )
-        return _JOBS_STORE[job_id]
+        _assert_owner(job, user_id)
+        return job
 
-    def get_job_progress(self, job_id: str) -> JobProgressResponse:
-        """Return live progress telemetry for a specific Job ID."""
-        job = self.get_job(job_id)
+    def get_job_progress(self, job_id: str, *, user_id: str) -> JobProgressResponse:
+        """Return live progress telemetry for a specific Job ID.
+
+        Ownership is enforced via the underlying ``get_job`` call.
+        """
+        job = self.get_job(job_id, user_id=user_id)
         return JobProgressResponse(
             job_id=job.job_id,
             status=job.status,
@@ -143,11 +209,23 @@ class JobService:
             estimated_seconds_remaining=job.estimated_seconds,
         )
 
-    def cancel_job(self, job_id: str) -> JobCancelResponse:
-        """Transition active job to CANCELLED state."""
-        job = self.get_job(job_id)
+    # ------------------------------------------------------------------
+    # Mutate
+    # ------------------------------------------------------------------
 
-        if job.status in (JobStatusEnum.COMPLETED.value, JobStatusEnum.FAILED.value, JobStatusEnum.CANCELLED.value):
+    def cancel_job(self, job_id: str, *, user_id: str) -> JobCancelResponse:
+        """Transition active job to CANCELLED state.
+
+        Only the owning user may cancel. Terminal jobs (COMPLETED, FAILED,
+        CANCELLED) raise HTTP 400.
+        """
+        job = self.get_job(job_id, user_id=user_id)   # ownership checked here
+
+        if job.status in (
+            JobStatusEnum.COMPLETED.value,
+            JobStatusEnum.FAILED.value,
+            JobStatusEnum.CANCELLED.value,
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot cancel job '{job_id}' in terminal state '{job.status}'.",
@@ -164,6 +242,7 @@ class JobService:
             }
         )
         _JOBS_STORE[job_id] = updated_job
+        logger.info("Job %s cancelled by user %s.", job_id, user_id)
 
         return JobCancelResponse(
             job_id=job_id,
@@ -172,9 +251,13 @@ class JobService:
             message="Training job was cancelled successfully.",
         )
 
-    def retry_job(self, job_id: str) -> JobRetryResponse:
-        """Create a new job retry run linked to the original job configuration."""
-        original_job = self.get_job(job_id)
+    def retry_job(self, job_id: str, *, user_id: str) -> JobRetryResponse:
+        """Create a new job retry run linked to the original job configuration.
+
+        Ownership of the original job is enforced. The retry inherits
+        the original ``owner_id``.
+        """
+        original_job = self.get_job(job_id, user_id=user_id)   # ownership checked
         new_job_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
@@ -198,13 +281,16 @@ class JobService:
             estimated_seconds=10.0,
             worker_id=f"worker-{uuid.uuid4().hex[:8]}",
             retry_count=new_retry_count,
-            owner_id=original_job.owner_id,
+            owner_id=original_job.owner_id,    # inherit original owner
             metadata=config,
         )
 
         _JOBS_STORE[new_job_id] = retried_job
+        logger.info(
+            "Job %s retried as %s by user %s (attempt #%d).",
+            job_id, new_job_id, user_id, new_retry_count,
+        )
 
-        # Dispatch model training execution
         self._dispatch_job_execution(new_job_id, config)
 
         return JobRetryResponse(
@@ -215,15 +301,15 @@ class JobService:
             message=f"Successfully queued job retry #{new_retry_count}.",
         )
 
-    def delete_job(self, job_id: str) -> dict[str, str]:
-        """Soft delete a job entity without purging database history."""
-        if job_id not in _JOBS_STORE:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"ML Job with ID '{job_id}' not found.",
-            )
-        # Soft delete from memory active list
+    def delete_job(self, job_id: str, *, user_id: str) -> dict[str, str]:
+        """Soft delete a job entity without purging database history.
+
+        Only the owning user may delete. Raises 403 for non-owners and
+        404 for non-existent jobs.
+        """
+        job = self.get_job(job_id, user_id=user_id)   # ownership checked
         _JOBS_STORE.pop(job_id, None)
+        logger.info("Job %s soft-deleted by user %s.", job_id, user_id)
         return {"message": f"Job '{job_id}' soft deleted successfully."}
 
 

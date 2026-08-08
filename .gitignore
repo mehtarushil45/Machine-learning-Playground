@@ -37,6 +37,32 @@ venv/
 .env.*
 !.env.example
 
+# Docker local overrides (may contain secrets or personal paths)
+docker-compose.override.yml
+docker-compose.local.yml
+
 # Uploads and temporary test artifacts
 services/api/uploads/
 uploads/
+
+# MinIO local data (contains actual stored object bytes)
+services/minio/data/
+
+# Private key files — never commit
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+*.crt
+
+# Terraform — may contain cloud credentials
+*.tfvars
+!*.tfvars.example
+terraform.tfstate
+terraform.tfstate.*
+.terraform/
+
+# Secret scanners
+.secrets.baseline
