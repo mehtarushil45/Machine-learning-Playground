@@ -96,7 +96,11 @@ class IngestionService:
     """
 
     def __init__(self, backend: StorageBackend | None = None) -> None:
-        self._backend: StorageBackend = backend or get_configured_backend()
+        self._custom_backend: StorageBackend | None = backend
+
+    @property
+    def _backend(self) -> StorageBackend:
+        return self._custom_backend or get_configured_backend()
 
     # ------------------------------------------------------------------
     # Public API
@@ -105,6 +109,9 @@ class IngestionService:
     async def create_ingestion_job(
         self,
         file: UploadFile,
+        *,
+        user_id: str,
+        organisation_id: str,
     ) -> DatasetUploadV2Response:
         """Validate, stream-store, and enqueue a v2 dataset ingestion job.
 
@@ -114,7 +121,9 @@ class IngestionService:
         never held in memory simultaneously.
 
         Args:
-            file: The multipart-uploaded ``UploadFile`` from FastAPI.
+            file:            The multipart-uploaded ``UploadFile`` from FastAPI.
+            user_id:         UUID string of the uploading user.
+            organisation_id: UUID string of the uploading user's organisation.
 
         Returns:
             ``DatasetUploadV2Response`` with ``job_id`` and ``poll_url``.
@@ -133,8 +142,9 @@ class IngestionService:
         safe_name = _sanitize_filename(file.filename or "dataset.csv")
 
         logger.info(
-            "Ingestion job starting — backend=%s file='%s'",
+            "Ingestion job starting — backend=%s org=%s file='%s'",
             type(self._backend).__name__,
+            organisation_id,
             safe_name,
         )
 
@@ -148,26 +158,23 @@ class IngestionService:
         self._validate_header_row(first_chunk)
 
         # ── 3. Stream entire file through the StorageBackend ──────────────
-        # NOTE: self._backend.save_stream() is the ONLY write path.
-        # For LocalFileSystemBackend: writes to upload_dir/ on disk.
-        # For MinIOStorageBackend:    uploads to MinIO via put_object.
-        # _stream_file_to_disk is NOT used — it was local-only and
-        # did not call save_stream(), so MinIO never received the file.
         location = await self._store_upload(
             file=file,
             first_chunk=first_chunk,
             dataset_id=dataset_id,
             filename=safe_name,
+            organisation_id=organisation_id,
             max_bytes=settings.max_upload_size_bytes,
         )
         dest_path = location.path
         size_bytes = location.size_bytes
 
         logger.info(
-            "Upload stored — backend=%s path='%s' size=%d bytes",
+            "Upload stored — backend=%s path='%s' size=%d bytes org=%s",
             location.backend,
             dest_path,
             size_bytes,
+            organisation_id,
         )
 
         # ── 4. Register ingestion job in the shared _JOBS_STORE ───────────
@@ -192,10 +199,11 @@ class IngestionService:
             estimated_seconds=8.0,
             worker_id=f"ingestion-{uuid.uuid4().hex[:8]}",
             retry_count=0,
-            owner_id="user-default",
+            owner_id=user_id,
             metadata={
                 "filename": safe_name,
                 "dataset_id": dataset_id,
+                "organisation_id": organisation_id,
                 "storage_path": dest_path,
                 "storage_backend": location.backend,
                 "size_bytes": size_bytes,
@@ -211,14 +219,15 @@ class IngestionService:
         )
         _JOBS_STORE[job_id] = job
         logger.info(
-            "Ingestion job created — job_id=%s dataset_id=%s file='%s' size=%d bytes",
-            job_id, dataset_id, safe_name, size_bytes,
+            "Ingestion job created — job_id=%s dataset_id=%s org=%s file='%s' size=%d bytes",
+            job_id, dataset_id, organisation_id, safe_name, size_bytes,
         )
 
         # ── 5. Dispatch background ingestion pipeline ──────────────────────
         ingestion_config: dict[str, Any] = {
             "job_id": job_id,
             "dataset_id": dataset_id,
+            "organisation_id": organisation_id,
             "filename": safe_name,
             "storage_path": dest_path,
             "storage_backend": location.backend,
@@ -310,26 +319,22 @@ class IngestionService:
         first_chunk: bytes,
         dataset_id: str,
         filename: str,
+        organisation_id: str,
         max_bytes: int,
     ) -> "StorageLocation":  # noqa: F821  (forward ref resolved at runtime)
         """Read the UploadFile in chunks and persist via ``self._backend.save_stream()``.
-
-        This is the single write path for all storage backends.  The backend
-        decides where and how to persist the data — callers never call
-        ``open()`` directly.  Prior to this fix, ``_stream_file_to_disk``
-        always called ``open(dest_path, 'wb')`` regardless of the active
-        backend, which meant MinIO's ``save_stream()`` was never invoked.
 
         Reads the UploadFile in ``_STREAM_CHUNK``-byte increments.  The
         ``first_chunk`` (already read for header pre-screening) is yielded
         first so the backend sees the complete byte stream.
 
         Args:
-            file:        FastAPI UploadFile (stream positioned after first_chunk).
-            first_chunk: Already-read initial bytes (from header pre-screen).
-            dataset_id:  UUID string — forwarded to ``backend.save_stream()``.
-            filename:    Sanitised filename — forwarded to ``backend.save_stream()``.
-            max_bytes:   Hard size limit; excess triggers HTTP 413.
+            file:            FastAPI UploadFile (stream positioned after first_chunk).
+            first_chunk:     Already-read initial bytes (from header pre-screen).
+            dataset_id:      UUID string — forwarded to ``backend.save_stream()``.
+            filename:        Sanitised filename — forwarded to ``backend.save_stream()``.
+            organisation_id: Organisation UUID string for multi-tenant isolation.
+            max_bytes:       Hard size limit; excess triggers HTTP 413.
 
         Returns:
             ``StorageLocation`` from the backend (path, size, backend identifier).
@@ -366,6 +371,7 @@ class IngestionService:
                 chunks=iter(chunks),
                 dataset_id=dataset_id,
                 filename=filename,
+                organisation_id=organisation_id,
             )
         except StorageError as exc:
             logger.error(

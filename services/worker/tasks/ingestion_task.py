@@ -165,7 +165,8 @@ def ingestion_pipeline_sync(
                 "MinIO backend detected — downloading '%s' to temp file for pipeline.",
                 storage_path,
             )
-            _tmp_path = _backend.download_to_temp(dataset_id, filename)
+            org_id = config.get("organisation_id")
+            _tmp_path = _backend.download_to_temp(dataset_id, filename, organisation_id=org_id)
             _local_path = _tmp_path
             logger.info(
                 "MinIO download complete — temp file '%s' (%s).",

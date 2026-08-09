@@ -21,29 +21,32 @@ UPLOADS_DIR = os.path.abspath(
 
 
 def find_dataset_path(dataset_id: str) -> str:
-    """Find CSV file path in uploads directory corresponding to dataset_id."""
+    """Find CSV file path in uploads directory corresponding to dataset_id.
+
+    Searches both the root upload directory and organisation-scoped subdirectories.
+
+    Raises:
+        FileNotFoundError: If no matching CSV dataset file is found for dataset_id.
+    """
     if os.path.exists(dataset_id) and dataset_id.endswith(".csv"):
         return dataset_id
 
-    os.makedirs(UPLOADS_DIR, exist_ok=True)
-
     if os.path.exists(UPLOADS_DIR):
+        # 1. Search root upload directory
         for fname in os.listdir(UPLOADS_DIR):
-            if dataset_id in fname and fname.endswith(".csv"):
-                return os.path.join(UPLOADS_DIR, fname)
+            fpath = os.path.join(UPLOADS_DIR, fname)
+            if os.path.isfile(fpath) and (dataset_id in fname and fname.endswith(".csv")):
+                return fpath
+            # 2. Search organisation-scoped subdirectories
+            if os.path.isdir(fpath):
+                for sub_fname in os.listdir(fpath):
+                    if dataset_id in sub_fname and sub_fname.endswith(".csv"):
+                        return os.path.join(fpath, sub_fname)
 
-    # Dedicated sample dataset for test runs
-    sample_path = os.path.join(UPLOADS_DIR, "sample_dataset.csv")
-    df_sample = pd.DataFrame(
-        {
-            "feature1": [10.5, 12.1, 9.8, 14.3, 11.2, 13.5, 8.9, 15.1, 10.0, 12.8],
-            "feature2": [0.2, 0.5, 0.1, 0.8, 0.3, 0.7, 0.2, 0.9, 0.4, 0.6],
-            "category": ["class_a", "class_b", "class_a", "class_b", "class_a", "class_b", "class_a", "class_b", "class_a", "class_b"],
-            "target": [350000.0, 520000.0, 210000.0, 810000.0, 390000.0, 610000.0, 190000.0, 890000.0, 320000.0, 550000.0],
-        }
+    raise FileNotFoundError(
+        f"No dataset file found for dataset_id='{dataset_id}'. "
+        "Please upload a valid CSV dataset before training."
     )
-    df_sample.to_csv(sample_path, index=False)
-    return sample_path
 
 
 def load_and_preprocess_dataset(
@@ -54,7 +57,11 @@ def load_and_preprocess_dataset(
     random_seed: int = 42,
     use_scaling: bool = True,
 ) -> Tuple[Any, Any, Any, Any, ColumnTransformer, bool]:
-    """Load dataset CSV, build preprocessing transformers, and return train/test splits."""
+    """Load dataset CSV, build preprocessing transformers, and return train/test splits.
+
+    Raises:
+        FileNotFoundError: If no matching CSV dataset file is found for dataset_id.
+    """
     file_path = find_dataset_path(dataset_id)
     df = pd.read_csv(file_path)
 

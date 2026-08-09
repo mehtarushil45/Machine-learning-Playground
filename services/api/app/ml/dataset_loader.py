@@ -115,12 +115,13 @@ def load_dataset_context(
     logger.info("Loading dataset '%s'", dataset_id)
 
     # ── 1. Resolve file path ─────────────────────────────────────────────────
-    file_path = find_dataset_path(dataset_id)
-    if not os.path.exists(file_path):
+    try:
+        file_path = find_dataset_path(dataset_id)
+    except FileNotFoundError as exc:
         raise FileNotFoundError(
             f"No CSV file found for dataset_id='{dataset_id}'. "
             "Ensure the file was uploaded successfully."
-        )
+        ) from exc
 
     # ── 2. Parse CSV ─────────────────────────────────────────────────────────
     try:

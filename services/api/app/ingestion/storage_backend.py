@@ -33,11 +33,12 @@ class StorageLocation:
     """Immutable descriptor of a persisted dataset file.
 
     Attributes:
-        backend:    Identifier for the storage medium (``"local"`` | ``"s3"`` | ``"gcs"``).
-        path:       Absolute filesystem path (local) or object key (remote).
-        size_bytes: Number of bytes written.
-        dataset_id: UUID string that forms the file's primary-key prefix.
-        filename:   Sanitised original filename without the dataset_id prefix.
+        backend:         Identifier for the storage medium (``"local"`` | ``"s3"`` | ``"gcs"``).
+        path:            Absolute filesystem path (local) or object key (remote).
+        size_bytes:      Number of bytes written.
+        dataset_id:      UUID string that forms the file's primary-key prefix.
+        filename:        Sanitised original filename without the dataset_id prefix.
+        organisation_id: Optional organisation UUID string for multi-tenant isolation.
     """
 
     backend: str
@@ -45,6 +46,7 @@ class StorageLocation:
     size_bytes: int
     dataset_id: str
     filename: str
+    organisation_id: str | None = None
 
 
 class StorageError(RuntimeError):
@@ -75,6 +77,7 @@ class StorageBackend(Protocol):
         chunks: Iterable[bytes],
         dataset_id: str,
         filename: str,
+        organisation_id: str | None = None,
     ) -> StorageLocation:
         """Persist an iterable of byte chunks as a single atomic file.
 
@@ -83,9 +86,10 @@ class StorageBackend(Protocol):
         and must not buffer the full content.
 
         Args:
-            chunks:     Iterator of raw byte chunks (e.g. 64 KB reads).
-            dataset_id: UUID string used as the file's primary-key prefix.
-            filename:   Sanitised original filename (e.g. ``"churn.csv"``).
+            chunks:          Iterator of raw byte chunks (e.g. 64 KB reads).
+            dataset_id:      UUID string used as the file's primary-key prefix.
+            filename:        Sanitised original filename (e.g. ``"churn.csv"``).
+            organisation_id: Optional organisation UUID for tenant isolation.
 
         Returns:
             StorageLocation describing the persisted file.
@@ -95,7 +99,12 @@ class StorageBackend(Protocol):
         """
         ...  # pragma: no cover
 
-    def resolve_path(self, dataset_id: str, filename: str) -> str:
+    def resolve_path(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> str:
         """Return the canonical storage path for ``(dataset_id, filename)``.
 
         For local backends this is an absolute filesystem path.
@@ -104,11 +113,21 @@ class StorageBackend(Protocol):
         """
         ...  # pragma: no cover
 
-    def exists(self, dataset_id: str, filename: str) -> bool:
+    def exists(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> bool:
         """Return ``True`` if the file is present in the storage backend."""
         ...  # pragma: no cover
 
-    def delete(self, dataset_id: str, filename: str) -> None:
+    def delete(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> None:
         """Remove the file from storage.  No-op if the file does not exist.
 
         Raises:
@@ -145,14 +164,15 @@ class LocalFileSystemBackend:
         chunks: Iterable[bytes],
         dataset_id: str,
         filename: str,
+        organisation_id: str | None = None,
     ) -> StorageLocation:
-        """Write chunks sequentially to ``<base_dir>/<dataset_id>_<filename>``.
+        """Write chunks sequentially to ``<base_dir>/[<org_id>/]<dataset_id>_<filename>``.
 
-        Creates the base directory if it does not exist.  Raises
+        Creates parent directories if they do not exist.  Raises
         StorageError on any OSError so callers receive a typed exception.
         """
-        os.makedirs(self._base_dir, exist_ok=True)
-        dest = self._build_path(dataset_id, filename)
+        dest = self._build_path(dataset_id, filename, organisation_id)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
         written = 0
 
         try:
@@ -171,23 +191,50 @@ class LocalFileSystemBackend:
             size_bytes=written,
             dataset_id=dataset_id,
             filename=filename,
+            organisation_id=organisation_id,
         )
 
-    def resolve_path(self, dataset_id: str, filename: str) -> str:
-        """Return ``<base_dir>/<dataset_id>_<filename>`` without touching disk."""
-        return self._build_path(dataset_id, filename)
+    def resolve_path(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> str:
+        """Return canonical path without touching disk."""
+        return self._build_path(dataset_id, filename, organisation_id)
 
-    def exists(self, dataset_id: str, filename: str) -> bool:
+    def exists(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> bool:
         """Return ``True`` if the file exists on the local filesystem."""
-        return os.path.isfile(self._build_path(dataset_id, filename))
+        path = self._build_path(dataset_id, filename, organisation_id)
+        if os.path.isfile(path):
+            return True
+        if organisation_id:
+            # Fallback check for legacy unscoped path
+            return os.path.isfile(self._build_path(dataset_id, filename, None))
+        return False
 
-    def delete(self, dataset_id: str, filename: str) -> None:
+    def delete(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> None:
         """Remove the file.  Silently succeeds if the file is already absent."""
-        path = self._build_path(dataset_id, filename)
+        path = self._build_path(dataset_id, filename, organisation_id)
         try:
             os.remove(path)
         except FileNotFoundError:
-            pass  # idempotent
+            if organisation_id:
+                legacy_path = self._build_path(dataset_id, filename, None)
+                try:
+                    os.remove(legacy_path)
+                except FileNotFoundError:
+                    pass
         except OSError as exc:
             raise StorageError(
                 f"LocalFileSystemBackend: failed deleting '{path}': {exc}"
@@ -197,8 +244,15 @@ class LocalFileSystemBackend:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_path(self, dataset_id: str, filename: str) -> str:
-        """Construct ``<base_dir>/<dataset_id>_<filename>``."""
+    def _build_path(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> str:
+        """Construct ``<base_dir>/[<organisation_id>/]<dataset_id>_<filename>``."""
+        if organisation_id:
+            return os.path.join(self._base_dir, str(organisation_id), f"{dataset_id}_{filename}")
         return os.path.join(self._base_dir, f"{dataset_id}_{filename}")
 
     def __repr__(self) -> str:  # pragma: no cover

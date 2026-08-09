@@ -2,24 +2,22 @@
 
 Provides endpoints for uploading, validating, profiling, health scoring, recommendations, and managing datasets.
 
-Version 1  (existing, untouched API surface):
+Authentication & Multi-tenancy
+-------------------------------
+All endpoints require a valid Bearer token / httpOnly cookie via ``CurrentUser``.
+Read and write operations are strictly scoped to ``current_user.organisation_id``.
+
+Version 1:
     POST /upload              — upload + immediate validate + parse + store
     POST /                    — alias for /upload
+    GET  /                    — list organization datasets
     GET  /{dataset_id}/profile
     GET  /{dataset_id}/health
     GET  /{dataset_id}/recommendations
 
-Version 2  (new, additive):
+Version 2:
     POST /upload/v2           — streaming upload → background Celery ingestion pipeline
                                 Returns HTTP 202 Accepted + poll_url immediately.
-    Polling:  GET /api/v1/jobs/{job_id}/progress  (existing endpoint, unchanged)
-
-Integration note (v3 / StorageBackend):
-    POST /upload now delegates file persistence to ``get_configured_backend()``
-    instead of hardcoded ``open()`` calls.  This ensures ALL dataset uploads
-    (v1 and v2) use the same storage abstraction, so setting
-    ``STORAGE_BACKEND=minio`` in ``.env`` routes files to MinIO without any
-    frontend changes.
 """
 
 import csv
@@ -30,9 +28,10 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.config import settings
+from app.dependencies import CurrentUser
 from app.ingestion.storage_backend import StorageError, get_configured_backend
 from app.schemas.common import MessageResponse
 from app.schemas.dataset import (
@@ -60,9 +59,12 @@ def sanitize_filename(filename: str) -> str:
 
 
 @router.get("", response_model=MessageResponse, summary="List datasets")
-async def list_datasets() -> MessageResponse:
+async def list_datasets(current_user: CurrentUser) -> MessageResponse:
     """List datasets registered in active organization session."""
-    return MessageResponse(message="Datasets listing endpoint.")
+    org_id_str = str(current_user.organisation_id)
+    return MessageResponse(
+        message=f"Datasets listing endpoint for organisation '{org_id_str}'."
+    )
 
 
 @router.post(
@@ -78,11 +80,13 @@ async def list_datasets() -> MessageResponse:
     summary="Upload and validate a CSV dataset (alias)",
 )
 async def upload_dataset(
+    current_user: CurrentUser,
     file: UploadFile = File(...),
 ) -> DatasetUploadResponse:
     """Validate, parse metadata from, and securely store an uploaded CSV dataset.
 
     - **Validation**: CSV extension, MIME type, max size (50MB), non-empty file, non-corrupted structure.
+    - **Isolation**: Stored under organisation-scoped path for multi-tenant isolation.
     - **HTTP Statuses**:
         - 400 Bad Request: Unsupported format, invalid encoding, empty file.
         - 413 Payload Too Large: Size > 50MB.
@@ -189,15 +193,17 @@ async def upload_dataset(
             detail=f"Malformed CSV: Failed to parse tabular structure ({str(exc)}).",
         ) from exc
 
-    # 5. Safe Filename & Storage — delegated to StorageBackend
+    # 5. Safe Filename & Storage — delegated to StorageBackend with Organisation Scoping
     dataset_id = uuid.uuid4()
     safe_filename = sanitize_filename(file.filename)
+    org_id_str = str(current_user.organisation_id)
     backend = get_configured_backend()
 
     logger.info(
-        "POST /upload — selected StorageBackend: %s (type=%s)",
+        "POST /upload — selected StorageBackend: %s (type=%s, org=%s)",
         type(backend).__name__,
         getattr(backend, "_backend", type(backend).__name__),
+        org_id_str,
     )
 
     try:
@@ -205,6 +211,7 @@ async def upload_dataset(
             chunks=[content],
             dataset_id=str(dataset_id),
             filename=safe_filename,
+            organisation_id=org_id_str,
         )
     except StorageError as exc:
         logger.error(
@@ -255,24 +262,34 @@ async def upload_dataset(
     response_model=DatasetProfileResponse,
     summary="Get comprehensive statistical and quality profile of a dataset",
 )
-async def get_dataset_profile(dataset_id: str) -> DatasetProfileResponse:
+async def get_dataset_profile(
+    dataset_id: str,
+    current_user: CurrentUser,
+) -> DatasetProfileResponse:
     """Analyze and return comprehensive schema, statistics, and quality profile for a dataset."""
-    if not os.path.exists(settings.upload_dir):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Dataset with ID '{dataset_id}' not found.",
-        )
+    org_id_str = str(current_user.organisation_id)
+    org_dir = os.path.join(settings.upload_dir, org_id_str)
 
-    # Locate dataset file matching prefix {dataset_id}_
     matched_filename = None
     matched_file_path = None
     prefix = f"{dataset_id}_"
 
-    for fname in os.listdir(settings.upload_dir):
-        if fname == dataset_id or fname.startswith(prefix):
-            matched_filename = fname[len(prefix) :] if fname.startswith(prefix) else fname
-            matched_file_path = os.path.join(settings.upload_dir, fname)
-            break
+    # 1. Search in organisation-scoped upload directory
+    if os.path.exists(org_dir):
+        for fname in os.listdir(org_dir):
+            if fname == dataset_id or fname.startswith(prefix):
+                matched_filename = fname[len(prefix) :] if fname.startswith(prefix) else fname
+                matched_file_path = os.path.join(org_dir, fname)
+                break
+
+    # 2. Fallback search in base upload_dir for legacy unscoped datasets
+    if not matched_file_path and os.path.exists(settings.upload_dir):
+        for fname in os.listdir(settings.upload_dir):
+            fpath = os.path.join(settings.upload_dir, fname)
+            if os.path.isfile(fpath) and (fname == dataset_id or fname.startswith(prefix)):
+                matched_filename = fname[len(prefix) :] if fname.startswith(prefix) else fname
+                matched_file_path = fpath
+                break
 
     if not matched_file_path or not os.path.isfile(matched_file_path):
         raise HTTPException(
@@ -311,12 +328,15 @@ async def get_dataset_profile(dataset_id: str) -> DatasetProfileResponse:
     response_model=DatasetHealthResponse,
     summary="Get enterprise quality health score and audit report for a dataset",
 )
-async def get_dataset_health(dataset_id: str) -> DatasetHealthResponse:
+async def get_dataset_health(
+    dataset_id: str,
+    current_user: CurrentUser,
+) -> DatasetHealthResponse:
     """Evaluate and return dataset health score, grade, warnings, issues, and recommendations.
 
     Consumes DatasetProfileResponse (single source of truth). Does NOT re-parse raw files.
     """
-    profile = await get_dataset_profile(dataset_id)
+    profile = await get_dataset_profile(dataset_id, current_user)
     return health_service.evaluate_health(profile)
 
 
@@ -325,12 +345,15 @@ async def get_dataset_health(dataset_id: str) -> DatasetHealthResponse:
     response_model=DatasetRecommendationResponse,
     summary="Get ML problem type, model architectures, and preprocessing recommendations",
 )
-async def get_dataset_recommendations(dataset_id: str) -> DatasetRecommendationResponse:
+async def get_dataset_recommendations(
+    dataset_id: str,
+    current_user: CurrentUser,
+) -> DatasetRecommendationResponse:
     """Produce ML task recommendations, candidate targets, feature actions, and model choices.
 
     Consumes DatasetProfileResponse and DatasetHealthResponse (sources of truth).
     """
-    profile = await get_dataset_profile(dataset_id)
+    profile = await get_dataset_profile(dataset_id, current_user)
     health = health_service.evaluate_health(profile)
     return recommendation_service.generate_recommendations(profile, health)
 
@@ -363,6 +386,7 @@ async def get_dataset_recommendations(dataset_id: str) -> DatasetRecommendationR
     ),
 )
 async def upload_dataset_v2(
+    current_user: CurrentUser,
     file: UploadFile = File(
         ...,
         description="CSV file to ingest (max 50 MB, UTF-8 or ISO-8859-1 encoded).",
@@ -385,4 +409,8 @@ async def upload_dataset_v2(
     - ``422 Unprocessable Entity``: Missing or blank CSV header row.
     - ``500 Internal Server Error``: Disk write failure.
     """
-    return await ingestion_service.create_ingestion_job(file)
+    return await ingestion_service.create_ingestion_job(
+        file,
+        user_id=str(current_user.id),
+        organisation_id=str(current_user.organisation_id),
+    )

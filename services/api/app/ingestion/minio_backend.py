@@ -114,6 +114,7 @@ class MinIOStorageBackend:
         chunks: Iterable[bytes],
         dataset_id: str,
         filename: str,
+        organisation_id: str | None = None,
     ) -> StorageLocation:
         """Buffer all chunks and upload as a single object to MinIO.
 
@@ -122,9 +123,10 @@ class MinIOStorageBackend:
         never exceeds the configured limit (default 50 MB).
 
         Args:
-            chunks:     Iterator of raw byte chunks.
-            dataset_id: UUID string used as the object key prefix.
-            filename:   Sanitised original filename.
+            chunks:          Iterator of raw byte chunks.
+            dataset_id:      UUID string used as the object key prefix.
+            filename:        Sanitised original filename.
+            organisation_id: Optional organisation UUID string.
 
         Returns:
             ``StorageLocation`` with ``backend="minio"`` and
@@ -133,7 +135,7 @@ class MinIOStorageBackend:
         Raises:
             StorageError: On any boto3 / MinIO error.
         """
-        object_key = self._build_key(dataset_id, filename)
+        object_key = self._build_key(dataset_id, filename, organisation_id)
         buffer = io.BytesIO()
         written = 0
 
@@ -170,30 +172,52 @@ class MinIOStorageBackend:
             size_bytes=written,
             dataset_id=dataset_id,
             filename=filename,
+            organisation_id=organisation_id,
         )
 
-    def resolve_path(self, dataset_id: str, filename: str) -> str:
-        """Return the object key for ``(dataset_id, filename)``.
+    def resolve_path(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> str:
+        """Return the object key for ``(dataset_id, filename)``."""
+        return self._build_key(dataset_id, filename, organisation_id)
 
-        No I/O is performed.  The key format mirrors the local backend
-        convention (``{dataset_id}_{filename}``) so ``find_dataset_path()``
-        in the worker can match it if needed.
-        """
-        return self._build_key(dataset_id, filename)
-
-    def exists(self, dataset_id: str, filename: str) -> bool:
+    def exists(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> bool:
         """Return ``True`` if the object exists in MinIO."""
-        object_key = self._build_key(dataset_id, filename)
+        object_key = self._build_key(dataset_id, filename, organisation_id)
         try:
             client = self._make_client()
             client.head_object(Bucket=self._bucket, Key=object_key)
             return True
         except Exception:
+            if organisation_id:
+                # Fallback check for unscoped legacy key
+                try:
+                    client = self._make_client()
+                    client.head_object(
+                        Bucket=self._bucket,
+                        Key=self._build_key(dataset_id, filename, None),
+                    )
+                    return True
+                except Exception:
+                    pass
             return False
 
-    def delete(self, dataset_id: str, filename: str) -> None:
+    def delete(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> None:
         """Delete the object from MinIO.  No-op if the object is absent."""
-        object_key = self._build_key(dataset_id, filename)
+        object_key = self._build_key(dataset_id, filename, organisation_id)
         try:
             client = self._make_client()
             client.delete_object(Bucket=self._bucket, Key=object_key)
@@ -205,29 +229,14 @@ class MinIOStorageBackend:
                 f"MinIOStorageBackend: failed deleting '{object_key}': {exc}"
             ) from exc
 
-    def download_to_temp(self, dataset_id: str, filename: str) -> str:
-        """Download an object from MinIO to a local temporary file.
-
-        Returns the absolute path to the temp file.  The caller is
-        responsible for deleting it when done.
-
-        This method is NOT part of the ``StorageBackend`` Protocol because
-        local backends have no need for it.  It is called explicitly by
-        ``ingestion_pipeline_sync`` when the configured backend is MinIO,
-        so the CSV parsing and profiling code can use ``open()`` without
-        any changes.
-
-        Args:
-            dataset_id: UUID string (object key prefix).
-            filename:   Sanitised original filename.
-
-        Returns:
-            Absolute path to the downloaded temporary file.
-
-        Raises:
-            StorageError: If the download fails.
-        """
-        object_key = self._build_key(dataset_id, filename)
+    def download_to_temp(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> str:
+        """Download an object from MinIO to a local temporary file."""
+        object_key = self._build_key(dataset_id, filename, organisation_id)
         suffix = os.path.splitext(filename)[1] or ".csv"
 
         try:
@@ -235,10 +244,22 @@ class MinIOStorageBackend:
             response = client.get_object(Bucket=self._bucket, Key=object_key)
             body = response["Body"].read()
         except Exception as exc:
-            raise StorageError(
-                f"MinIOStorageBackend: failed downloading '{object_key}' "
-                f"from bucket '{self._bucket}': {exc}"
-            ) from exc
+            if organisation_id:
+                legacy_key = self._build_key(dataset_id, filename, None)
+                try:
+                    client = self._make_client()
+                    response = client.get_object(Bucket=self._bucket, Key=legacy_key)
+                    body = response["Body"].read()
+                except Exception:
+                    raise StorageError(
+                        f"MinIOStorageBackend: failed downloading '{object_key}' "
+                        f"from bucket '{self._bucket}': {exc}"
+                    ) from exc
+            else:
+                raise StorageError(
+                    f"MinIOStorageBackend: failed downloading '{object_key}' "
+                    f"from bucket '{self._bucket}': {exc}"
+                ) from exc
 
         # Write to a named temp file — delete=False so the caller can open it
         with tempfile.NamedTemporaryFile(
@@ -261,13 +282,9 @@ class MinIOStorageBackend:
     # ------------------------------------------------------------------
 
     def _make_client(self):  # type: ignore[return]
-        """Create a new boto3 S3 client for this call.
-
-        A new client per call avoids thread-safety issues with shared
-        boto3 session state in multi-threaded Celery workers.
-        """
+        """Create a new boto3 S3 client for this call."""
         try:
-            import boto3  # noqa: PLC0415  (lazy import — boto3 is optional)
+            import boto3  # noqa: PLC0415
         except ImportError as exc:
             raise StorageError(
                 "boto3 is not installed.  Run: pip install boto3"
@@ -278,11 +295,18 @@ class MinIOStorageBackend:
             endpoint_url=self._endpoint_url,
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
-            region_name="us-east-1",  # required by boto3 even for MinIO
+            region_name="us-east-1",
         )
 
-    def _build_key(self, dataset_id: str, filename: str) -> str:
-        """Construct the object key ``{dataset_id}_{filename}``."""
+    def _build_key(
+        self,
+        dataset_id: str,
+        filename: str,
+        organisation_id: str | None = None,
+    ) -> str:
+        """Construct the object key ``[<organisation_id>/]{dataset_id}_{filename}``."""
+        if organisation_id:
+            return f"{organisation_id}/{dataset_id}_{filename}"
         return f"{dataset_id}_{filename}"
 
     def __repr__(self) -> str:  # pragma: no cover

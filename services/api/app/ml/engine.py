@@ -644,6 +644,9 @@ def execute_ml_training_pipeline_sync(
 
         return save_info
 
+    except FileNotFoundError as exc:
+        _fail_job(job_id, f"Dataset not found: {exc}")
+        raise
     except DatasetValidationError as exc:
         _fail_job(job_id, str(exc))
         raise
