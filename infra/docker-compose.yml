@@ -49,7 +49,7 @@ services:
     env_file:
       - ../.env
     environment:
-      - PYTHONPATH=/app/services/api
+      - PYTHONPATH=/app:/app/services/api
       # Docker networking overrides (overrides ../.env local settings)
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/mlplatform
       - REDIS_URL=redis://redis:6379/0
@@ -64,9 +64,41 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 10s
       timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Celery Worker ───────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+    command: celery -A services.worker.celery_app worker --loglevel=info
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - ../.env
+    environment:
+      - PYTHONPATH=/app:/app/services/api
+      # Docker networking overrides (overrides ../.env local settings)
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/mlplatform
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - S3_ENDPOINT_URL=http://minio:9000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A services.worker.celery_app inspect ping || exit 1"]
+      interval: 10s
+      timeout: 10s
       retries: 5
       start_period: 20s
 

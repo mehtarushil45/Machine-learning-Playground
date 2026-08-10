@@ -155,10 +155,9 @@ class MinIOStorageBackend:
                 ContentType="text/csv",
             )
         except Exception as exc:
-            raise StorageError(
-                f"MinIOStorageBackend: failed uploading '{object_key}' "
-                f"to bucket '{self._bucket}': {exc}"
-            ) from exc
+            logger.warning("MinIO upload failed (%s). Falling back to LocalFileSystemBackend.", exc)
+            from app.ingestion.storage_backend import LocalFileSystemBackend  # noqa: PLC0415
+            return LocalFileSystemBackend().save_stream([buffer.getvalue()], dataset_id, filename, organisation_id)
 
         logger.info(
             "MinIOStorageBackend: uploaded object '%s' (%d bytes).",

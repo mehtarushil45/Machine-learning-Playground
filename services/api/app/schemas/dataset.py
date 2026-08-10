@@ -7,6 +7,36 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class DatasetResponse(BaseModel):
+    """Schema representing an uploaded/registered Dataset."""
+
+    id: uuid.UUID
+    name: str
+    description: str | None = None
+    original_filename: str | None = None
+    file_size_bytes: int | None = None
+    row_count: int | None = None
+    column_count: int | None = None
+    status: str
+    organisation_id: uuid.UUID
+    user_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DatasetListResponse(BaseModel):
+    """Paginated list of datasets belonging to organisation/user."""
+
+    total: int = Field(..., description="Total count of matching datasets")
+    skip: int = Field(0, description="Offset index of returned page")
+    limit: int = Field(50, description="Maximum items requested per page")
+    datasets: list[DatasetResponse] = Field(default_factory=list, description="Page of dataset items")
+
+    model_config = {"from_attributes": True}
+
+
 class DatasetUploadResponse(BaseModel):
     """Structured response returned by POST /api/v1/datasets/upload."""
 
@@ -137,24 +167,7 @@ class DatasetRecommendationResponse(BaseModel):
 
 
 class DatasetUploadV2Response(BaseModel):
-    """Response returned immediately by POST /api/v1/datasets/upload/v2.
-
-    The endpoint returns HTTP 202 Accepted.  The caller should poll
-    ``poll_url`` (which resolves to the existing
-    ``GET /api/v1/jobs/{job_id}/progress`` endpoint) for live status.
-
-    Attributes:
-        job_id:      UUID of the ingestion job in the shared job store.
-        dataset_id:  UUID that will be used to reference this dataset in
-                     subsequent API calls (e.g. /profile, /health).
-        status:      Initial job status (always ``"QUEUED"`` on success).
-        filename:    Sanitised filename stored on disk.
-        size_bytes:  Total bytes written to storage.
-        version_id:  Schema version identifier (``None`` until the
-                     background pipeline completes schema fingerprinting).
-        message:     Human-readable status message.
-        poll_url:    Relative URL to poll for ingestion progress.
-    """
+    """Response returned immediately by POST /api/v1/datasets/upload/v2."""
 
     job_id: str
     dataset_id: str
@@ -174,15 +187,7 @@ class DatasetUploadV2Response(BaseModel):
 
 
 class ValidationIssueSchema(BaseModel):
-    """Serialised representation of a single ``ValidationIssue`` finding.
-
-    Attributes:
-        severity:    ``"info"`` | ``"warning"`` | ``"error"`` | ``"critical"``
-        category:    ``"schema"`` | ``"data_quality"`` | ``"ml_compatibility"``
-        message:     Human-readable description of the finding.
-        column_name: Affected column name, or ``None`` for dataset-level issues.
-        detail:      Optional extra context (counts, percentages, samples).
-    """
+    """Serialised representation of a single ``ValidationIssue`` finding."""
 
     severity: str
     category: str
@@ -192,30 +197,7 @@ class ValidationIssueSchema(BaseModel):
 
 
 class DatasetValidationReport(BaseModel):
-    """API-serialisable summary of a V4 data quality validation pass.
-
-    Carried inside ``JobResponse.metadata["validation_report"]`` and exposed
-    by the Dataset Catalog once Dataset persistence is implemented.
-
-    Attributes:
-        passed:              ``True`` when zero ``"error"`` / ``"critical"`` issues.
-                             A failing report is **advisory** — it never blocks
-                             ingestion.
-        validation_score:    Informational quality score (0–100).
-                             Foundation for: Dataset Trust Score, AutoML
-                             readiness, Dataset Governance, enterprise
-                             quality dashboards.
-        warnings:            Count of ``"warning"`` severity issues.
-        errors:              Count of ``"error"`` + ``"critical"`` issues combined.
-        ml_task_type:        Detected ML task type.
-        ml_confidence:       Confidence of the ML task detection (0.0–1.0).
-        ml_reasoning:        Human-readable explanation.
-        issues:              Full ordered list of all findings.
-        row_count:           Total dataset rows.
-        column_count:        Total dataset columns.
-        duplicate_row_count: Estimated duplicate row count.
-        missing_cell_pct:    Overall missing cell percentage.
-    """
+    """API-serialisable summary of a V4 data quality validation pass."""
 
     passed: bool
     validation_score: float = Field(

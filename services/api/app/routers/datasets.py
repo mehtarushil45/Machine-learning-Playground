@@ -31,24 +31,26 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.config import settings
-from app.dependencies import CurrentUser
-from app.ingestion.storage_backend import StorageError, get_configured_backend
-from app.schemas.common import MessageResponse
+from typing import Annotated
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies import CurrentUser, get_db
+from app.models.dataset import Dataset, DatasetStatus
 from app.schemas.dataset import (
     DatasetHealthResponse,
+    DatasetListResponse,
     DatasetProfileResponse,
     DatasetRecommendationResponse,
+    DatasetResponse,
     DatasetUploadResponse,
     DatasetUploadV2Response,
 )
+from app.ingestion.storage_backend import StorageError, get_configured_backend
 from app.services.health import health_service
 from app.services.ingestion_service import ingestion_service
 from app.services.profiler import TabularDataContainer, profiler_service
 from app.services.recommendation import recommendation_service
-
-router = APIRouter(prefix="/datasets", tags=["Datasets"])
-
-logger = logging.getLogger("apex_ingestion.router")
 
 
 def sanitize_filename(filename: str) -> str:
@@ -58,12 +60,134 @@ def sanitize_filename(filename: str) -> str:
     return cleaned or "dataset.csv"
 
 
-@router.get("", response_model=MessageResponse, summary="List datasets")
-async def list_datasets(current_user: CurrentUser) -> MessageResponse:
-    """List datasets registered in active organization session."""
-    org_id_str = str(current_user.organisation_id)
-    return MessageResponse(
-        message=f"Datasets listing endpoint for organisation '{org_id_str}'."
+router = APIRouter(prefix="/datasets", tags=["Datasets"])
+
+logger = logging.getLogger("apex_ingestion.router")
+
+
+@router.get("", response_model=DatasetListResponse, summary="List organization datasets (paginated)")
+async def list_datasets(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    skip: int = 0,
+    limit: int = 50,
+) -> DatasetListResponse:
+    """List datasets registered in active organization session, paginated and scoped to current user's organisation_id.
+
+    - **Pagination**: `skip` (offset) and `limit` (page size).
+    - **Multi-tenancy**: Strictly filtered by `current_user.organisation_id`.
+    """
+    skip_val = max(0, skip)
+    limit_val = max(1, min(100, limit))
+    org_id = current_user.organisation_id
+
+    if db is None:
+        return DatasetListResponse(total=0, skip=skip_val, limit=limit_val, datasets=[])
+
+    try:
+        # Total count query filtered by organisation_id
+        count_stmt = (
+            select(func.count())
+            .select_from(Dataset)
+            .where(Dataset.organisation_id == org_id)
+        )
+        total_res = await db.execute(count_stmt)
+        total_count = total_res.scalar_one_or_none() or 0
+
+        # Paginated items query
+        items_stmt = (
+            select(Dataset)
+            .where(Dataset.organisation_id == org_id)
+            .order_by(Dataset.created_at.desc())
+            .offset(skip_val)
+            .limit(limit_val)
+        )
+        res = await db.execute(items_stmt)
+        dataset_rows = res.scalars().all()
+
+        dataset_responses = [
+            DatasetResponse(
+                id=ds.id,
+                name=ds.name,
+                description=ds.description,
+                original_filename=ds.original_filename,
+                file_size_bytes=ds.file_size_bytes,
+                row_count=ds.row_count,
+                column_count=ds.column_count,
+                status=ds.status.value if hasattr(ds.status, "value") else str(ds.status),
+                organisation_id=ds.organisation_id,
+                user_id=ds.user_id,
+                created_at=ds.created_at,
+                updated_at=ds.updated_at,
+            )
+            for ds in dataset_rows
+        ]
+
+        return DatasetListResponse(
+            total=total_count,
+            skip=skip_val,
+            limit=limit_val,
+            datasets=dataset_responses,
+        )
+    except Exception as exc:
+        logger.warning("DB query failed in list_datasets: %s", exc)
+        return DatasetListResponse(total=0, skip=skip_val, limit=limit_val, datasets=[])
+
+
+@router.get(
+    "/{dataset_id}",
+    response_model=DatasetResponse,
+    summary="Get dataset metadata by ID",
+)
+async def get_dataset_by_id(
+    dataset_id: str,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DatasetResponse:
+    """Retrieve basic dataset metadata from PostgreSQL table, including status, row/column counts, file size, and created_at.
+
+    - **Security**: Strictly scoped to `current_user.organisation_id`. Returns 404 if dataset is not found or belongs to another organisation.
+    - **Error Handling**: 404 Not Found if dataset does not exist.
+    """
+    try:
+        ds_uuid = uuid.UUID(dataset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset with ID '{dataset_id}' not found.",
+        )
+
+    if db is not None:
+        try:
+            stmt = select(Dataset).where(
+                Dataset.id == ds_uuid,
+                Dataset.organisation_id == current_user.organisation_id,
+            )
+            res = await db.execute(stmt)
+            ds = res.scalar_one_or_none()
+            if ds is not None:
+                return DatasetResponse(
+                    id=ds.id,
+                    name=ds.name,
+                    description=ds.description,
+                    original_filename=ds.original_filename,
+                    file_size_bytes=ds.file_size_bytes,
+                    row_count=ds.row_count,
+                    column_count=ds.column_count,
+                    status=ds.status.value if hasattr(ds.status, "value") else str(ds.status),
+                    organisation_id=ds.organisation_id,
+                    user_id=ds.user_id,
+                    created_at=ds.created_at,
+                    updated_at=ds.updated_at,
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("Database query error in get_dataset_by_id: %s", exc)
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Dataset with ID '{dataset_id}' not found.",
     )
 
 

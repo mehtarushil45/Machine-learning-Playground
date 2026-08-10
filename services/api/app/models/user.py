@@ -40,6 +40,8 @@ class User(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(default=UserRole.member, nullable=False)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(default=False, nullable=False)
+    verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
 
     # ── Multi-tenancy foreign key ──────────────────────────────────────────────
     organisation_id: Mapped[uuid.UUID] = mapped_column(

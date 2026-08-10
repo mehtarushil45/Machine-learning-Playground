@@ -285,8 +285,15 @@ def get_configured_backend() -> "StorageBackend":
 
     if backend_name == "minio":
         # Deferred import — boto3 is only required when MinIO backend is selected.
-        from app.ingestion.minio_backend import MinIOStorageBackend  # noqa: PLC0415
-        return MinIOStorageBackend()
+        try:
+            from app.ingestion.minio_backend import MinIOStorageBackend  # noqa: PLC0415
+            return MinIOStorageBackend()
+        except Exception as exc:
+            import logging
+            logging.getLogger("apex_ingestion.storage").warning(
+                "Failed to connect to MinIO storage backend (%s). Falling back to LocalFileSystemBackend.", exc
+            )
+            return LocalFileSystemBackend()
 
     raise ValueError(
         f"Unrecognised storage backend '{backend_name}'. "

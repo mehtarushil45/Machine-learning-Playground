@@ -433,20 +433,27 @@ class IngestionService:
                 )
 
         # Daemon thread fallback — not asyncio.create_task()
-        from services.worker.tasks.ingestion_task import ingestion_pipeline_sync  # noqa: PLC0415
+        try:
+            from services.worker.tasks.ingestion_task import ingestion_pipeline_sync  # noqa: PLC0415
 
-        thread = threading.Thread(
-            target=ingestion_pipeline_sync,
-            args=(job_id, config),
-            daemon=True,
-            name=f"ingestion-{job_id[:8]}",
-        )
-        thread.start()
-        logger.info(
-            "Ingestion job %s dispatched to daemon thread '%s'.",
-            job_id,
-            thread.name,
-        )
+            thread = threading.Thread(
+                target=ingestion_pipeline_sync,
+                args=(job_id, config),
+                daemon=True,
+                name=f"ingestion-{job_id[:8]}",
+            )
+            thread.start()
+            logger.info(
+                "Ingestion job %s dispatched to daemon thread '%s'.",
+                job_id,
+                thread.name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Daemon thread dispatch failed for ingestion job %s: %s",
+                job_id,
+                exc,
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Authentication router — httpOnly cookie-based token delivery.
+"""Authentication router — httpOnly cookie-based token delivery and user registration.
 
 Cookie strategy
 ---------------
@@ -8,17 +8,13 @@ On login and refresh the server responds with two httpOnly cookies:
     refresh_token — long-lived  (default 7 days),  HttpOnly, SameSite=Lax
 
 The ``Authorization: Bearer`` header is no longer used for browser clients.
-The ``get_current_user`` dependency (and therefore ``oauth2_scheme``) reads the
-cookie automatically via the ``cookie_scheme`` defined in
-``app.auth.cookie_scheme``.
-
-Why keep the Authorization header path?
-  Non-browser clients (CLI tools, tests, mobile apps) still send
-  ``Authorization: Bearer`` tokens.  Both paths are supported; the cookie
-  wins if both are present.
+The ``get_current_user`` dependency reads the cookie automatically.
 
 Endpoints
 ---------
+POST /auth/register          — register a new user (rate limited, bcrypt, org scoping, verification flow)
+POST /auth/verify-email       — verify email via token payload
+GET  /auth/verify-email       — verify email via URL query token
 POST /auth/login             — set access_token + refresh_token cookies
 POST /auth/refresh           — rotate cookies; blacklist old refresh token
 POST /auth/logout            — clear cookies; blacklist access token
@@ -30,13 +26,14 @@ GET  /auth/me                — return current user info (cookie auth)
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Annotated
 
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.blacklist import (
@@ -50,12 +47,20 @@ from app.auth.jwt import (
     create_refresh_token,
     decode_refresh_token,
 )
-from app.auth.password import verify_password
+from app.auth.password import hash_password, verify_password
+from app.auth.rate_limiter import check_register_rate_limit
 from app.auth.oauth2 import oauth2_scheme
 from app.config import settings
 from app.dependencies import CurrentUser, get_db
-from app.models.user import User
-from app.schemas.auth import RefreshTokenRequest, TokenResponse
+from app.models.organisation import Organisation
+from app.models.user import User, UserRole
+from app.schemas.auth import (
+    RefreshTokenRequest,
+    TokenResponse,
+    UserRegisterRequest,
+    UserRegisterResponse,
+    VerifyEmailRequest,
+)
 from app.schemas.common import MessageResponse
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -112,6 +117,179 @@ def _clear_auth_cookies(response: Response) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Registration & Email Verification
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/register",
+    response_model=UserRegisterResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register new user account",
+    dependencies=[Depends(check_register_rate_limit)],
+)
+async def register_user(
+    body: UserRegisterRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserRegisterResponse:
+    """Register a new user account with email uniqueness validation, bcrypt password hashing, organisation scoping, and email verification.
+
+    Features:
+      - Rate Limiting: Rate limited per IP address to prevent abuse.
+      - Email Uniqueness: Checks if email is already registered (case-insensitive).
+      - Password Hashing: Hashes plain password using bcrypt.
+      - Organisation Scoping: Attaches user to target or default organisation.
+      - Verification Flow: Generates email verification token (user created with is_verified=False).
+    """
+    email_clean = body.email.strip().lower()
+
+    # 1. Email Uniqueness Validation
+    stmt = select(User).where(func.lower(User.email) == email_clean)
+    res = await db.execute(stmt)
+    existing_user = res.scalar_one_or_none()
+    if existing_user is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email is already registered.",
+        )
+
+    # 2. Organisation Scoping
+    target_org = None
+    if body.organisation_id is not None:
+        stmt_org = select(Organisation).where(Organisation.id == body.organisation_id)
+        res_org = await db.execute(stmt_org)
+        target_org = res_org.scalar_one_or_none()
+        if target_org is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Organisation with ID '{body.organisation_id}' not found.",
+            )
+    elif body.organisation_name:
+        org_name = body.organisation_name.strip()
+        slug = re.sub(r"[^\w\s-]", "", org_name).strip().lower().replace(" ", "-") or "org-" + uuid.uuid4().hex[:6]
+        stmt_org = select(Organisation).where(Organisation.slug == slug)
+        res_org = await db.execute(stmt_org)
+        target_org = res_org.scalar_one_or_none()
+        if target_org is None:
+            target_org = Organisation(id=uuid.uuid4(), name=org_name, slug=slug, is_active=True)
+            db.add(target_org)
+            await db.flush()
+
+    if target_org is None:
+        # Default Organisation fallback
+        stmt_org = select(Organisation).limit(1)
+        res_org = await db.execute(stmt_org)
+        target_org = res_org.scalar_one_or_none()
+        if target_org is None:
+            target_org = Organisation(
+                id=uuid.uuid4(),
+                name="Default Organisation",
+                slug="default-org",
+                is_active=True,
+            )
+            db.add(target_org)
+            await db.flush()
+
+    # 3. Bcrypt Password Hashing & Verification Token
+    hashed_pwd = hash_password(body.password)
+    verification_token = uuid.uuid4().hex
+
+    new_user = User(
+        id=uuid.uuid4(),
+        email=email_clean,
+        hashed_password=hashed_pwd,
+        full_name=body.full_name,
+        role=UserRole.member,
+        is_active=True,
+        is_verified=False,
+        verification_token=verification_token,
+        organisation_id=target_org.id,
+    )
+
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    return UserRegisterResponse(
+        user_id=new_user.id,
+        email=new_user.email,
+        full_name=new_user.full_name,
+        organisation_id=new_user.organisation_id,
+        role=new_user.role.value if isinstance(new_user.role, UserRole) else str(new_user.role),
+        is_verified=new_user.is_verified,
+        verification_token=verification_token,
+        message="Registration successful. Please check your email to verify your account.",
+    )
+
+
+@router.post(
+    "/verify-email",
+    response_model=MessageResponse,
+    summary="Verify user email address using verification token payload",
+)
+async def verify_email(
+    body: VerifyEmailRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    """Confirm user registration email address via token payload."""
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token is required.",
+        )
+
+    stmt = select(User).where(User.verification_token == token)
+    res = await db.execute(stmt)
+    user = res.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token.",
+        )
+
+    user.is_verified = True
+    user.verification_token = None
+    await db.commit()
+
+    return MessageResponse(message="Email verified successfully. You can now log in.")
+
+
+@router.get(
+    "/verify-email",
+    response_model=MessageResponse,
+    summary="Verify user email address via URL query token",
+)
+async def verify_email_query(
+    token: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    """Confirm user registration email address via URL query token."""
+    token_clean = token.strip()
+    if not token_clean:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token is required.",
+        )
+
+    stmt = select(User).where(User.verification_token == token_clean)
+    res = await db.execute(stmt)
+    user = res.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token.",
+        )
+
+    user.is_verified = True
+    user.verification_token = None
+    await db.commit()
+
+    return MessageResponse(message="Email verified successfully. You can now log in.")
+
+
+# ---------------------------------------------------------------------------
 # Login
 # ---------------------------------------------------------------------------
 
@@ -134,7 +312,7 @@ async def login(
     The response body also includes the token values for non-browser clients.
     """
     result = await db.execute(
-        select(User).where(User.email == form_data.username, User.is_active == True)  # noqa: E712
+        select(User).where(User.email == form_data.username.strip().lower(), User.is_active == True)  # noqa: E712
     )
     user = result.scalar_one_or_none()
 
@@ -172,19 +350,10 @@ async def login(
 async def refresh_token_endpoint(
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
-    # Cookie read (browser path)
     refresh_token_cookie: Annotated[str | None, Cookie(alias="refresh_token")] = None,
-    # Body fallback (non-browser / CLI clients)
     body: RefreshTokenRequest | None = None,
 ) -> TokenResponse:
-    """Rotate the refresh token and issue a new cookie pair.
-
-    Token sources (in priority order):
-      1. ``refresh_token`` httpOnly cookie (browser)
-      2. ``body.refresh_token`` JSON body (non-browser clients)
-
-    The consumed refresh token is blacklisted.  A new cookie pair is issued.
-    """
+    """Rotate the refresh token and issue a new cookie pair."""
     raw_refresh = refresh_token_cookie or (body.refresh_token if body else None)
     if not raw_refresh:
         raise HTTPException(
@@ -209,7 +378,6 @@ async def refresh_token_endpoint(
     if user is None:
         raise credentials_exception
 
-    # Per-user version check (bulk revocation)
     token_ver_in_token: int = payload.get("ver", 0)
     current_ver = await get_user_token_version(str(user_id))
     if token_ver_in_token < current_ver:
@@ -218,10 +386,8 @@ async def refresh_token_endpoint(
             detail="Refresh token has been revoked (session invalidated)",
         )
 
-    # Blacklist the consumed refresh token (token rotation)
     await blacklist_token(raw_refresh)
 
-    # Issue a new pair
     new_ver = await get_user_token_version(str(user.id))
     new_access = create_access_token(user.id, user.organisation_id, token_version=new_ver)
     new_refresh = create_refresh_token(user.id, user.organisation_id, token_version=new_ver)
@@ -244,13 +410,7 @@ async def logout(
     request: Request,
     current_user: CurrentUser,
 ) -> MessageResponse:
-    """Blacklist the current access token and clear both auth cookies.
-
-    The access token is read from:
-      1. The ``access_token`` cookie (browser)
-      2. The ``Authorization: Bearer`` header (non-browser fallback)
-    """
-    # Resolve the raw token from cookie or Authorization header
+    """Blacklist the current access token and clear both auth cookies."""
     raw_token: str | None = request.cookies.get("access_token")
     if not raw_token:
         auth_header = request.headers.get("Authorization", "")
@@ -295,11 +455,7 @@ async def logout_all_sessions(
     summary="Return current authenticated user info",
 )
 async def me(current_user: CurrentUser) -> dict:
-    """Return basic profile info for the currently authenticated user.
-
-    Primarily used by the frontend to hydrate the auth context after a
-    page reload (the cookie is sent automatically; no token parsing in JS).
-    """
+    """Return basic profile info for the currently authenticated user."""
     return {
         "id": str(current_user.id),
         "email": current_user.email,
@@ -307,6 +463,7 @@ async def me(current_user: CurrentUser) -> dict:
         "role": current_user.role,
         "organisation_id": str(current_user.organisation_id),
         "is_active": current_user.is_active,
+        "is_verified": getattr(current_user, "is_verified", True),
     }
 
 
