@@ -1,6 +1,7 @@
-import { memo, useState } from 'react'
+import { memo, useState, useEffect } from 'react'
 import type { Dataset, DatasetRecommendations } from '../../types/dataset'
 import type { TrainingRequestPayload } from '../../types/job'
+import { fetchSupportedAlgorithms } from '../../services/jobService'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
@@ -35,17 +36,37 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
   const [featureSelection, setFeatureSelection] = useState<string>('all')
   const [notes, setNotes] = useState<string>('')
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [remoteAlgorithms, setRemoteAlgorithms] = useState<string[]>([])
+
+  useEffect(() => {
+    fetchSupportedAlgorithms().then((res) => {
+      if (res && (res.classification?.length || res.regression?.length)) {
+        const combined = Array.from(
+          new Set([...(res.classification || []), ...(res.regression || [])])
+        )
+        setRemoteAlgorithms(combined)
+      }
+    }).catch(() => {})
+  }, [])
 
   const availableAlgorithms = recommendations?.recommended_models.length
     ? recommendations.recommended_models
+    : remoteAlgorithms.length
+    ? remoteAlgorithms
     : [
-        'Random Forest Classifier',
-        'XGBoost Classifier',
         'Logistic Regression',
+        'Random Forest Classifier',
         'Gradient Boosting Classifier',
+        'XGBoost Classifier',
+        'LightGBM Classifier',
+        'Ridge Classifier',
+        'Linear Regression',
         'Random Forest Regressor',
+        'Gradient Boosting Regressor',
         'XGBoost Regressor',
-        'Ridge / Lasso Regression',
+        'LightGBM Regressor',
+        'Ridge',
+        'Lasso',
       ]
 
   const handleLaunch = async () => {

@@ -22,14 +22,6 @@ from typing import List
 
 import pandas as pd
 
-# ---------------------------------------------------------------------------
-# Ensure repo root is on sys.path so services.worker can be imported when the
-# server is started from services/api/ (CWD = services/api/).
-# ---------------------------------------------------------------------------
-_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
-
 # Reuse the existing file-system helper — single source of truth.
 from services.worker.core.dataset_loader import find_dataset_path  # noqa: E402
 

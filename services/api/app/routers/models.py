@@ -64,9 +64,17 @@ from app.ml.model_governance import (
     deprecate_governance,
 )
 
+from app.ml.model_factory import list_supported_algorithms
+
 logger = logging.getLogger("apex_ml.router.models")
 
 router = APIRouter(prefix="/models", tags=["Models"])
+
+
+@router.get("/algorithms", summary="List supported ML algorithms grouped by task")
+def get_supported_algorithms() -> Dict[str, List[str]]:
+    """Return dictionary of supported classification and regression algorithms."""
+    return list_supported_algorithms()
 
 
 # ---------------------------------------------------------------------------

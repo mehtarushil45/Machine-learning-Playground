@@ -15,10 +15,10 @@ WORKDIR /app
 COPY services/api/requirements.txt services/api/requirements.txt
 RUN pip install --no-cache-dir -r services/api/requirements.txt
 
-# ── Application code ─────────────────────────────────────────────────────────
+# ── Application code & editable monorepo package install ───────────────────
 COPY . .
+RUN pip install --no-cache-dir --no-build-isolation -e .
 
-ENV PYTHONPATH=/app/services/api
 WORKDIR /app/services/api
 
 

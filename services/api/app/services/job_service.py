@@ -184,6 +184,10 @@ def update_job_state(
 class JobService:
     """Enterprise ML Job Orchestration & Service Layer using SQLAlchemy Async Sessions."""
 
+    def __init__(self, runner: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None) -> None:
+        """Initialize JobService with optional runner callable for dependency injection."""
+        self._runner = runner
+
     # ------------------------------------------------------------------
     # Create
     # ------------------------------------------------------------------
@@ -214,13 +218,14 @@ class JobService:
             "target_column": request.target_column,
             "feature_columns": request.feature_columns,
             "algorithm": request.algorithm,
-            "train_test_split": request.train_test_split,
-            "random_seed": request.random_seed,
-            "cross_validation": request.cross_validation,
-            "normalization": request.normalization,
-            "feature_selection": request.feature_selection,
-            "class_weight": request.class_weight,
-            "notes": request.notes,
+            "train_test_split": getattr(request, "train_test_split", 0.8),
+            "random_seed": getattr(request, "random_seed", 42),
+            "cross_validation": getattr(request, "cross_validation", 5),
+            "normalization": getattr(request, "normalization", True),
+            "feature_selection": getattr(request, "feature_selection", "all"),
+            "class_weight": getattr(request, "class_weight", "balanced"),
+            "notes": getattr(request, "notes", ""),
+            "created_at": now.isoformat(),
         }
 
         job_resp = JobResponse(
@@ -243,38 +248,30 @@ class JobService:
             owner_id=user_id,
             metadata=config,
         )
-
         _JOBS_STORE[job_id] = job_resp
 
         if db is not None:
-            user_uuid = None
             try:
-                user_uuid = uuid.UUID(user_id)
-            except ValueError:
-                pass
+                dataset_uuid = None
+                if request.dataset_id:
+                    try:
+                        dataset_uuid = uuid.UUID(request.dataset_id)
+                    except ValueError:
+                        dataset_uuid = None
 
-            try:
                 db_job = Job(
                     id=job_uuid,
-                    dataset_id=request.dataset_id,
+                    user_id=user_uuid,
+                    owner_id=user_id,
+                    dataset_id=dataset_uuid,
                     status=JobStatusEnum.QUEUED.value,
-                    created_at=now,
-                    updated_at=now,
-                    started_at=now,
                     job_type="training",
                     algorithm=request.algorithm,
                     target_column=request.target_column,
                     feature_columns=request.feature_columns,
-                    progress=0.0,
-                    current_stage="Queued in orchestration queue",
-                    message=f"Training job initialized for dataset '{request.dataset_id}'.",
-                    estimated_seconds=10.0,
-                    worker_id=job_resp.worker_id,
-                    retry_count=0,
-                    owner_id=user_id,
                     job_metadata=config,
-                    user_id=user_uuid,
-                    is_deleted=False,
+                    created_at=now,
+                    updated_at=now,
                 )
                 db.add(db_job)
                 await db.commit()
@@ -295,14 +292,14 @@ class JobService:
     # ------------------------------------------------------------------
 
     async def _dispatch_job_execution(self, job_id: str, config: Dict[str, Any]) -> None:
-        """Dispatch to Celery worker (if Redis is live) or async ML engine."""
+        """Dispatch to injected runner, Celery worker (if Redis is live), or lazy-imported async ML engine."""
+        if self._runner is not None:
+            asyncio.create_task(self._runner(job_id, config))
+            logger.info("Dispatched job %s to injected runner.", job_id)
+            return
+
         if is_redis_available():
             try:
-                _repo_root = os.path.abspath(
-                    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
-                )
-                if _repo_root not in sys.path:
-                    sys.path.insert(0, _repo_root)
                 from services.worker.tasks.training_task import execute_ml_training_job
 
                 execute_ml_training_job.delay(job_id, config)
@@ -311,6 +308,7 @@ class JobService:
             except Exception as exc:
                 logger.warning("Celery dispatch failed: %s. Falling back to async engine.", exc)
 
+        # LAZY IMPORT: Deferred inside function body to eliminate top-level circular import with engine.py
         from app.ml.engine import execute_ml_training_pipeline_async
 
         asyncio.create_task(execute_ml_training_pipeline_async(job_id, config))

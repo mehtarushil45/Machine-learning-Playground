@@ -50,20 +50,31 @@ def _cast_to_object(X: np.ndarray) -> np.ndarray:
     return np.array(X, dtype=object)
 
 
-def _to_unix_timestamp(X: np.ndarray) -> np.ndarray:
-    """Convert a 2-D object array of datetime strings to float Unix timestamps.
+def _to_unix_timestamp(X: np.ndarray | pd.DataFrame) -> np.ndarray:
+    """Convert a 2-D array / DataFrame of datetime strings to float Unix timestamps using vectorized pandas operations.
 
-    Rows that cannot be parsed are filled with 0.0.
+    Handles edge cases gracefully:
+    - None, NaN, pd.NA, empty strings, and invalid datetime strings are coerced to NaT and assigned 0.0.
+    - Preserves 2-D shape and returns float64 Unix timestamps.
     """
-    result = np.zeros(X.shape, dtype=np.float64)
-    for col_idx in range(X.shape[1]):
-        for row_idx in range(X.shape[0]):
-            try:
-                ts = pd.Timestamp(X[row_idx, col_idx])
-                result[row_idx, col_idx] = ts.timestamp()
-            except Exception:
-                result[row_idx, col_idx] = 0.0
-    return result
+    if not isinstance(X, pd.DataFrame):
+        df = pd.DataFrame(X)
+    else:
+        df = X.copy()
+
+    if df.empty or df.shape[1] == 0:
+        return np.empty((df.shape[0], df.shape[1]), dtype=np.float64)
+
+    cols = []
+    for col in df.columns:
+        dt_series = pd.to_datetime(df[col], errors="coerce", utc=True)
+        # Convert to seconds resolution datetime64[s, UTC] then int64 for exact Unix seconds
+        ts_sec = dt_series.astype("datetime64[s, UTC]").astype("int64").astype(np.float64)
+        # Coerced NaT values become negative int64 min value after cast; replace with 0.0
+        ts_sec = ts_sec.where(dt_series.notna(), 0.0)
+        cols.append(ts_sec.to_numpy(dtype=np.float64))
+
+    return np.column_stack(cols)
 
 
 def _bool_to_int(X: np.ndarray) -> np.ndarray:

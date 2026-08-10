@@ -50,7 +50,11 @@ class Job(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     status: Mapped[str] = mapped_column(String(64), default=JobStatusEnum.PENDING.value, nullable=False)
 
     # ── Job Configuration & Details ──────────────────────────────────────────
-    dataset_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("datasets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     algorithm: Mapped[str | None] = mapped_column(String(255), nullable=True)
     target_column: Mapped[str | None] = mapped_column(String(255), nullable=True)
     feature_columns: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
@@ -95,6 +99,7 @@ class Job(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     # ── Relationships ─────────────────────────────────────────────────────────
     organisation: Mapped["Organisation"] = relationship(back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
     created_by: Mapped["User"] = relationship(back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
+    dataset: Mapped["Dataset | None"] = relationship("Dataset", back_populates="jobs")  # type: ignore[name-defined]  # noqa: F821
 
     def __repr__(self) -> str:
         return f"<Job id={self.id} algorithm={self.algorithm} status={self.status} progress={self.progress}%>"

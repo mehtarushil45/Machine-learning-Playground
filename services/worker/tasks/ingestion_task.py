@@ -41,16 +41,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# sys.path bootstrap (identical pattern to training_task.py)
-# ---------------------------------------------------------------------------
-
-_repo_root = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
-)
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
-
-# ---------------------------------------------------------------------------
 # Cross-package imports  (deferred inside functions where needed to avoid
 # circular references at Celery worker startup time)
 # ---------------------------------------------------------------------------

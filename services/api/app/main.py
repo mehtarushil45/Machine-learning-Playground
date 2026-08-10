@@ -105,3 +105,10 @@ app.include_router(explainability_v7b.router, prefix=API_V1_PREFIX)  # Ethics & 
 app.include_router(portfolios_v7b.router, prefix=API_V1_PREFIX)      # Portfolio+
 app.include_router(classrooms_v7b.router, prefix=API_V1_PREFIX)      # Classroom Analytics
 app.include_router(workflow.router, prefix=API_V1_PREFIX)             # E2E Workflow
+
+
+@app.get(f"{API_V1_PREFIX}/algorithms", tags=["Algorithms"])
+async def get_algorithms():
+    """Return dictionary of supported classification and regression algorithms."""
+    from app.ml.model_factory import list_supported_algorithms
+    return list_supported_algorithms()

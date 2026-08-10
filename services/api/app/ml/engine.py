@@ -62,13 +62,6 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
-# ---------------------------------------------------------------------------
-# sys.path bootstrap
-# ---------------------------------------------------------------------------
-_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
-
 # Sprint 3 modules
 from app.ml.dataset_loader import DatasetContext, DatasetValidationError, load_dataset_context
 from app.ml.model_factory import create_model
@@ -122,6 +115,7 @@ def update_job_state(
     Silently no-ops if the job has been cancelled or does not exist.
     """
     try:
+        # LAZY IMPORT: Deferred inside function body to eliminate top-level circular import with job_service.py
         from app.services.job_service import _JOBS_STORE  # noqa: PLC0415
 
         if job_id not in _JOBS_STORE:

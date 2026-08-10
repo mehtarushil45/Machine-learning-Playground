@@ -45,7 +45,7 @@ async def create_training_job(
 ) -> JobResponse:
     """Validate training configuration and queue a new Machine Learning job.
 
-    The calling user's ID is stamped as ``owner_id`` on the created job in PostgreSQL.
+    The calling user's ID is stamped as owner_id on the created job in PostgreSQL.
     Only the owner can later cancel, retry, or delete the job.
     """
     return await job_service.create_job(request, user_id=str(current_user.id), db=db)
@@ -64,8 +64,7 @@ async def list_jobs(
 ) -> JobListResponse:
     """List training jobs owned by the authenticated user from PostgreSQL (newest first).
 
-    Results are scoped to ``current_user.id`` — users cannot see each
-    other's jobs through this endpoint.
+    Results are scoped to current_user.id. Users cannot see jobs of other users.
     """
     return await job_service.list_jobs(
         user_id=str(current_user.id),
@@ -104,7 +103,7 @@ async def get_job_progress(
 ) -> JobProgressResponse:
     """Return live execution stage and percentage progress for a running Job ID.
 
-    Ownership is enforced — only the job owner can poll progress.
+    Ownership is enforced -- only the job owner can poll progress.
     """
     return await job_service.get_job_progress(job_id, user_id=str(current_user.id), db=db)
 

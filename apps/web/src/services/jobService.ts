@@ -13,6 +13,38 @@ import type {
 import { apiClient, AuthExpiredError } from './apiClient'
 export { AuthExpiredError }
 
+export interface SupportedAlgorithms {
+  classification: string[]
+  regression: string[]
+}
+
+export async function fetchSupportedAlgorithms(): Promise<SupportedAlgorithms> {
+  try {
+    return await apiClient.get<SupportedAlgorithms>('/algorithms')
+  } catch (err) {
+    if (err instanceof AuthExpiredError) throw err
+    return {
+      classification: [
+        'Logistic Regression',
+        'Random Forest Classifier',
+        'Gradient Boosting Classifier',
+        'XGBoost Classifier',
+        'LightGBM Classifier',
+        'Ridge Classifier',
+      ],
+      regression: [
+        'Linear Regression',
+        'Random Forest Regressor',
+        'Gradient Boosting Regressor',
+        'XGBoost Regressor',
+        'LightGBM Regressor',
+        'Ridge',
+        'Lasso',
+      ],
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Job API functions
 // ---------------------------------------------------------------------------

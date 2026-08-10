@@ -4,7 +4,29 @@ import enum
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+ALLOWED_ALGORITHMS = {
+    "logistic regression",
+    "random forest classifier",
+    "random forest",
+    "gradient boosting classifier",
+    "gradient boosting",
+    "xgboost classifier",
+    "xgboost",
+    "lightgbm classifier",
+    "lightgbm",
+    "ridge classifier",
+    "ridge",
+    "linear regression",
+    "random forest regressor",
+    "gradient boosting regressor",
+    "xgboost regressor",
+    "lightgbm regressor",
+    "ridge regressor",
+    "lasso",
+    "lasso regressor",
+}
 
 
 class JobStatusEnum(str, enum.Enum):
@@ -39,6 +61,13 @@ class TrainingRequest(BaseModel):
     class_weight: str | None = Field("balanced", description="Class weighting mode")
     notes: str | None = Field("", description="Optional user notes")
 
+    @field_validator("algorithm")
+    @classmethod
+    def validate_algorithm(cls, algo: str) -> str:
+        if not algo or algo.strip().lower() not in ALLOWED_ALGORITHMS:
+            raise ValueError(f"Algorithm '{algo}' is not in the allowed algorithms list.")
+        return algo
+
     @field_validator("feature_columns")
     @classmethod
     def validate_features(cls, features: list[str]) -> list[str]:
@@ -54,6 +83,14 @@ class TrainingRequest(BaseModel):
         if split < 0.5 or split > 0.95:
             raise ValueError("Train/Test split ratio must be between 0.50 and 0.95.")
         return split
+
+    @model_validator(mode="after")
+    def validate_target_not_in_features(self) -> "TrainingRequest":
+        if self.target_column in self.feature_columns:
+            raise ValueError(
+                f"Target column '{self.target_column}' cannot be included inside feature columns."
+            )
+        return self
 
     def model_post_init(self, __context: Any) -> None:
         if self.target_column in self.feature_columns:
