@@ -6,20 +6,14 @@ import type {
   FeatureRecommendation,
 } from '../types/dataset'
 
+import { apiClient } from './apiClient'
+
 export async function fetchDatasetRecommendations(
   datasetId: string,
   signal?: AbortSignal,
 ): Promise<DatasetRecommendations | null> {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  const RECS_URL = `${API_BASE_URL}/api/v1/datasets/${datasetId}/recommendations`
-
   try {
-    const res = await fetch(RECS_URL, { signal })
-    if (!res.ok) {
-      return null
-    }
-    const data: DatasetRecommendations = await res.json()
-    return data
+    return await apiClient.get<DatasetRecommendations>(`/datasets/${datasetId}/recommendations`, { signal })
   } catch {
     return null
   }

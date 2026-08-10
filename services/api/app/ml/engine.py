@@ -670,6 +670,10 @@ async def execute_ml_training_pipeline_async(
         )
     except Exception as exc:
         logger.error("Async training error for job %s: %s", job_id, exc)
+        _fail_job(job_id, str(exc))
+        raise RuntimeError(
+            f"Async ML training pipeline failed for job '{job_id}': {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

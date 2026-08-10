@@ -1,16 +1,10 @@
 import type { Dataset, DatasetProfile, ColumnProfile } from '../types/dataset'
 
-export async function fetchDatasetProfile(datasetId: string, signal?: AbortSignal): Promise<DatasetProfile | null> {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  const PROFILE_URL = `${API_BASE_URL}/api/v1/datasets/${datasetId}/profile`
+import { apiClient } from './apiClient'
 
+export async function fetchDatasetProfile(datasetId: string, signal?: AbortSignal): Promise<DatasetProfile | null> {
   try {
-    const res = await fetch(PROFILE_URL, { signal })
-    if (!res.ok) {
-      return null
-    }
-    const data: DatasetProfile = await res.json()
-    return data
+    return await apiClient.get<DatasetProfile>(`/datasets/${datasetId}/profile`, { signal })
   } catch {
     return null
   }

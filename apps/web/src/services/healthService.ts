@@ -1,19 +1,13 @@
 import type { DatasetProfile, DatasetHealthReport, HealthIssue } from '../types/dataset'
 
+import { apiClient } from './apiClient'
+
 export async function fetchDatasetHealth(
   datasetId: string,
   signal?: AbortSignal,
 ): Promise<DatasetHealthReport | null> {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-  const HEALTH_URL = `${API_BASE_URL}/api/v1/datasets/${datasetId}/health`
-
   try {
-    const res = await fetch(HEALTH_URL, { signal })
-    if (!res.ok) {
-      return null
-    }
-    const data: DatasetHealthReport = await res.json()
-    return data
+    return await apiClient.get<DatasetHealthReport>(`/datasets/${datasetId}/health`, { signal })
   } catch {
     return null
   }

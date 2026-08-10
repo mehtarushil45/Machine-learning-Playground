@@ -13,63 +13,11 @@
  *   - Learner Portfolios & Cryptographic QR Certificate Verification
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
-
-/**
- * Core HTTP request helper — cookie-based auth edition.
- *
- * Key changes from the localStorage version:
- *   - `credentials: 'include'` sends httpOnly cookies automatically.
- *   - No `localStorage.getItem('token')` — the browser handles the cookie.
- *   - No `Authorization` header injection for standard requests.
- *   - HTTP 401 is re-thrown with a special `AuthExpiredError` type so the
- *     UI layer can react (e.g. redirect to login, clear user state).
- *
- * Non-browser callers (CLI, tests) should set `Authorization: Bearer <token>`
- * directly in the options.headers — it still works alongside the cookie.
- */
-
-/** Thrown when the server returns 401 — session expired or not logged in. */
-export class AuthExpiredError extends Error {
-  readonly status = 401
-  constructor(detail: string) {
-    super(detail)
-    this.name = 'AuthExpiredError'
-  }
-}
+import { apiClient, AuthExpiredError, ApiError, ApiTimeoutError } from './apiClient'
+export { apiClient, AuthExpiredError, ApiError, ApiTimeoutError }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
-  };
-
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-    credentials: 'include',   // ← send & receive httpOnly cookies on every call
-  });
-
-  if (response.status === 401) {
-    // Session expired or not authenticated — surface as a typed error
-    let detail = 'Session expired. Please log in again.';
-    try {
-      const errJson = await response.json();
-      detail = errJson.detail ?? detail;
-    } catch (_) {}
-    throw new AuthExpiredError(detail);
-  }
-
-  if (!response.ok) {
-    let errorDetail = response.statusText;
-    try {
-      const errJson = await response.json();
-      errorDetail = errJson.detail || JSON.stringify(errJson);
-    } catch (_) {}
-    throw new Error(`API Error [${response.status}]: ${errorDetail}`);
-  }
-
-  return response.json();
+  return apiClient.request<T>(endpoint, options)
 }
 
 // ---------------------------------------------------------------------------

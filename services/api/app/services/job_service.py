@@ -287,14 +287,14 @@ class JobService:
             except Exception as db_exc:
                 logger.warning("DB insert failed (using in-memory store): %s", db_exc)
 
-        self._dispatch_job_execution(job_id, config)
+        await self._dispatch_job_execution(job_id, config)
         return job_resp
 
     # ------------------------------------------------------------------
     # Internal dispatch
     # ------------------------------------------------------------------
 
-    def _dispatch_job_execution(self, job_id: str, config: Dict[str, Any]) -> None:
+    async def _dispatch_job_execution(self, job_id: str, config: Dict[str, Any]) -> None:
         """Dispatch to Celery worker (if Redis is live) or async ML engine."""
         if is_redis_available():
             try:
@@ -598,7 +598,7 @@ class JobService:
             job_id, new_job_id, user_id, new_retry_count,
         )
 
-        self._dispatch_job_execution(new_job_id, config)
+        await self._dispatch_job_execution(new_job_id, config)
 
         return JobRetryResponse(
             original_job_id=job_id,
