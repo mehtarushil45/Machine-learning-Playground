@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useAuthContext, getInitials } from './providers/AuthContext';
+
 import {
   Database,
   Code2,
@@ -34,6 +36,11 @@ export interface ToastMessage {
 
 function AppContent() {
   const latestModel = useLatestModel();
+  const { user, isAuthenticated } = useAuthContext();
+  const headerInitials = isAuthenticated
+    ? getInitials(user?.full_name, user?.email)
+    : 'ML';
+
   const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -219,10 +226,14 @@ function AppContent() {
             {/* Real-Time Notification Bell Dropdown */}
             <NotificationBell />
 
-            {/* User Avatar Pill */}
-            <div className="w-7 h-7 rounded-full bg-[#101E36] border border-[#7B5CF5] flex items-center justify-center text-white text-xs font-bold">
-              MR
+            {/* User Avatar Pill — dynamic initials from AuthContext */}
+            <div
+              className="w-7 h-7 rounded-full bg-[#101E36] border border-[#7B5CF5] flex items-center justify-center text-white text-xs font-bold"
+              title={user?.full_name || user?.email || 'User'}
+            >
+              {headerInitials}
             </div>
+
           </div>
         </header>
 

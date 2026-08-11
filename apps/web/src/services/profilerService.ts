@@ -171,7 +171,7 @@ export function computeClientProfile(dataset: Dataset): DatasetProfile {
   }
 }
 
-function isDateColumn(vals: unknown[]): boolean {
+export function isDateColumn(vals: unknown[]): boolean {
   if (vals.length === 0) return false
   const dateRegex = /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/
   return vals.every((v) => typeof v === 'string' && dateRegex.test(v.trim()))
