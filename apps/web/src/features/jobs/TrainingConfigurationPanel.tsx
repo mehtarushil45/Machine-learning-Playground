@@ -1,7 +1,7 @@
 import { memo, useState, useEffect } from 'react'
 import type { Dataset, DatasetRecommendations } from '../../types/dataset'
 import type { TrainingRequestPayload } from '../../types/job'
-import { fetchSupportedAlgorithms } from '../../services/jobService'
+import { fetchSupportedAlgorithms, type SupportedAlgorithms } from '../../services/jobService'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
@@ -36,38 +36,38 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
   const [featureSelection, setFeatureSelection] = useState<string>('all')
   const [notes, setNotes] = useState<string>('')
   const [validationError, setValidationError] = useState<string | null>(null)
-  const [remoteAlgorithms, setRemoteAlgorithms] = useState<string[]>([])
+  const [supportedAlgos, setSupportedAlgos] = useState<SupportedAlgorithms>({
+    classification: [
+      'Logistic Regression',
+      'Random Forest Classifier',
+      'Gradient Boosting Classifier',
+      'XGBoost Classifier',
+      'LightGBM Classifier',
+      'Ridge Classifier',
+    ],
+    regression: [
+      'Linear Regression',
+      'Random Forest Regressor',
+      'Gradient Boosting Regressor',
+      'XGBoost Regressor',
+      'LightGBM Regressor',
+      'Ridge',
+      'Lasso',
+    ],
+  })
 
   useEffect(() => {
-    fetchSupportedAlgorithms().then((res) => {
-      if (res && (res.classification?.length || res.regression?.length)) {
-        const combined = Array.from(
-          new Set([...(res.classification || []), ...(res.regression || [])])
-        )
-        setRemoteAlgorithms(combined)
-      }
-    }).catch(() => {})
+    fetchSupportedAlgorithms()
+      .then((data) => {
+        if (data && (data.classification?.length || data.regression?.length)) {
+          setSupportedAlgos({
+            classification: data.classification || [],
+            regression: data.regression || [],
+          })
+        }
+      })
+      .catch(() => {})
   }, [])
-
-  const availableAlgorithms = recommendations?.recommended_models.length
-    ? recommendations.recommended_models
-    : remoteAlgorithms.length
-    ? remoteAlgorithms
-    : [
-        'Logistic Regression',
-        'Random Forest Classifier',
-        'Gradient Boosting Classifier',
-        'XGBoost Classifier',
-        'LightGBM Classifier',
-        'Ridge Classifier',
-        'Linear Regression',
-        'Random Forest Regressor',
-        'Gradient Boosting Regressor',
-        'XGBoost Regressor',
-        'LightGBM Regressor',
-        'Ridge',
-        'Lasso',
-      ]
 
   const handleLaunch = async () => {
     setValidationError(null)
@@ -160,11 +160,31 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
                 onChange={(e) => setAlgorithm(e.target.value)}
                 className="w-full p-2.5 rounded-lg border border-border bg-card text-foreground text-xs font-medium focus:ring-2 focus:ring-primary focus:outline-none"
               >
-                {availableAlgorithms.map((algo) => (
-                  <option key={algo} value={algo}>
-                    {algo}
-                  </option>
-                ))}
+                {recommendations?.recommended_models && recommendations.recommended_models.length > 0 ? (
+                  <optgroup label="Recommended Models">
+                    {recommendations.recommended_models.map((algo) => (
+                      <option key={algo} value={algo}>
+                        {algo}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+
+                <optgroup label="Classification Algorithms">
+                  {supportedAlgos.classification.map((algo) => (
+                    <option key={algo} value={algo}>
+                      {algo}
+                    </option>
+                  ))}
+                </optgroup>
+
+                <optgroup label="Regression Algorithms">
+                  {supportedAlgos.regression.map((algo) => (
+                    <option key={algo} value={algo}>
+                      {algo}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 

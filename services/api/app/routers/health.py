@@ -1,13 +1,14 @@
 """Health-check router.
 
 GET /health       — Liveness probe (200 while process is running).
-GET /health/ready — Readiness probe (database 100ms ping, Redis ping, upload directory write test).
+GET /health/ready — Readiness probe (PostgreSQL SELECT 1, Redis ping, disk space, upload storage test).
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import time
 import uuid
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ router = APIRouter(tags=["Health"])
 
 
 async def _check_database_ping(db: AsyncSession | None) -> ReadinessDependencyStatus:
-    """Perform a database ping query with a 100ms strict timeout."""
+    """Perform PostgreSQL connectivity check with a SELECT 1 query and 100ms timeout."""
     start_time = time.perf_counter()
     try:
         if db is not None:
@@ -51,7 +52,7 @@ async def _check_database_ping(db: AsyncSession | None) -> ReadinessDependencySt
 
 
 async def _check_redis_ping() -> ReadinessDependencyStatus:
-    """Perform a Redis ping test."""
+    """Perform Redis connectivity check via PING command."""
     start_time = time.perf_counter()
     try:
         import redis.asyncio as aioredis
@@ -68,8 +69,39 @@ async def _check_redis_ping() -> ReadinessDependencyStatus:
         return ReadinessDependencyStatus(status="unhealthy", error=str(exc))
 
 
+async def _check_disk_space() -> ReadinessDependencyStatus:
+    """Perform disk space availability check on upload directory storage mount."""
+    start_time = time.perf_counter()
+    upload_dir = settings.upload_dir
+    try:
+        os.makedirs(upload_dir, exist_ok=True)
+        total, used, free = shutil.disk_usage(upload_dir)
+        latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        free_mb = round(free / (1024 * 1024), 2)
+
+        # Enforce minimum 100 MB free space threshold
+        min_free_bytes = 100 * 1024 * 1024
+        if free >= min_free_bytes:
+            return ReadinessDependencyStatus(
+                status="ok",
+                latency_ms=latency_ms,
+                path=upload_dir,
+                free_mb=free_mb,
+            )
+        return ReadinessDependencyStatus(
+            status="unhealthy",
+            path=upload_dir,
+            free_mb=free_mb,
+            error=f"Insufficient disk space: {free_mb} MB free (minimum 100 MB required)",
+        )
+    except Exception as exc:
+        return ReadinessDependencyStatus(
+            status="unhealthy", path=upload_dir, error=str(exc)
+        )
+
+
 async def _check_storage_write() -> ReadinessDependencyStatus:
-    """Perform an upload directory write/read/delete test."""
+    """Perform upload directory write/read/delete verification test."""
     start_time = time.perf_counter()
     upload_dir = settings.upload_dir
     test_filepath = None
@@ -119,30 +151,33 @@ async def health() -> HealthResponse:
 @router.get(
     "/health/ready",
     response_model=ReadinessResponse,
-    summary="Readiness probe — checks database, redis, and storage dependencies",
+    summary="Readiness probe — checks PostgreSQL, Redis, disk space, and storage dependencies",
 )
 async def readiness_check(
     response: Response,
     db: Annotated[AsyncSession | None, Depends(get_db)] = None,
 ) -> ReadinessResponse:
-    """Readiness probe performing a 100ms timeout database ping, Redis ping, and upload directory write test.
+    """Readiness probe checking PostgreSQL connectivity (SELECT 1), Redis ping, disk space, and storage write.
 
-    - **Database**: `SELECT 1` with 100ms timeout limit.
+    - **PostgreSQL**: `SELECT 1` query execution with 100ms timeout.
     - **Redis**: PING command to configured Redis URL.
+    - **Disk Space**: Disk free space check (minimum 100MB threshold).
     - **Storage**: Directory write, read, and delete test in `settings.upload_dir`.
 
-    Returns HTTP 200 OK when dependencies pass.
+    Returns HTTP 200 OK when all dependencies are healthy.
     Returns HTTP 503 Service Unavailable when any critical dependency fails.
     """
     timestamp = datetime.now(timezone.utc).isoformat()
 
     db_dep = await _check_database_ping(db)
     redis_dep = await _check_redis_ping()
+    disk_dep = await _check_disk_space()
     storage_dep = await _check_storage_write()
 
     dependencies = {
         "database": db_dep,
         "redis": redis_dep,
+        "disk": disk_dep,
         "storage": storage_dep,
     }
 

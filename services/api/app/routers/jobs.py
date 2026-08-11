@@ -14,11 +14,13 @@ The authenticated user's ID is threaded through to the service layer so that:
   - ``delete_job``  enforces ownership before soft-deleting.
 """
 
-from __future__ import annotations
-
-from fastapi import APIRouter, Query, status
+import asyncio
+import json
+from fastapi import APIRouter, Query, Request, status
+from fastapi.responses import StreamingResponse
 
 from app.dependencies import CurrentUser, DBSession
+from app.rate_limiter import limiter
 from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
@@ -38,8 +40,10 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
     status_code=status.HTTP_201_CREATED,
     summary="Create and queue a new ML training job",
 )
+@limiter.limit("10/minute")
 async def create_training_job(
-    request: TrainingRequest,
+    request: Request,
+    payload: TrainingRequest,
     current_user: CurrentUser,
     db: DBSession,
 ) -> JobResponse:
@@ -48,7 +52,7 @@ async def create_training_job(
     The calling user's ID is stamped as owner_id on the created job in PostgreSQL.
     Only the owner can later cancel, retry, or delete the job.
     """
-    return await job_service.create_job(request, user_id=str(current_user.id), db=db)
+    return await job_service.create_job(payload, user_id=str(current_user.id), db=db)
 
 
 @router.get(
@@ -56,7 +60,9 @@ async def create_training_job(
     response_model=JobListResponse,
     summary="List ML training jobs",
 )
+@limiter.limit("60/minute")
 async def list_jobs(
+    request: Request,
     current_user: CurrentUser,
     db: DBSession,
     skip: int = Query(0, ge=0, description="Pagination offset"),
@@ -79,7 +85,9 @@ async def list_jobs(
     response_model=JobResponse,
     summary="Get job details by ID",
 )
+@limiter.limit("60/minute")
 async def get_job(
+    request: Request,
     job_id: str,
     current_user: CurrentUser,
     db: DBSession,
@@ -96,7 +104,9 @@ async def get_job(
     response_model=JobProgressResponse,
     summary="Get live job progress telemetry",
 )
+@limiter.limit("60/minute")
 async def get_job_progress(
+    request: Request,
     job_id: str,
     current_user: CurrentUser,
     db: DBSession,
@@ -106,6 +116,68 @@ async def get_job_progress(
     Ownership is enforced -- only the job owner can poll progress.
     """
     return await job_service.get_job_progress(job_id, user_id=str(current_user.id), db=db)
+
+
+TERMINAL_STATUSES = {"COMPLETED", "FAILED", "CANCELLED"}
+
+
+async def _generate_job_progress_sse(job_id: str, user_id: str):
+    """Generator yielding formatted Server-Sent Events (SSE) for job progress stream."""
+    try:
+        while True:
+            prog = await job_service.get_job_progress(job_id, user_id=user_id)
+            payload = json.dumps(
+                {
+                    "job_id": prog.job_id,
+                    "status": prog.status,
+                    "progress": prog.progress,
+                    "current_stage": prog.current_stage,
+                    "message": prog.message,
+                    "estimated_seconds_remaining": prog.estimated_seconds_remaining,
+                }
+            )
+
+            if prog.status in TERMINAL_STATUSES:
+                yield f"event: progress\ndata: {payload}\n\n"
+                yield f"event: complete\ndata: {payload}\n\n"
+                return
+
+            yield f"event: progress\ndata: {payload}\n\n"
+            await asyncio.sleep(0.1)
+    except (asyncio.CancelledError, GeneratorExit):
+        raise
+    except Exception as exc:
+        err_payload = json.dumps({"job_id": job_id, "error": str(exc)})
+        yield f"event: error\ndata: {err_payload}\n\n"
+
+
+@router.get(
+    "/{job_id}/stream",
+    summary="Stream live job progress via Server-Sent Events (SSE)",
+)
+@limiter.limit("60/minute")
+async def stream_job_progress(
+    request: Request,
+    job_id: str,
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    """Stream live job execution progress telemetry using Server-Sent Events (SSE).
+
+    - Emits `event: progress` data frames every second.
+    - Emits `event: complete` and cleanly closes the connection upon reaching a terminal state.
+    """
+    # Ownership check before initiating SSE stream
+    await job_service.get_job(job_id, user_id=str(current_user.id))
+
+    return StreamingResponse(
+        _generate_job_progress_sse(job_id, user_id=str(current_user.id)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post(

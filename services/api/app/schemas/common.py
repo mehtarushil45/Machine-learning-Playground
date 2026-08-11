@@ -15,6 +15,7 @@ class ReadinessDependencyStatus(BaseModel):
     status: str
     latency_ms: Optional[float] = None
     path: Optional[str] = None
+    free_mb: Optional[float] = None
     error: Optional[str] = None
 
 

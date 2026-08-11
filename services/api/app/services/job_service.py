@@ -251,6 +251,12 @@ class JobService:
         _JOBS_STORE[job_id] = job_resp
 
         if db is not None:
+            user_uuid = None
+            try:
+                user_uuid = uuid.UUID(user_id)
+            except ValueError:
+                pass
+
             try:
                 dataset_uuid = None
                 if request.dataset_id:
@@ -337,9 +343,6 @@ class JobService:
         skip: int = 0,
         limit: int = 50,
     ) -> JobListResponse:
-        skip_val = int(getattr(skip, "default", skip)) if hasattr(skip, "default") else int(skip)
-        limit_val = int(getattr(limit, "default", limit)) if hasattr(limit, "default") else int(limit)
-
         job_list: List[JobResponse] = []
         db_job_ids = set()
 
@@ -365,7 +368,7 @@ class JobService:
                 job_list.append(j)
 
         job_list.sort(key=lambda j: j.created_at, reverse=True)
-        paginated = job_list[skip_val : skip_val + limit_val]
+        paginated = job_list[skip : skip + limit]
 
         return JobListResponse(total=len(job_list), jobs=paginated)
 

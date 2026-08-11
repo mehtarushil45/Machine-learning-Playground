@@ -111,3 +111,87 @@ export async function deleteJob(jobId: string): Promise<boolean> {
     return false
   }
 }
+
+export interface JobProgressSSECallbacks {
+  onProgress?: (progress: JobProgressInfo) => void
+  onComplete?: (progress: JobProgressInfo) => void
+  onError?: (error: any) => void
+}
+
+/**
+ * Subscribe to live job progress updates via Server-Sent Events (SSE).
+ *
+ * Features:
+ * - Automatic reconnection with exponential backoff on connection drop
+ * - Explicit connection cleanup on job completion (`event: complete`)
+ * - Cleanup function returned for unmounting React components
+ */
+export function subscribeToJobProgressSSE(
+  jobId: string,
+  callbacks: JobProgressSSECallbacks,
+  maxReconnectAttempts = 5
+): () => void {
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+  const url = `${baseUrl}/jobs/${jobId}/stream`
+
+  let eventSource: EventSource | null = null
+  let reconnectAttempts = 0
+  let isClosed = false
+  let reconnectTimer: any = null
+
+  function connect() {
+    if (isClosed) return
+    eventSource = new EventSource(url, { withCredentials: true })
+
+    eventSource.addEventListener('progress', (e: MessageEvent) => {
+      try {
+        const data: JobProgressInfo = JSON.parse(e.data)
+        callbacks.onProgress?.(data)
+        reconnectAttempts = 0 // reset backoff on valid progress frame
+      } catch (err) {
+        callbacks.onError?.(err)
+      }
+    })
+
+    eventSource.addEventListener('complete', (e: MessageEvent) => {
+      try {
+        const data: JobProgressInfo = JSON.parse(e.data)
+        callbacks.onComplete?.(data)
+      } catch (err) {
+        callbacks.onError?.(err)
+      } finally {
+        cleanup() // Cleanup EventSource client connection on job completion
+      }
+    })
+
+    eventSource.onerror = (err) => {
+      if (isClosed) return
+      callbacks.onError?.(err)
+      if (eventSource) {
+        eventSource.close()
+        eventSource = null
+      }
+
+      if (reconnectAttempts < maxReconnectAttempts) {
+        reconnectAttempts++
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000)
+        reconnectTimer = setTimeout(connect, delay)
+      }
+    }
+  }
+
+  function cleanup() {
+    isClosed = true
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (eventSource) {
+      eventSource.close()
+      eventSource = null
+    }
+  }
+
+  connect()
+  return cleanup
+}

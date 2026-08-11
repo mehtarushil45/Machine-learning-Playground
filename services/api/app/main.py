@@ -73,6 +73,28 @@ app.add_middleware(
 )
 app.add_middleware(TokenBlacklistMiddleware)
 
+# ── Request ID & Contextual Logging Middleware ─────────────────────────────
+from app.middleware.request_id import (
+    RequestIDMiddleware,
+    configure_structlog,
+    register_request_id_exception_handlers,
+    setup_celery_request_id_signals,
+)
+
+configure_structlog()
+setup_celery_request_id_signals()
+app.add_middleware(RequestIDMiddleware)
+register_request_id_exception_handlers(app)
+
+# ── SlowAPI Rate Limiting ─────────────────────────────────────────────────────
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from app.rate_limiter import limiter, custom_rate_limit_exceeded_handler
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 # ── Routers ───────────────────────────────────────────────────────────────────
 # All application routes are served under /api/v1 to match the frontend contract.
 # The health endpoint is mounted at root for Docker/k8s liveness probes.

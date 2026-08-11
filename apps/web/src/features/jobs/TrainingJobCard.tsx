@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import type { JobEntity } from '../../types/job'
-import { cancelJob, fetchJobProgress, retryJob } from '../../services/jobService'
+import { cancelJob, retryJob, subscribeToJobProgressSSE } from '../../services/jobService'
 import { TrainingStatusBadge } from './TrainingStatusBadge'
 import { TrainingProgressBar } from './TrainingProgressBar'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
@@ -22,7 +22,7 @@ export const TrainingJobCard = memo(function TrainingJobCard({
   const [job, setJob] = useState<JobEntity>(initialJob)
   const [isActionLoading, setIsActionLoading] = useState(false)
 
-  // Polling Effect for Live Progress Telemetry
+  // Server-Sent Events (SSE) Effect for Live Progress Telemetry
   useEffect(() => {
     setJob(initialJob)
 
@@ -31,10 +31,8 @@ export const TrainingJobCard = memo(function TrainingJobCard({
       return
     }
 
-    let isMounted = true
-    const interval = setInterval(async () => {
-      const liveProg = await fetchJobProgress(initialJob.job_id)
-      if (liveProg && isMounted) {
+    const unsubscribe = subscribeToJobProgressSSE(initialJob.job_id, {
+      onProgress: (liveProg) => {
         setJob((prev) => {
           const next = {
             ...prev,
@@ -46,16 +44,24 @@ export const TrainingJobCard = memo(function TrainingJobCard({
           if (onJobUpdated) onJobUpdated(next)
           return next
         })
-
-        if (terminalStatuses.includes(liveProg.status)) {
-          clearInterval(interval)
-        }
-      }
-    }, 1000)
+      },
+      onComplete: (liveProg) => {
+        setJob((prev) => {
+          const next = {
+            ...prev,
+            status: liveProg.status,
+            progress: liveProg.progress,
+            current_stage: liveProg.current_stage,
+            estimated_seconds: liveProg.estimated_seconds_remaining,
+          }
+          if (onJobUpdated) onJobUpdated(next)
+          return next
+        })
+      },
+    })
 
     return () => {
-      isMounted = false
-      clearInterval(interval)
+      unsubscribe()
     }
   }, [initialJob, onJobUpdated])
 

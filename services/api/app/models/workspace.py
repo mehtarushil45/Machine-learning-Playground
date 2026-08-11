@@ -10,7 +10,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -33,6 +33,9 @@ class Workspace(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     """A collaboration workspace within an Organisation."""
 
     __tablename__ = "workspaces"
+    __table_args__ = (
+        UniqueConstraint("organisation_id", "slug", name="uq_workspaces_organisation_id_slug"),
+    )
 
     # ── Identity ──────────────────────────────────────────────────────────────
     name: Mapped[str] = mapped_column(String(255), nullable=False)
