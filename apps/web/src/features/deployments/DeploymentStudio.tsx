@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Rocket,
@@ -30,19 +30,30 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
   const [activeTab, setActiveTab] = useState<'curl' | 'python' | 'js' | 'widget'>('curl');
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  useEffect(() => { loadDeployments(); }, []);
-
-  const loadDeployments = async () => {
+  const loadDeployments = useCallback(async (signal?: AbortSignal) => {
     try {
-      const list = await DeploymentService.listDeployments();
+      const list = await DeploymentService.listDeployments(signal);
       setDeployments(list);
       if (list.length > 0 && !selectedDep) {
         selectDeployment(list[0]);
       }
     } catch (err: any) {
+      if (err?.name === 'AbortError' || err?.name === 'CanceledError') {
+        // Cleanly handle aborted fetch on component unmount
+        return;
+      }
       console.error('Load deployments error:', err);
     }
-  };
+  }, [selectedDep]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadDeployments(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadDeployments]);
 
   const handleCreateDeployment = async () => {
     setLoading(true);

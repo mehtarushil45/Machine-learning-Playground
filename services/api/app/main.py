@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.blacklist import TokenBlacklistMiddleware
 from app.redis_client import close_redis, ping_redis
 
-from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, pipelines, portfolios, predictions
+from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, notifications, pipelines, portfolios, predictions
 from app.routers import organizations, workspaces, users_v7a, api_keys, activity  # V7A
 from app.routers import admin  # V7B Part 1
 from app.routers import studio, explainability_v7b, portfolios_v7b, classrooms_v7b, workflow  # V7B Part 2
@@ -112,6 +112,7 @@ app.include_router(pipelines.router, prefix=API_V1_PREFIX)
 app.include_router(explainability.router, prefix=API_V1_PREFIX)
 app.include_router(deployments.router, prefix=API_V1_PREFIX)
 app.include_router(models.router, prefix=API_V1_PREFIX)  # V5A: Model Versioning & Lineage
+app.include_router(notifications.router, prefix=API_V1_PREFIX)
 
 # ── V7A: Enterprise Organizations, Workspaces & RBAC ─────────────────────────
 app.include_router(organizations.router, prefix=API_V1_PREFIX)

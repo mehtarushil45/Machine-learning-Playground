@@ -8,11 +8,13 @@ import {
   Award,
   ChevronLeft,
   ChevronRight,
-  Bell,
-  CheckCircle2,
-  X
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
+import { AuthProvider } from './providers/AuthContext';
+import { SidebarUserAvatar } from './components/layout/SidebarUserAvatar';
+import { NotificationBell } from './components/notifications/NotificationBell';
+import { Toast } from './components/ui/Toast';
+import { useLatestModel } from './hooks/useLatestModel';
 import { EnterpriseWorkspace } from './features/datasets/EnterpriseWorkspace';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { ExplainabilityHub } from './features/explainability/ExplainabilityHub';
@@ -31,6 +33,7 @@ export interface ToastMessage {
 }
 
 function AppContent() {
+  const latestModel = useLatestModel();
   const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [dataset, setDataset] = useState<Dataset | null>(null);
@@ -174,17 +177,7 @@ function AppContent() {
 
         {/* Bottom User Avatar */}
         <div className="p-3 border-t border-[rgba(0,212,255,0.08)] bg-[#0C1A30]">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-[#101E36] border-2 border-[#7B5CF5] flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-[0_0_12px_rgba(123,92,245,0.4)]">
-              MR
-            </div>
-            {!isSidebarCollapsed && (
-              <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-xs font-semibold text-slate-200 truncate">Mehta R.</span>
-                <span className="text-[10px] text-[#64748B] truncate">Quantum ML Infrastructure</span>
-              </div>
-            )}
-          </div>
+          <SidebarUserAvatar isCollapsed={isSidebarCollapsed} />
         </div>
       </aside>
 
@@ -213,18 +206,18 @@ function AppContent() {
 
           {/* Right Header Controls */}
           <div className="flex items-center gap-4">
-            {/* Model Selector Pill */}
-            <button className="btn-secondary py-1.5! px-3! text-xs flex items-center gap-2">
+            {/* Dynamic Latest Model Selector Pill */}
+            <button
+              onClick={() => latestModel.refetch()}
+              className="btn-secondary py-1.5! px-3! text-xs flex items-center gap-2 transition-all hover:border-[#00D4FF]/40 cursor-pointer"
+              title={`Latest Trained Model: ${latestModel.displayText} (Click to refresh)`}
+            >
               <span className="w-2 h-2 rounded-full bg-[#00F5A0] shadow-[0_0_8px_#00F5A0]" />
-              Random Forest v2.4
+              <span>{latestModel.displayText}</span>
             </button>
 
-            {/* Notification Bell */}
-            <button className="btn-icon relative">
-              <Bell className="w-4 h-4 text-[#94A3B8]" />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#00D4FF] animate-ping" />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#00D4FF]" />
-            </button>
+            {/* Real-Time Notification Bell Dropdown */}
+            <NotificationBell />
 
             {/* User Avatar Pill */}
             <div className="w-7 h-7 rounded-full bg-[#101E36] border border-[#7B5CF5] flex items-center justify-center text-white text-xs font-bold">
@@ -256,24 +249,13 @@ function AppContent() {
       {/* ── 3. FLOATING TOAST NOTIFICATIONS ───────────────────────── */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
         {toasts.map((toast) => (
-          <div
+          <Toast
             key={toast.id}
-            className="pointer-events-auto flex items-start gap-3 p-4 rounded-xl border border-[rgba(0,212,255,0.3)] bg-[#0C1A30]/95 text-white shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-5 duration-200"
-          >
-            <div className="mt-0.5 text-[#00F5A0] shrink-0">
-              <CheckCircle2 className="w-5 h-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h5 className="text-xs font-bold text-slate-100">{toast.title}</h5>
-              {toast.description && <p className="text-[11px] text-[#64748B] mt-0.5">{toast.description}</p>}
-            </div>
-            <button
-              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
-              className="text-[#64748B] hover:text-slate-200"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+            variant={toast.type}
+            title={toast.title}
+            description={toast.description}
+            onClose={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+          />
         ))}
       </div>
     </div>
@@ -283,7 +265,9 @@ function AppContent() {
 export default function App() {
   return (
     <ThemeProvider defaultTheme="system">
-      <AppContent />
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </ThemeProvider>
   );
 }

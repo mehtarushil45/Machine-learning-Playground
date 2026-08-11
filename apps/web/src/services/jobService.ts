@@ -18,11 +18,14 @@ export interface SupportedAlgorithms {
   regression: string[]
 }
 
-export async function fetchSupportedAlgorithms(): Promise<SupportedAlgorithms> {
+export async function fetchSupportedAlgorithms(signal?: AbortSignal): Promise<SupportedAlgorithms> {
   try {
-    return await apiClient.get<SupportedAlgorithms>('/algorithms')
+    return await apiClient.get<SupportedAlgorithms>('/algorithms', { signal })
   } catch (err) {
     if (err instanceof AuthExpiredError) throw err
+    if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
+      throw err
+    }
     return {
       classification: [
         'Logistic Regression',

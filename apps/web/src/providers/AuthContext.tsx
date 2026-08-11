@@ -4,24 +4,23 @@
  * Architecture
  * ------------
  * Tokens live in httpOnly cookies set by the server — JavaScript never reads
- * them directly.  The browser sends them automatically on every same-origin
+ * them directly. The browser sends them automatically on every same-origin
  * fetch with `credentials: "include"`.
  *
  * The AuthContext stores only the *public* user profile (id, email, role) in
- * React state.  On mount it calls GET /auth/me; if the cookie is valid the
+ * React state. On mount it calls GET /auth/me; if the cookie is valid the
  * server returns the profile, otherwise we treat the user as logged-out.
  *
  * Session persistence across page reloads
  * ----------------------------------------
- * The session is persistent as long as the httpOnly cookie is alive.  On each
- * page load, `useEffect` calls `restoreSession()` which hits /auth/me.  The
- * cookie is sent automatically — no localStorage, no sessionStorage.
+ * The session is persistent as long as the httpOnly cookie is alive. On each
+ * page load, `useEffect` calls `restoreSession()` which hits /auth/me.
  *
  * Usage
  * -----
- *   import { useAuth } from '../providers/AuthContext'
+ *   import { useAuthContext } from '../providers/AuthContext'
  *
- *   const { user, login, logout, isAuthenticated, isLoading } = useAuth()
+ *   const { user, login, logout, isAuthenticated, isLoading } = useAuthContext()
  */
 
 import {
@@ -43,16 +42,16 @@ export interface AuthUser {
   email: string
   full_name: string | null
   role: string
-  organisation_id: string
-  is_active: boolean
+  organisation_id?: string
+  is_active?: boolean
 }
 
 export interface LoginCredentials {
-  username: string  // FastAPI OAuth2PasswordRequestForm uses "username"
+  username: string // FastAPI OAuth2PasswordRequestForm uses "username"
   password: string
 }
 
-interface AuthContextValue {
+export interface AuthContextValue {
   /** The authenticated user, or null when logged out / loading. */
   user: AuthUser | null
   /** True while the initial session check is in-flight. */
@@ -76,19 +75,41 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 // ---------------------------------------------------------------------------
+// Initials Helper Function
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute dynamic user initials from user full_name or email.
+ * - "Rushil Mehta" -> "RM"
+ * - "Rushil" -> "RU"
+ * - "rushil@example.com" -> "RU"
+ * - Fallback -> "U"
+ */
+export function getInitials(name?: string | null, email?: string | null): string {
+  if (name && name.trim().length > 0) {
+    const parts = name.trim().split(/\s+/)
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    }
+    return parts[0].slice(0, 2).toUpperCase()
+  }
+  if (email && email.trim().length > 0) {
+    const username = email.split('@')[0]
+    return username.slice(0, 2).toUpperCase()
+  }
+  return 'U'
+}
+
+// ---------------------------------------------------------------------------
 // API helpers (cookie-aware)
 // ---------------------------------------------------------------------------
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'
 
-/**
- * Fetch wrapper that always includes credentials (cookies).
- * All auth endpoints use this helper.
- */
 async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
     ...init,
-    credentials: 'include',    // ← send & receive httpOnly cookies
+    credentials: 'include', // send & receive httpOnly cookies
     headers: {
       'Content-Type': 'application/json',
       ...(init.headers as Record<string, string>),
@@ -116,7 +137,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null)
       }
     } catch {
-      // Network error or server down — treat as logged-out
       setUser(null)
     } finally {
       setIsLoading(false)
@@ -131,7 +151,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ── Login ───────────────────────────────────────────────────────────────
   const login = useCallback(async (credentials: LoginCredentials) => {
-    // FastAPI's OAuth2PasswordRequestForm requires application/x-www-form-urlencoded
     const body = new URLSearchParams({
       username: credentials.username,
       password: credentials.password,
@@ -139,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
-      credentials: 'include',                             // ← receive Set-Cookie
+      credentials: 'include',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
     })
@@ -149,7 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.detail ?? `Login failed (${res.status})`)
     }
 
-    // Cookies are now set by the server.  Fetch profile separately.
+    // Fetch updated profile after login
     const profileRes = await authFetch('/auth/me')
     if (profileRes.ok) {
       setUser(await profileRes.json())
@@ -206,13 +225,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 // ---------------------------------------------------------------------------
-// Hook
+// Hooks
 // ---------------------------------------------------------------------------
 
-export function useAuth(): AuthContextValue {
+export function useAuthContext(): AuthContextValue {
   const ctx = useContext(AuthContext)
   if (!ctx) {
-    throw new Error('useAuth must be used inside <AuthProvider>')
+    throw new Error('useAuthContext must be used inside <AuthProvider>')
   }
   return ctx
 }
+
+export const useAuth = useAuthContext

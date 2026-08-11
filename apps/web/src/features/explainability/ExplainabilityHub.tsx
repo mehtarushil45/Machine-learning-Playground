@@ -25,27 +25,39 @@ export const ExplainabilityHub: React.FC = () => {
   const [feat3, setFeat3] = useState(0.4);
   const [desiredOutcome, setDesiredOutcome] = useState('1');
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const glob = await ExplainabilityService.getGlobalExplainability();
-      setGlobalExp(glob);
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const glob = await ExplainabilityService.getGlobalExplainability(undefined, controller.signal);
+        setGlobalExp(glob);
 
-      const sampleData = Array.from({ length: 40 }, (_, i) => ({
-        feat_0: Math.random(), feat_1: Math.random(), feat_2: Math.random(), feat_3: Math.random(),
-        gender: i % 2 === 0 ? 'Male' : 'Female',
-      }));
-      const fair = await ExplainabilityService.auditFairness(sampleData, 'gender', 'Male', 'Female');
-      setFairnessAudit(fair);
-      await runWhatIf();
-    } catch (err) {
-      console.error('Explainability load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+        const sampleData = Array.from({ length: 40 }, (_, i) => ({
+          feat_0: Math.random(), feat_1: Math.random(), feat_2: Math.random(), feat_3: Math.random(),
+          gender: i % 2 === 0 ? 'Male' : 'Female',
+        }));
+        const fair = await ExplainabilityService.auditFairness(sampleData, 'gender', 'Male', 'Female');
+        setFairnessAudit(fair);
+        await runWhatIf();
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || err?.name === 'CanceledError') {
+          // Cleanly handle aborted fetch on component unmount
+          return;
+        }
+        console.error('Explainability load error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   const runWhatIf = async () => {
     try {

@@ -28,8 +28,8 @@ export function computeClientProfile(dataset: Dataset): DatasetProfile {
   const uniqueRowStrings = new Set(rowStrings)
   const duplicateRows = rowCount > 0 ? rowCount - uniqueRowStrings.size : 0
 
-  // 2. Calculate Duplicate Columns
-  const duplicateColumns = 0
+  // 2. Calculate Duplicate Columns using Fingerprint Hash Map & Sampling
+  const duplicateColumns = detectDuplicateColumns(dataset)
 
   // 3. Column Analysis
   const columnsProfile: ColumnProfile[] = dataset.columns.map((colName) => {
@@ -51,7 +51,7 @@ export function computeClientProfile(dataset: Dataset): DatasetProfile {
     // Type Inference
     const numVals: number[] = []
     let isAllBool = true
-    const isAllDate = fontIsDate(nonMissing)
+    const isAllDate = isDateColumn(nonMissing)
 
     for (const v of nonMissing) {
       if (typeof v === 'number') {
@@ -171,8 +171,78 @@ export function computeClientProfile(dataset: Dataset): DatasetProfile {
   }
 }
 
-function fontIsDate(vals: unknown[]): boolean {
+function isDateColumn(vals: unknown[]): boolean {
   if (vals.length === 0) return false
   const dateRegex = /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/
   return vals.every((v) => typeof v === 'string' && dateRegex.test(v.trim()))
+}
+
+/**
+ * Detects duplicate columns in a dataset using column value fingerprints and a hash map.
+ * Efficiently handles large datasets by sampling up to `maxSampleRows`.
+ * Returns the count of duplicate columns (columns with identical values to an earlier column).
+ */
+export function detectDuplicateColumns(dataset: Dataset, maxSampleRows: number = 1000): number {
+  const rowCount = dataset.rows.length
+  const colCount = dataset.columns.length
+
+  if (colCount <= 1 || rowCount === 0) {
+    return 0
+  }
+
+  // Determine row indices to sample for fingerprint computation
+  const sampledIndices: number[] = []
+  if (rowCount <= maxSampleRows) {
+    for (let i = 0; i < rowCount; i++) {
+      sampledIndices.push(i)
+    }
+  } else {
+    // Uniformly sample maxSampleRows across the dataset
+    const step = rowCount / maxSampleRows
+    for (let i = 0; i < maxSampleRows; i++) {
+      sampledIndices.push(Math.floor(i * step))
+    }
+  }
+
+  // Hash Map: Fingerprint String -> First Column Name encountered with this fingerprint
+  const fingerprintMap = new Map<string, string>()
+  let duplicateCount = 0
+
+  for (const colName of dataset.columns) {
+    // Generate canonical string fingerprint for this column across sampled rows
+    const sampledValues: string[] = new Array(sampledIndices.length)
+    for (let i = 0; i < sampledIndices.length; i++) {
+      const val = dataset.rows[sampledIndices[i]][colName]
+      sampledValues[i] = val === null || val === undefined ? '\x00' : String(val)
+    }
+    const fingerprint = sampledValues.join('\x1f')
+
+    if (fingerprintMap.has(fingerprint)) {
+      // If sampling was used, perform full row verification against candidate original column
+      const existingCol = fingerprintMap.get(fingerprint)!
+      let isExactDuplicate = true
+
+      if (rowCount > maxSampleRows) {
+        for (let r = 0; r < rowCount; r++) {
+          const v1 = dataset.rows[r][colName]
+          const v2 = dataset.rows[r][existingCol]
+          if (v1 !== v2 && String(v1 ?? '') !== String(v2 ?? '')) {
+            isExactDuplicate = false
+            break
+          }
+        }
+      }
+
+      if (isExactDuplicate) {
+        duplicateCount++
+      } else {
+        // Sample collision, store under composite key
+        fingerprintMap.set(`${fingerprint}_${colName}`, colName)
+      }
+    } else {
+      fingerprintMap.set(fingerprint, colName)
+    }
+  }
+
+  return duplicateCount
 }

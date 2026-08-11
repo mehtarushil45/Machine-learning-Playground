@@ -153,10 +153,11 @@ export interface WhatIfResponse {
 }
 
 export const ExplainabilityService = {
-  getGlobalExplainability: (modelId?: string) =>
+  getGlobalExplainability: (modelId?: string, signal?: AbortSignal) =>
     request<GlobalExplainabilityResponse>('/explainability/global', {
       method: 'POST',
       body: JSON.stringify({ model_id: modelId }),
+      signal,
     }),
 
   getLocalExplainability: (sample: Record<string, any>, modelId?: string) =>
@@ -257,7 +258,7 @@ export const DeploymentService = {
       body: JSON.stringify({ model_id: modelId, deployment_name: deploymentName, rate_limit_rpm: rateLimitRpm }),
     }),
 
-  listDeployments: () => request<DeploymentResponse[]>('/deployments'),
+  listDeployments: (signal?: AbortSignal) => request<DeploymentResponse[]>('/deployments', { signal }),
 
   getSnippets: (deploymentId: string) => request<IntegrationSnippets>(`/deployments/${deploymentId}/snippets`),
 

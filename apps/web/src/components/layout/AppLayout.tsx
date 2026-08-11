@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Header } from './Header'
+import { SidebarUserAvatar } from './SidebarUserAvatar'
 import { Icon } from '../ui/Icon'
 import { Card } from '../ui/Card'
 import { Badge } from '../ui/Badge'
@@ -75,9 +76,8 @@ export function AppLayout({ children, currentView, onToggleView }: AppLayoutProp
             </a>
           </nav>
 
-          <div className="p-3 border-t border-border/40 text-xs text-muted-foreground flex items-center gap-2">
-            <Icon name="shield" size={14} className="text-emerald-500" />
-            <span>FastAPI + PyTorch Worker</span>
+          <div className="p-3 border-t border-border/40 text-xs text-muted-foreground">
+            <SidebarUserAvatar isCollapsed={!isSidebarOpen} />
           </div>
         </aside>
 

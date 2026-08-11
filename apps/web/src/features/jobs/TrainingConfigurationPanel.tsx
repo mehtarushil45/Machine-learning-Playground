@@ -57,7 +57,9 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
   })
 
   useEffect(() => {
-    fetchSupportedAlgorithms()
+    const controller = new AbortController()
+
+    fetchSupportedAlgorithms(controller.signal)
       .then((data) => {
         if (data && (data.classification?.length || data.regression?.length)) {
           setSupportedAlgos({
@@ -66,7 +68,17 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
           })
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
+          // Cleanly handle aborted fetch on component unmount
+          return
+        }
+        console.warn('Failed to load supported algorithms:', err)
+      })
+
+    return () => {
+      controller.abort()
+    }
   }, [])
 
   const handleLaunch = async () => {

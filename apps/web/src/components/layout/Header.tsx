@@ -1,6 +1,7 @@
 import { Icon } from '../ui/Icon'
 import { Input } from '../ui/Input'
 import { ThemeToggle } from '../ui/ThemeToggle'
+import { NotificationBell } from '../notifications/NotificationBell'
 import { Avatar } from '../ui/Avatar'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -74,6 +75,7 @@ export function Header({
         </Button>
 
         <ThemeToggle />
+        <NotificationBell />
 
         {onToggleAiPanel && (
           <Button
