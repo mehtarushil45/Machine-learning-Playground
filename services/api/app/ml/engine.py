@@ -59,6 +59,7 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 import numpy as np
+import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
@@ -686,8 +687,3 @@ def _fail_job(job_id: str, error_message: str) -> None:
         error_msg=error_message,
     )
 
-
-# ---------------------------------------------------------------------------
-# Deferred import to avoid circular reference at module load time
-# ---------------------------------------------------------------------------
-import pandas as pd  # noqa: E402 — intentionally at end of module

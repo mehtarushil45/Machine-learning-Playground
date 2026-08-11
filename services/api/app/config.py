@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     # ── JWT / Auth ────────────────────────────────────────────────────────────
     # Stored as SecretStr so the value is masked in repr() / logs.
     # Access the raw string via:  settings.secret_key.get_secret_value()
-    secret_key: SecretStr = SecretStr("change-me-in-production")
+    secret_key: SecretStr = SecretStr("")  # REQUIRED: set SECRET_KEY env var (min 32 chars)
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
