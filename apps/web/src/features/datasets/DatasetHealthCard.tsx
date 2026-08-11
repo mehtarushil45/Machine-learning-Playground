@@ -1,7 +1,6 @@
-import { memo, useEffect, useMemo, useState } from 'react'
-import type { Dataset, DatasetHealthReport, DatasetProfile, HealthIssue } from '../../types/dataset'
-import { computeClientProfile } from '../../services/profilerService'
-import { fetchDatasetHealth, computeClientHealth } from '../../services/healthService'
+import { memo, useMemo } from 'react'
+import type { Dataset, DatasetHealthReport, HealthIssue } from '../../types/dataset'
+import { useDatasetHealthQuery } from '../../hooks/useMLQueries'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
 import { Badge } from '../../components/ui/Badge'
 import { Icon, type IconName } from '../../components/ui/Icon'
@@ -15,46 +14,8 @@ export const DatasetHealthCard = memo(function DatasetHealthCard({
   dataset,
   healthReport: initialHealthReport,
 }: DatasetHealthCardProps) {
-  const [healthReport, setHealthReport] = useState<DatasetHealthReport | null>(initialHealthReport || null)
-
-  useEffect(() => {
-    let isMounted = true
-
-    async function loadHealth() {
-      if (initialHealthReport) {
-        if (isMounted) setHealthReport(initialHealthReport)
-        return
-      }
-
-      if (!dataset) {
-        if (isMounted) setHealthReport(null)
-        return
-      }
-
-      const currentDataset = dataset
-
-      if (currentDataset.datasetId) {
-        const remoteHealth = await fetchDatasetHealth(currentDataset.datasetId)
-        if (remoteHealth && isMounted) {
-          setHealthReport(remoteHealth)
-          return
-        }
-      }
-
-      // Compute client-side health from profiler output
-      const clientProfile: DatasetProfile = computeClientProfile(currentDataset)
-      const clientHealth = computeClientHealth(clientProfile)
-      if (isMounted) {
-        setHealthReport(clientHealth)
-      }
-    }
-
-    loadHealth()
-
-    return () => {
-      isMounted = false
-    }
-  }, [dataset, initialHealthReport])
+  const { data: queriedHealthReport } = useDatasetHealthQuery(dataset)
+  const healthReport = initialHealthReport || queriedHealthReport
 
   // Visual Theme Mapping by Grade (memoized)
   const gradeStyles: Record<

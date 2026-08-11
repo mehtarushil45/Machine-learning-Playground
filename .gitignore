@@ -1,54 +1,12 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# ==============================================================================
+# Monorepo .gitignore — Python FastAPI + React / TypeScript ML Playground
+# ==============================================================================
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.venv/
-venv/
-*.egg-info/
-
-# Environment — never commit real secrets
+# ── 1. Environment & Secrets (NEVER COMMIT REAL CREDENTIALS) ──────────────────
 .env
 .env.*
 !.env.example
-
-# Docker local overrides (may contain secrets or personal paths)
-docker-compose.override.yml
-docker-compose.local.yml
-
-# Uploads and temporary test artifacts
-services/api/uploads/
-uploads/
-
-# MinIO local data (contains actual stored object bytes)
-services/minio/data/
-
-# Private key files — never commit
+*.local
 *.pem
 *.key
 *.p12
@@ -56,13 +14,107 @@ services/minio/data/
 id_rsa
 id_ed25519
 *.crt
+.secrets.baseline
 
-# Terraform — may contain cloud credentials
+# ── 2. Node.js & React Frontend (Vite / Tailwind / Monorepo) ──────────────────
+node_modules/
+**/node_modules/
+dist/
+dist-ssr/
+build/
+out/
+.vite/
+.next/
+.nuxt/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.eslintcache
+.stylelintcache
+
+# ── 3. Python & Virtual Environments ──────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.env/
+ENV/
+venv.bak/
+*.egg-info/
+.eggs/
+sdist/
+eggs/
+*.egg
+
+# ── 4. Python Testing, Linting & Coverage ─────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+
+# ── 5. Uploaded Files, Local Storage & Temporary Datasets ─────────────────────
+uploads/
+**/uploads/
+services/api/uploads/
+services/minio/data/
+minio-data/
+data/
+scratch/
+*.csv
+*.parquet
+*.feather
+*.h5
+
+# ── 6. Trained Model Binaries & Machine Learning Checkpoints ─────────────────
+*.pkl
+*.joblib
+*.pth
+*.pt
+*.onnx
+*.tflite
+*.bin
+*.pb
+*.safetensors
+models/
+saved_models/
+checkpoints/
+mlruns/
+wandb/
+.tensorboard/
+
+# ── 7. IDEs, Editors & OS Files ───────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Desktop.ini
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ── 8. Docker Local Overrides & Infrastructure ────────────────────────────────
+docker-compose.override.yml
+docker-compose.local.yml
 *.tfvars
 !*.tfvars.example
 terraform.tfstate
 terraform.tfstate.*
 .terraform/
-
-# Secret scanners
-.secrets.baseline

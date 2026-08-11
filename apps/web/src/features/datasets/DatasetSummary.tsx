@@ -1,12 +1,12 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useMemo } from 'react'
 import type { Dataset, DatasetProfile, ColumnProfile } from '../../types/dataset'
-import { fetchDatasetProfile, computeClientProfile } from '../../services/profilerService'
+import { useDatasetProfileQuery } from '../../hooks/useMLQueries'
 import { formatBytes } from '../../utils/validation'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table'
 import { Badge } from '../../components/ui/Badge'
 import { Icon, type IconName } from '../../components/ui/Icon'
-import { Spinner } from '../../components/ui/Spinner'
+import { TableSkeleton } from '../../components/ui/Skeleton'
 
 export interface DatasetSummaryProps {
   dataset: Dataset | null
@@ -14,50 +14,8 @@ export interface DatasetSummaryProps {
 }
 
 export const DatasetSummary = memo(function DatasetSummary({ dataset, profile: initialProfile }: DatasetSummaryProps) {
-  const [profile, setProfile] = useState<DatasetProfile | null>(initialProfile || null)
-  const [isLoading, setIsLoading] = useState(false)
-
-  useEffect(() => {
-    let isMounted = true
-
-    async function loadProfile() {
-      if (initialProfile) {
-        if (isMounted) setProfile(initialProfile)
-        return
-      }
-
-      if (!dataset) {
-        if (isMounted) setProfile(null)
-        return
-      }
-
-      const currentDataset = dataset
-      setIsLoading(true)
-
-      // Try fetching backend REST profile if dataset has server ID
-      if (currentDataset.datasetId) {
-        const remoteProfile = await fetchDatasetProfile(currentDataset.datasetId)
-        if (remoteProfile && isMounted) {
-          setProfile(remoteProfile)
-          setIsLoading(false)
-          return
-        }
-      }
-
-      // Compute client-side profile if offline or no server ID
-      const clientProfile = computeClientProfile(currentDataset)
-      if (isMounted) {
-        setProfile(clientProfile)
-        setIsLoading(false)
-      }
-    }
-
-    loadProfile()
-
-    return () => {
-      isMounted = false
-    }
-  }, [dataset, initialProfile])
+  const { data: queriedProfile, isLoading } = useDatasetProfileQuery(dataset)
+  const profile = initialProfile || queriedProfile
 
   // Count column types for overview distribution (memoized)
   const typeCounts = useMemo(() => {
@@ -86,11 +44,7 @@ export const DatasetSummary = memo(function DatasetSummary({ dataset, profile: i
   }
 
   if (isLoading && !profile) {
-    return (
-      <Card variant="default" className="p-8 text-center flex justify-center items-center">
-        <Spinner size="lg" label="Generating Dataset Profile..." />
-      </Card>
-    )
+    return <TableSkeleton rows={5} cols={4} />
   }
 
   if (!profile) {

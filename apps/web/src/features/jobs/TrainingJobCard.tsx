@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import type { JobEntity } from '../../types/job'
-import { cancelJob, retryJob, subscribeToJobProgressSSE } from '../../services/jobService'
+import { retryJob, subscribeToJobProgressSSE } from '../../services/jobService'
+import { useCancelJobMutation } from '../../hooks/useMLQueries'
 import { TrainingStatusBadge } from './TrainingStatusBadge'
 import { TrainingProgressBar } from './TrainingProgressBar'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
@@ -65,19 +66,18 @@ export const TrainingJobCard = memo(function TrainingJobCard({
     }
   }, [initialJob, onJobUpdated])
 
+  const cancelJobMutation = useCancelJobMutation()
+
   const handleCancel = async () => {
-    setIsActionLoading(true)
-    const result = await cancelJob(job.job_id)
-    setIsActionLoading(false)
-    if (result) {
-      const cancelledJob = {
-        ...job,
-        status: 'CANCELLED' as const,
-        current_stage: 'Job execution cancelled by user',
-      }
-      setJob(cancelledJob)
-      if (onJobUpdated) onJobUpdated(cancelledJob)
+    const cancelledJob = {
+      ...job,
+      status: 'CANCELLED' as const,
+      current_stage: 'Job execution cancelled by user',
     }
+    setJob(cancelledJob)
+    if (onJobUpdated) onJobUpdated(cancelledJob)
+
+    cancelJobMutation.mutate(job.job_id)
   }
 
   const handleRetry = async () => {

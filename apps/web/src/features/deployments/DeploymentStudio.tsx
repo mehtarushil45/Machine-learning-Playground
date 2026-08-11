@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Rocket,
@@ -12,6 +12,9 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { DeploymentService, DeploymentResponse, IntegrationSnippets } from '../../services/api';
+import { useAsync } from '../../hooks/useAsync';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { CardSkeleton } from '../../components/ui/Skeleton';
 
 interface DeploymentStudioProps {
   onShowToast?: (title: string, description?: string) => void;
@@ -22,7 +25,6 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
   const [depName, setDepName] = useState('Production Customer Churn API');
   const [rateLimit, setRateLimit] = useState(60);
 
-  const [deployments, setDeployments] = useState<DeploymentResponse[]>([]);
   const [selectedDep, setSelectedDep] = useState<DeploymentResponse | null>(null);
   const [snippets, setSnippets] = useState<IntegrationSnippets | null>(null);
   const [loading, setLoading] = useState(false);
@@ -30,37 +32,28 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
   const [activeTab, setActiveTab] = useState<'curl' | 'python' | 'js' | 'widget'>('curl');
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
-  const loadDeployments = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const list = await DeploymentService.listDeployments(signal);
-      setDeployments(list);
-      if (list.length > 0 && !selectedDep) {
-        selectDeployment(list[0]);
-      }
-    } catch (err: any) {
-      if (err?.name === 'AbortError' || err?.name === 'CanceledError') {
-        // Cleanly handle aborted fetch on component unmount
-        return;
-      }
-      console.error('Load deployments error:', err);
+  // useAsync pattern for deployments fetching
+  const fetchDeploymentsFn = useCallback(async (signal: AbortSignal) => {
+    const list = await DeploymentService.listDeployments(signal);
+    if (list.length > 0 && !selectedDep) {
+      selectDeployment(list[0]);
     }
+    return list;
   }, [selectedDep]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    loadDeployments(controller.signal);
+  const { data: fetchedDeployments, isLoading: isDeploymentsLoading, execute: refetchDeployments } = useAsync<DeploymentResponse[]>(
+    fetchDeploymentsFn,
+    true
+  );
 
-    return () => {
-      controller.abort();
-    };
-  }, [loadDeployments]);
+  const deployments = fetchedDeployments || [];
 
   const handleCreateDeployment = async () => {
     setLoading(true);
     setError(null);
     try {
       const newDep = await DeploymentService.createDeployment(modelId, depName, rateLimit);
-      await loadDeployments();
+      await refetchDeployments();
       selectDeployment(newDep);
       if (onShowToast) onShowToast('Deployment Created!', `Endpoint ${newDep.deployment_id} is live.`);
     } catch (err: any) {
@@ -180,36 +173,45 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
             </div>
 
             <div className="space-y-3">
-              {deployments.map((d) => {
-                const isSelected = selectedDep?.deployment_id === d.deployment_id;
-                return (
-                  <div
-                    key={d.deployment_id}
-                    onClick={() => selectDeployment(d)}
-                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#00F5A0]/10 border-[#00F5A0]/50 shadow-[0_0_15px_rgba(0,245,160,0.15)]'
-                        : 'bg-[#040912] border-[#152540] hover:border-[#00D4FF]/30'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs font-bold text-slate-100">{d.deployment_name}</div>
-                      <span className="badge-running">
-                        ACTIVE
-                      </span>
+              {isDeploymentsLoading ? (
+                <>
+                  <CardSkeleton />
+                  <CardSkeleton />
+                </>
+              ) : deployments.length === 0 ? (
+                <EmptyState
+                  icon={Rocket}
+                  title="No Active Endpoints"
+                  description="Deploy a trained model above to generate real-time REST prediction APIs and Web Widgets."
+                  actionLabel="Deploy Default Model"
+                  onAction={handleCreateDeployment}
+                />
+              ) : (
+                deployments.map((d) => {
+                  const isSelected = selectedDep?.deployment_id === d.deployment_id;
+                  return (
+                    <div
+                      key={d.deployment_id}
+                      onClick={() => selectDeployment(d)}
+                      className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#00F5A0]/10 border-[#00F5A0]/50 shadow-[0_0_15px_rgba(0,245,160,0.15)]'
+                          : 'bg-[#040912] border-[#152540] hover:border-[#00D4FF]/30'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs font-bold text-slate-100">{d.deployment_name}</div>
+                        <span className="badge-running">
+                          ACTIVE
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] font-mono text-[#64748B] mt-2">
+                        <span>{d.deployment_id}</span>
+                        <span>{d.rate_limit_rpm} RPM</span>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between text-[11px] font-mono text-[#64748B] mt-2">
-                      <span>{d.deployment_id}</span>
-                      <span>{d.rate_limit_rpm} RPM</span>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {deployments.length === 0 && (
-                <div className="text-xs text-[#475569] text-center py-6">
-                  No active deployments yet. Deploy an endpoint above!
-                </div>
+                  );
+                })
               )}
             </div>
           </div>

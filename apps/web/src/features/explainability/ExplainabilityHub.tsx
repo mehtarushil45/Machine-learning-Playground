@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Sparkles,
@@ -11,12 +11,14 @@ import {
   Info
 } from 'lucide-react';
 import { ExplainabilityService, GlobalExplainabilityResponse, FairnessAuditResponse, WhatIfResponse } from '../../services/api';
+import { useAsync } from '../../hooks/useAsync';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { CardSkeleton } from '../../components/ui/Skeleton';
 
 export const ExplainabilityHub: React.FC = () => {
   const [globalExp, setGlobalExp] = useState<GlobalExplainabilityResponse | null>(null);
   const [fairnessAudit, setFairnessAudit] = useState<FairnessAuditResponse | null>(null);
   const [whatIfResult, setWhatIfResult] = useState<WhatIfResponse | null>(null);
-  const [loading, setLoading] = useState(false);
 
   // What-if simulator sliders
   const [feat0, setFeat0] = useState(0.8);
@@ -25,39 +27,21 @@ export const ExplainabilityHub: React.FC = () => {
   const [feat3, setFeat3] = useState(0.4);
   const [desiredOutcome, setDesiredOutcome] = useState('1');
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const fetchExplainabilityData = useCallback(async (signal: AbortSignal) => {
+    const glob = await ExplainabilityService.getGlobalExplainability(undefined, signal);
+    setGlobalExp(glob);
 
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const glob = await ExplainabilityService.getGlobalExplainability(undefined, controller.signal);
-        setGlobalExp(glob);
-
-        const sampleData = Array.from({ length: 40 }, (_, i) => ({
-          feat_0: Math.random(), feat_1: Math.random(), feat_2: Math.random(), feat_3: Math.random(),
-          gender: i % 2 === 0 ? 'Male' : 'Female',
-        }));
-        const fair = await ExplainabilityService.auditFairness(sampleData, 'gender', 'Male', 'Female');
-        setFairnessAudit(fair);
-        await runWhatIf();
-      } catch (err: any) {
-        if (err?.name === 'AbortError' || err?.name === 'CanceledError') {
-          // Cleanly handle aborted fetch on component unmount
-          return;
-        }
-        console.error('Explainability load error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-
-    return () => {
-      controller.abort();
-    };
+    const sampleData = Array.from({ length: 40 }, (_, i) => ({
+      feat_0: Math.random(), feat_1: Math.random(), feat_2: Math.random(), feat_3: Math.random(),
+      gender: i % 2 === 0 ? 'Male' : 'Female',
+    }));
+    const fair = await ExplainabilityService.auditFairness(sampleData, 'gender', 'Male', 'Female');
+    setFairnessAudit(fair);
+    await runWhatIf();
+    return glob;
   }, []);
+
+  const { isLoading: isExpLoading } = useAsync(fetchExplainabilityData, true);
 
   const runWhatIf = async () => {
     try {
@@ -106,7 +90,7 @@ export const ExplainabilityHub: React.FC = () => {
         </div>
       </div>
 
-      {loading && (
+      {isExpLoading && (
         <div className="badge-pending p-4 border rounded-xl text-xs font-semibold flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-[#F5A623] animate-ping" /> Loading model evaluation audit data...
         </div>
@@ -115,7 +99,7 @@ export const ExplainabilityHub: React.FC = () => {
       {/* Grid Row 1: Global SHAP Feature Importance & Confusion Matrix Lab */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* Card 1: SHAP Feature Importance */}
+      {/* Card 1: SHAP Feature Importance */}
         <div className="quantum-card space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="micro-label flex items-center gap-2">
@@ -126,26 +110,38 @@ export const ExplainabilityHub: React.FC = () => {
             </span>
           </div>
 
-          <p className="text-xs text-[#94A3B8] leading-relaxed bg-[#040912] p-3 rounded-xl border border-[rgba(255,255,255,0.06)]">
-            {globalExp?.summary_explanation || 'Calculating global SHAP feature impact rankings...'}
-          </p>
+          {isExpLoading ? (
+            <CardSkeleton />
+          ) : !globalExp ? (
+            <EmptyState
+              icon={BarChart3}
+              title="No Model Explainability Audit Available"
+              description="Train a machine learning model to generate global SHAP feature importance rankings and decision boundary trees."
+            />
+          ) : (
+            <>
+              <p className="text-xs text-[#94A3B8] leading-relaxed bg-[#040912] p-3 rounded-xl border border-[rgba(255,255,255,0.06)]">
+                {globalExp.summary_explanation || 'Global SHAP feature impact rankings computed.'}
+              </p>
 
-          <div className="space-y-4 pt-1">
-            {(globalExp?.global_feature_importance ?? []).map((item) => (
-              <div key={item.feature_name} className="space-y-1.5">
-                <div className="flex justify-between items-center text-xs font-semibold">
-                  <span className="text-slate-200 font-mono">{item.feature_name}</span>
-                  <span className="text-[#00D4FF] font-mono font-bold">{item.impact_percentage.toFixed(1)}%</span>
-                </div>
-                <div className="h-3 w-full bg-[#040912] rounded-full overflow-hidden border border-[#152540] p-0.5">
-                  <div
-                    style={{ width: `${Math.max(5, item.impact_percentage)}%` }}
-                    className="h-full bg-gradient-to-r from-[#00D4FF] via-[#7B5CF5] to-[#00F5A0] rounded-full shadow-[0_0_10px_rgba(0,212,255,0.5)] transition-all duration-700"
-                  />
-                </div>
+              <div className="space-y-4 pt-1">
+                {(globalExp.global_feature_importance ?? []).map((item) => (
+                  <div key={item.feature_name} className="space-y-1.5">
+                    <div className="flex justify-between items-center text-xs font-semibold">
+                      <span className="text-slate-200 font-mono">{item.feature_name}</span>
+                      <span className="text-[#00D4FF] font-mono font-bold">{item.impact_percentage.toFixed(1)}%</span>
+                    </div>
+                    <div className="h-3 w-full bg-[#040912] rounded-full overflow-hidden border border-[#152540] p-0.5">
+                      <div
+                        style={{ width: `${Math.max(5, item.impact_percentage)}%` }}
+                        className="h-full bg-gradient-to-r from-[#00D4FF] via-[#7B5CF5] to-[#00F5A0] rounded-full shadow-[0_0_10px_rgba(0,212,255,0.5)] transition-all duration-700"
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
 
         {/* Card 2: Confusion Matrix & Model Metrics Lab */}
