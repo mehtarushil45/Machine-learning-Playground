@@ -60,14 +60,29 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
     }
   };
 
-  useEffect(() => { handleGenerateCode(); }, [imputerStrategy, scalerType, algorithm, testSize]);
+  useEffect(() => {
+    handleGenerateCode();
+  }, [imputerStrategy, scalerType, algorithm, testSize, targetColumn, featureColumns]);
 
-  const copyCode = () => {
+  const copyCode = async () => {
     if (generatedCode?.python_code) {
-      navigator.clipboard.writeText(generatedCode.python_code);
-      setCopied(true);
-      if (onShowToast) onShowToast('Code Copied!', 'Python scikit-learn script copied to clipboard.');
-      setTimeout(() => setCopied(false), 2000);
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(generatedCode.python_code);
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = generatedCode.python_code;
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
+        setCopied(true);
+        if (onShowToast) onShowToast('Code Copied!', 'Python scikit-learn script copied to clipboard.');
+        setTimeout(() => setCopied(false), 2000);
+      } catch (err) {
+        if (onShowToast) onShowToast('Copy Failed', 'Could not copy code to clipboard.', 'error');
+      }
     }
   };
 

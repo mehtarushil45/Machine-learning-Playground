@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { parseCsvFile } from '../../services/csvService'
 import { validateCsvFile, formatBytes } from '../../utils/validation'
+import { apiClient, ApiError } from '../../services/apiClient'
 import type { Dataset } from '../../types/dataset'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -35,26 +36,13 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
     const formData = new FormData()
     formData.append('file', file)
 
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-    const UPLOAD_URL = `${API_BASE_URL}/api/v1/datasets/upload`
-
     try {
-      const response = await fetch(UPLOAD_URL, {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        const errorMessage =
-          errorData.detail || `Upload failed with HTTP ${response.status}`
-        throw new Error(errorMessage)
-      }
-
-      const data: ApiUploadResponse = await response.json()
+      const data = await apiClient.upload<ApiUploadResponse>('/datasets/upload', formData)
       return data
-    } catch (err) {
-      // Re-throw if error detail is provided by backend
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw new Error(err.detail || err.message)
+      }
       if (err instanceof Error && err.message) {
         throw err
       }
@@ -81,7 +69,7 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
       const dataset = await parseCsvFile(file)
       setUploadProgress(60)
 
-      // 3. API Endpoint Upload
+      // 3. API Endpoint Upload via Authenticated ApiClient
       let apiResponse: ApiUploadResponse | null = null
       try {
         apiResponse = await uploadFileToApi(file)
@@ -98,7 +86,7 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
 
       setUploadProgress(100)
 
-      // Construct metadata if API server was unreachable
+      // Construct metadata if API server was unreachable or in offline mode
       const finalMeta: ApiUploadResponse = apiResponse || {
         dataset_id: `ds-${Date.now().toString(36)}`,
         filename: file.name,

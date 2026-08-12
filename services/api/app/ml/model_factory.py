@@ -32,6 +32,10 @@ from sklearn.linear_model import (
     Ridge,
     RidgeClassifier,
 )
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.svm import SVC, SVR
 
 # Optional XGBoost & LightGBM imports with graceful fallbacks
 try:
@@ -70,13 +74,13 @@ def _make_xgb_regressor(rs: int) -> BaseEstimator:
 
 def _make_lgbm_classifier(rs: int) -> BaseEstimator:
     if _HAS_LIGHTGBM:
-        return LGBMClassifier(random_state=rs, verbose=-1)
+        return LGBMClassifier(random_state=rs, verbosity=-1)
     logger.warning("LightGBM not installed; falling back to GradientBoostingClassifier")
     return GradientBoostingClassifier(random_state=rs)
 
 def _make_lgbm_regressor(rs: int) -> BaseEstimator:
     if _HAS_LIGHTGBM:
-        return LGBMRegressor(random_state=rs, verbose=-1)
+        return LGBMRegressor(random_state=rs, verbosity=-1)
     logger.warning("LightGBM not installed; falling back to GradientBoostingRegressor")
     return GradientBoostingRegressor(random_state=rs)
 
@@ -91,6 +95,23 @@ _REGISTRY: Dict[str, _FactoryFn] = {
     ),
     "random forest classifier": lambda rs: RandomForestClassifier(
         n_estimators=100, random_state=rs
+    ),
+    "decision tree classifier": lambda rs: DecisionTreeClassifier(
+        random_state=rs
+    ),
+    "multi-layer perceptron (mlp)": lambda rs: MLPClassifier(
+        max_iter=500, random_state=rs
+    ),
+    "mlp classifier": lambda rs: MLPClassifier(
+        max_iter=500, random_state=rs
+    ),
+    "k-nearest neighbors (knn)": lambda _: KNeighborsClassifier(),
+    "knn classifier": lambda _: KNeighborsClassifier(),
+    "support vector machine (svm)": lambda rs: SVC(
+        probability=True, random_state=rs
+    ),
+    "svm classifier": lambda rs: SVC(
+        probability=True, random_state=rs
     ),
     "gradient boosting classifier": lambda rs: GradientBoostingClassifier(
         random_state=rs
@@ -107,6 +128,19 @@ _REGISTRY: Dict[str, _FactoryFn] = {
     "random forest regressor": lambda rs: RandomForestRegressor(
         n_estimators=100, random_state=rs
     ),
+    "decision tree regressor": lambda rs: DecisionTreeRegressor(
+        random_state=rs
+    ),
+    "multi-layer perceptron regressor (mlp)": lambda rs: MLPRegressor(
+        max_iter=500, random_state=rs
+    ),
+    "mlp regressor": lambda rs: MLPRegressor(
+        max_iter=500, random_state=rs
+    ),
+    "k-nearest neighbors regressor (knn)": lambda _: KNeighborsRegressor(),
+    "knn regressor": lambda _: KNeighborsRegressor(),
+    "support vector regression (svr)": lambda _: SVR(),
+    "svr regressor": lambda _: SVR(),
     "gradient boosting regressor": lambda rs: GradientBoostingRegressor(
         random_state=rs
     ),
@@ -120,6 +154,22 @@ _REGISTRY: Dict[str, _FactoryFn] = {
 
 # Generic algorithm name mapping based on problem type
 _GENERIC_MAP: Dict[str, Dict[str, str]] = {
+    "decision tree": {
+        "classification": "decision tree classifier",
+        "regression": "decision tree regressor",
+    },
+    "mlp": {
+        "classification": "mlp classifier",
+        "regression": "mlp regressor",
+    },
+    "knn": {
+        "classification": "knn classifier",
+        "regression": "knn regressor",
+    },
+    "svm": {
+        "classification": "svm classifier",
+        "regression": "svr regressor",
+    },
     "xgboost": {
         "classification": "xgboost classifier",
         "regression": "xgboost regressor",
@@ -222,16 +272,24 @@ def list_supported_algorithms() -> Dict[str, list[str]]:
     """Return a dict of supported algorithm names grouped by task."""
     return {
         "classification": [
-            "Logistic Regression",
             "Random Forest Classifier",
+            "Logistic Regression",
+            "Decision Tree Classifier",
+            "Multi-Layer Perceptron (MLP)",
+            "K-Nearest Neighbors (KNN)",
+            "Support Vector Machine (SVM)",
             "Gradient Boosting Classifier",
             "XGBoost Classifier",
             "LightGBM Classifier",
             "Ridge Classifier",
         ],
         "regression": [
-            "Linear Regression",
             "Random Forest Regressor",
+            "Linear Regression",
+            "Decision Tree Regressor",
+            "Multi-Layer Perceptron Regressor (MLP)",
+            "K-Nearest Neighbors Regressor (KNN)",
+            "Support Vector Regression (SVR)",
             "Gradient Boosting Regressor",
             "XGBoost Regressor",
             "LightGBM Regressor",

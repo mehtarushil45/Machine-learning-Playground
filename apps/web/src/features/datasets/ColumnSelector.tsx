@@ -21,8 +21,9 @@ export const ColumnSelector = memo(function ColumnSelector({
   onSelectedFeaturesChange,
   onSelectedTargetChange,
 }: ColumnSelectorProps) {
-  const numericColumns = useMemo(
-    () => getNumericColumns(dataset.columns, dataset.rows),
+  const allColumns = useMemo(() => dataset.columns || [], [dataset.columns])
+  const numericSet = useMemo(
+    () => new Set(getNumericColumns(dataset.columns, dataset.rows)),
     [dataset.columns, dataset.rows],
   )
 
@@ -38,15 +39,15 @@ export const ColumnSelector = memo(function ColumnSelector({
     onSelectedFeaturesChange(next.selectedFeatures)
   }
 
-  if (numericColumns.length === 0) {
+  if (allColumns.length === 0) {
     return (
       <Card variant="outline" className="p-6">
         <div className="flex items-center gap-3 text-amber-500">
           <Icon name="alert-circle" size={20} />
           <div>
-            <h4 className="text-sm font-semibold">No Numeric Columns Detected</h4>
+            <h4 className="text-sm font-semibold">No Columns Detected</h4>
             <p className="text-xs text-muted-foreground">
-              No numerical columns were found in this dataset for feature and target modeling.
+              No header columns were found in this dataset for feature and target modeling.
             </p>
           </div>
         </div>
@@ -84,7 +85,7 @@ export const ColumnSelector = memo(function ColumnSelector({
           </legend>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-            {numericColumns.map((column) => {
+            {allColumns.map((column) => {
               const isChecked = selectedFeatures.includes(column)
               const isDisabled = column === selectedTarget
 
@@ -126,7 +127,7 @@ export const ColumnSelector = memo(function ColumnSelector({
           </legend>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-            {numericColumns.map((column) => {
+            {allColumns.map((column) => {
               const isSelected = selectedTarget === column
 
               return (

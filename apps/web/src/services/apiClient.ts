@@ -73,8 +73,17 @@ export class ApiClient {
 
     this.baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl.slice(0, -1) : rawBaseUrl
     this.defaultTimeoutMs = config.timeoutMs ?? 15000
-    this.getAuthToken = config.getAuthToken
-    this.setAuthToken = config.setAuthToken
+    this.getAuthToken =
+      config.getAuthToken ||
+      (() => (typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null))
+    this.setAuthToken =
+      config.setAuthToken ||
+      ((token) => {
+        if (typeof localStorage !== 'undefined') {
+          if (token) localStorage.setItem('access_token', token)
+          else localStorage.removeItem('access_token')
+        }
+      })
     this.onAuthError = config.onAuthError
     this.refreshTokenEndpoint = config.refreshTokenEndpoint ?? '/auth/refresh'
   }
@@ -262,7 +271,10 @@ export class ApiClient {
     if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
       return endpoint
     }
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+    let cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+    if (this.baseUrl.endsWith('/api/v1') && cleanEndpoint.startsWith('/api/v1/')) {
+      cleanEndpoint = cleanEndpoint.slice('/api/v1'.length)
+    }
     return `${this.baseUrl}${cleanEndpoint}`
   }
 

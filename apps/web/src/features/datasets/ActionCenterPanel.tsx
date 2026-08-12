@@ -76,7 +76,7 @@ export const ActionCenterPanel = memo(function ActionCenterPanel({
       description: `Train ${recommendations?.recommended_problem_type || 'Classification'} models (${recommendations?.recommended_models.slice(0, 2).join(', ') || 'Random Forest'}).`,
       status: 'Ready',
       icon: 'cpu',
-      sectionId: 'section-selector',
+      sectionId: 'section-training-config',
       buttonText: 'Ready to Train',
     })
 

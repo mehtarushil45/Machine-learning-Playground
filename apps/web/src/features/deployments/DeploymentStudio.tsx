@@ -293,10 +293,22 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
 
                     <button
                       onClick={() => {
+                        const jsCode = snippets?.javascript_snippet || `// JavaScript Fetch Integration
+fetch('${selectedDep.endpoint_url}', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-API-Key': '${selectedDep.api_key}'
+  },
+  body: JSON.stringify({ features: { feature_1: 1.0, feature_2: 0.5 } })
+})
+.then(res => res.json())
+.then(data => console.log('Prediction:', data));`;
+
                         const snippetMap = {
                           curl: snippets?.curl_snippet,
                           python: snippets?.python_snippet,
-                          js: `fetch('${selectedDep.endpoint_url}', ...)`,
+                          js: jsCode,
                           widget: snippets?.embeddable_widget_html
                         };
                         handleCopy(snippetMap[activeTab] || '', 'Code Snippet');

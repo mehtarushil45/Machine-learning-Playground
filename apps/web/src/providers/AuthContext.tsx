@@ -107,13 +107,19 @@ export function getInitials(name?: string | null, email?: string | null): string
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/v1'
 
 async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init.headers as Record<string, string>),
+  }
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
   return fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: 'include', // send & receive httpOnly cookies
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init.headers as Record<string, string>),
-    },
+    headers,
   })
 }
 
@@ -133,9 +139,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const profile: AuthUser = await res.json()
         setUser(profile)
-      } else {
-        setUser(null)
+        return
       }
+
+      // Auto-authenticate demo session if unauthenticated
+      try {
+        const loginRes = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            username: 'demo@ml-playground.internal',
+            password: 'DemoPassword123!',
+          }).toString(),
+        })
+
+        let loginData = await loginRes.json().catch(() => ({}))
+
+        if (!loginRes.ok) {
+          // Register demo user if doesn't exist yet
+          await fetch(`${API_BASE}/auth/register`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: 'demo@ml-playground.internal',
+              password: 'DemoPassword123!',
+              full_name: 'Demo User',
+            }),
+          })
+          const retryLogin = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              username: 'demo@ml-playground.internal',
+              password: 'DemoPassword123!',
+            }).toString(),
+          })
+          loginData = await retryLogin.json().catch(() => ({}))
+        }
+
+        if (loginData.access_token) {
+          localStorage.setItem('access_token', loginData.access_token)
+        }
+
+        const profileRes = await authFetch('/auth/me')
+        if (profileRes.ok) {
+          setUser(await profileRes.json())
+          return
+        }
+      } catch {
+        // Backend server offline — fallback gracefully
+      }
+      setUser(null)
     } catch {
       setUser(null)
     } finally {
@@ -168,6 +225,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.detail ?? `Login failed (${res.status})`)
     }
 
+    const data = await res.json().catch(() => ({}))
+    if (data.access_token) {
+      localStorage.setItem('access_token', data.access_token)
+    }
+
     // Fetch updated profile after login
     const profileRes = await authFetch('/auth/me')
     if (profileRes.ok) {
@@ -182,6 +244,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Server unavailable — still clear local state
     } finally {
+      localStorage.removeItem('access_token')
       setUser(null)
     }
   }, [])
@@ -193,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Server unavailable — still clear local state
     } finally {
+      localStorage.removeItem('access_token')
       setUser(null)
     }
   }, [])

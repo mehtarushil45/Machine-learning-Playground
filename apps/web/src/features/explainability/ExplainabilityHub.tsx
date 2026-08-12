@@ -27,6 +27,16 @@ export const ExplainabilityHub: React.FC = () => {
   const [feat3, setFeat3] = useState(0.4);
   const [desiredOutcome, setDesiredOutcome] = useState('1');
 
+  const runWhatIf = useCallback(async () => {
+    try {
+      const sample = { feat_0: feat0, feat_1: feat1, feat_2: feat2, feat_3: feat3 };
+      const res = await ExplainabilityService.simulateWhatIf(sample, desiredOutcome);
+      setWhatIfResult(res);
+    } catch (err) {
+      console.error('What-If error:', err);
+    }
+  }, [feat0, feat1, feat2, feat3, desiredOutcome]);
+
   const fetchExplainabilityData = useCallback(async (signal: AbortSignal) => {
     const glob = await ExplainabilityService.getGlobalExplainability(undefined, signal);
     setGlobalExp(glob);
@@ -37,23 +47,14 @@ export const ExplainabilityHub: React.FC = () => {
     }));
     const fair = await ExplainabilityService.auditFairness(sampleData, 'gender', 'Male', 'Female');
     setFairnessAudit(fair);
-    await runWhatIf();
     return glob;
   }, []);
 
   const { isLoading: isExpLoading } = useAsync(fetchExplainabilityData, true);
 
-  const runWhatIf = async () => {
-    try {
-      const sample = { feat_0: feat0, feat_1: feat1, feat_2: feat2, feat_3: feat3 };
-      const res = await ExplainabilityService.simulateWhatIf(sample, desiredOutcome);
-      setWhatIfResult(res);
-    } catch (err) {
-      console.error('What-If error:', err);
-    }
-  };
-
-  useEffect(() => { runWhatIf(); }, [feat0, feat1, feat2, feat3, desiredOutcome]);
+  useEffect(() => {
+    runWhatIf();
+  }, [runWhatIf]);
 
   // Synthetic confusion matrix metrics for model audit evaluation lab
   const confusionMatrix = {
@@ -344,6 +345,22 @@ export const ExplainabilityHub: React.FC = () => {
                     <div className="h-full bg-[#00D4FF] rounded-full shadow-[0_0_10px_#00D4FF]" style={{ width: `${whatIfResult.new_confidence * 100}%` }} />
                   </div>
                 </div>
+
+                {/* Counterfactual Feature Adjustments */}
+                {whatIfResult.suggested_changes && whatIfResult.suggested_changes.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-[#152540]">
+                    <h5 className="micro-label">Recommended Feature Adjustments</h5>
+                    <div className="space-y-1.5">
+                      {whatIfResult.suggested_changes.map((sc, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-[#070E1C] text-xs font-mono">
+                          <span className="text-[#E2E8F0] font-semibold">{sc.feature_name}</span>
+                          <span className="text-[#94A3B8]">{sc.old_value.toFixed(2)} → <strong className="text-[#00F5A0]">{sc.new_value.toFixed(2)}</strong></span>
+                          <span className="text-[10px] text-[#7B5CF5] font-sans">({sc.impact_description})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-xs text-[#64748B] text-center py-12">

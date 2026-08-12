@@ -28,16 +28,24 @@ export async function fetchSupportedAlgorithms(signal?: AbortSignal): Promise<Su
     }
     return {
       classification: [
-        'Logistic Regression',
         'Random Forest Classifier',
+        'Logistic Regression',
+        'Decision Tree Classifier',
+        'Multi-Layer Perceptron (MLP)',
+        'K-Nearest Neighbors (KNN)',
+        'Support Vector Machine (SVM)',
         'Gradient Boosting Classifier',
         'XGBoost Classifier',
         'LightGBM Classifier',
         'Ridge Classifier',
       ],
       regression: [
-        'Linear Regression',
         'Random Forest Regressor',
+        'Linear Regression',
+        'Decision Tree Regressor',
+        'Multi-Layer Perceptron Regressor (MLP)',
+        'K-Nearest Neighbors Regressor (KNN)',
+        'Support Vector Regression (SVR)',
         'Gradient Boosting Regressor',
         'XGBoost Regressor',
         'LightGBM Regressor',
