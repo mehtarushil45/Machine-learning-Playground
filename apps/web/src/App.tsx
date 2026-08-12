@@ -25,7 +25,13 @@ import { DeploymentStudio } from './features/deployments/DeploymentStudio';
 import { PortfolioViewer } from './features/portfolios/PortfolioViewer';
 import type { Dataset } from './types/dataset';
 
-export type PlatformTab = 'workspace' | 'code-studio' | 'explainability' | 'classrooms' | 'deployments' | 'portfolios';
+export type PlatformTab =
+  | 'workspace'
+  | 'code-studio'
+  | 'explainability'
+  | 'classrooms'
+  | 'deployments'
+  | 'portfolios';
 
 export interface ToastMessage {
   id: string;
@@ -34,6 +40,24 @@ export interface ToastMessage {
   type: 'success' | 'info' | 'error';
 }
 
+/* ─── Brand color constants ─────────────────────────────────────── */
+const BB = {
+  base:          '#0B0912',
+  surface:       '#1B1530',
+  elevated:      '#2A2247',
+  border:        'rgba(107,92,166,0.18)',
+  borderHover:   'rgba(107,92,166,0.35)',
+  primary:       '#4B3B7C',
+  primaryLight:  '#6C5CA6',
+  maroon:        '#6E1423',
+  gold:          '#C9A24B',
+  text:          '#F5F1EC',
+  muted:         '#9E93B8',
+  disabled:      '#3D3558',
+  // Group label
+  groupLabel:    '#5E5480',
+} as const;
+
 function AppContent() {
   const latestModel = useLatestModel();
   const { user, isAuthenticated } = useAuthContext();
@@ -41,14 +65,18 @@ function AppContent() {
     ? getInitials(user?.full_name, user?.email)
     : 'ML';
 
-  const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
+  const [activeTab, setActiveTab]           = useState<PlatformTab>('workspace');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [dataset, setDataset] = useState<Dataset | null>(null);
+  const [dataset, setDataset]               = useState<Dataset | null>(null);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [toasts, setToasts]                 = useState<ToastMessage[]>([]);
 
-  const showToast = (title: string, description?: string, type: 'success' | 'info' | 'error' = 'success') => {
+  const showToast = (
+    title: string,
+    description?: string,
+    type: 'success' | 'info' | 'error' = 'success',
+  ) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, title, description, type }]);
     setTimeout(() => {
@@ -64,7 +92,7 @@ function AppContent() {
     showToast('Dataset Ingested', `Successfully loaded dataset with ${count} rows.`);
   };
 
-  // Keyboard Navigation Shortcuts (⌘1 through ⌘6)
+  // Keyboard shortcuts (⌘1–⌘6, ⌘B)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
@@ -82,12 +110,12 @@ function AppContent() {
   }, []);
 
   const navItems: { id: PlatformTab; label: string; icon: React.ReactNode; group: string }[] = [
-    { id: 'workspace',      label: 'Dataset & Profiler',      icon: <Database className="w-4 h-4" />,      group: 'DATA LAB' },
-    { id: 'code-studio',    label: 'View-as-Code Studio',     icon: <Code2 className="w-4 h-4" />,         group: 'DATA LAB' },
-    { id: 'explainability', label: 'Explainability & Ethics', icon: <Sparkles className="w-4 h-4" />,      group: 'EVALUATION' },
-    { id: 'classrooms',     label: 'Classrooms & Audit',      icon: <GraduationCap className="w-4 h-4" />, group: 'EVALUATION' },
-    { id: 'deployments',    label: 'Deployment Studio',       icon: <Rocket className="w-4 h-4" />,        group: 'OPS & DEPLOY' },
-    { id: 'portfolios',     label: 'Portfolios & Verification',icon: <Award className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
+    { id: 'workspace',      label: 'Dataset & Profiler',       icon: <Database className="w-4 h-4" />,      group: 'DATA LAB' },
+    { id: 'code-studio',    label: 'View-as-Code Studio',      icon: <Code2 className="w-4 h-4" />,          group: 'DATA LAB' },
+    { id: 'explainability', label: 'Explainability & Ethics',  icon: <Sparkles className="w-4 h-4" />,       group: 'EVALUATION' },
+    { id: 'classrooms',     label: 'Classrooms & Audit',       icon: <GraduationCap className="w-4 h-4" />,  group: 'EVALUATION' },
+    { id: 'deployments',    label: 'Deployment Studio',        icon: <Rocket className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
+    { id: 'portfolios',     label: 'Portfolios & Verification', icon: <Award className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
   ];
 
   const groups = Array.from(new Set(navItems.map((n) => n.group)));
@@ -102,26 +130,72 @@ function AppContent() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden neural-grid-bg text-slate-100 font-sans antialiased selection:bg-[#00D4FF]/30 selection:text-[#00D4FF]">
-      
-      {/* ── 1. SIDEBAR (LEFT NAV) — 240px / 64px ──────────────────── */}
+    <div
+      className="flex h-screen w-screen overflow-hidden antialiased"
+      style={{
+        /* BB canvas: very faint blueberry dot grid */
+        backgroundColor: BB.base,
+        backgroundImage: 'radial-gradient(rgba(107,92,166,0.07) 1px, transparent 1px)',
+        backgroundSize: '32px 32px',
+        fontFamily: 'var(--font-ui)',
+        color: BB.text,
+      }}
+    >
+      {/* ── 1. SIDEBAR ────────────────────────────────────────────── */}
       <aside
         style={{
           width: isSidebarCollapsed ? 64 : 240,
-          backgroundColor: '#0C1A30',
-          borderRight: '1px solid rgba(0, 212, 255, 0.08)',
+          backgroundColor: BB.surface,
+          borderRight: `1px solid ${BB.border}`,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          transition: 'width 300ms cubic-bezier(0.4,0,0.2,1)',
+          zIndex: 30,
         }}
-        className="relative z-30 flex flex-col transition-all duration-300 ease-in-out shrink-0"
       >
-        {/* Logo Area */}
-        <div className="flex items-center justify-between h-14 px-4 border-b border-[rgba(0,212,255,0.08)]">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="text-[#00D4FF] text-xl font-bold drop-shadow-[0_0_10px_rgba(0,212,255,0.6)] shrink-0">
-              ◈
-            </div>
+        {/* Logo row */}
+        <div
+          style={{
+            height: 56,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 16px',
+            borderBottom: `1px solid ${BB.border}`,
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+            {/* Thread-node brand mark */}
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 22 22"
+              fill="none"
+              style={{ flexShrink: 0 }}
+            >
+              <circle cx="11" cy="11" r="4" fill={BB.maroon} />
+              <circle cx="3"  cy="3"  r="2" fill={BB.primary} />
+              <circle cx="19" cy="3"  r="2" fill={BB.primary} />
+              <circle cx="3"  cy="19" r="2" fill={BB.primary} />
+              <line x1="5"  y1="5"  x2="8.2"  y2="8.2"  stroke={BB.border} strokeWidth="1" />
+              <line x1="17" y1="5"  x2="13.8" y2="8.2"  stroke={BB.border} strokeWidth="1" />
+              <line x1="5"  y1="17" x2="8.2"  y2="13.8" stroke={BB.border} strokeWidth="1" />
+            </svg>
+
             {!isSidebarCollapsed && (
-              <span className="font-display font-bold text-base tracking-tight text-white uppercase">
-                ML LAB
+              <span
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontWeight: 700,
+                  fontSize: '1rem',
+                  letterSpacing: '-0.01em',
+                  color: BB.text,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                ML Lab
               </span>
             )}
           </div>
@@ -130,17 +204,31 @@ function AppContent() {
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             className="btn-icon"
             title="Toggle Sidebar (⌘B)"
+            style={{ flexShrink: 0 }}
           >
-            {isSidebarCollapsed ? <ChevronRight className="w-4 h-4 text-[#94A3B8]" /> : <ChevronLeft className="w-4 h-4 text-[#94A3B8]" />}
+            {isSidebarCollapsed
+              ? <ChevronRight className="w-4 h-4" style={{ color: BB.muted }} />
+              : <ChevronLeft  className="w-4 h-4" style={{ color: BB.muted }} />}
           </button>
         </div>
 
-        {/* Grouped Nav Items */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6">
-          {groups.map((group) => (
-            <div key={group} className="space-y-1">
+        {/* Nav groups */}
+        <nav style={{ flex: 1, overflowY: 'auto', padding: '16px 10px' }}>
+          {groups.map((group, gi) => (
+            <div key={group} style={{ marginBottom: gi < groups.length - 1 ? 24 : 0 }}>
               {!isSidebarCollapsed && (
-                <div className="px-3 text-[10px] font-medium tracking-[0.12em] uppercase text-[#334155] mb-2">
+                <div
+                  style={{
+                    padding: '0 10px',
+                    marginBottom: 6,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    color: BB.groupLabel,
+                    fontFamily: 'var(--font-ui)',
+                  }}
+                >
                   {group}
                 </div>
               )}
@@ -152,28 +240,51 @@ function AppContent() {
                     <button
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
-                      style={
-                        isActive
-                          ? {
-                              backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                              borderLeft: '3px solid #00D4FF',
-                              color: '#00D4FF',
-                            }
-                          : {
-                              color: '#64748B',
-                            }
-                      }
-                      className={`w-full h-11 px-3 flex items-center gap-3 rounded-r-lg text-xs font-medium transition-all duration-150 cursor-pointer ${
-                        !isActive ? 'hover:bg-[rgba(255,255,255,0.04)] hover:text-slate-200' : ''
-                      }`}
                       title={isSidebarCollapsed ? item.label : undefined}
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '0 10px',
+                        paddingLeft: isActive ? 8 : 10,
+                        marginBottom: 2,
+                        background: isActive ? 'rgba(107,92,166,0.09)' : 'transparent',
+                        border: 'none',
+                        // Maroon 2px left border for active state — the signature BB motif
+                        borderLeft: `2px solid ${isActive ? BB.maroon : 'transparent'}`,
+                        borderRadius: '0 6px 6px 0',
+                        color: isActive ? BB.text : BB.muted,
+                        fontFamily: 'var(--font-ui)',
+                        fontSize: 12,
+                        fontWeight: isActive ? 500 : 400,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'all 150ms',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = 'rgba(107,92,166,0.06)'
+                          e.currentTarget.style.color = BB.text
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive) {
+                          e.currentTarget.style.background = 'transparent'
+                          e.currentTarget.style.color = BB.muted
+                        }
+                      }}
                     >
-                      <span style={{ color: isActive ? '#00D4FF' : '#475569' }} className="shrink-0">
+                      <span style={{ color: isActive ? BB.primaryLight : BB.disabled, flexShrink: 0 }}>
                         {item.icon}
                       </span>
-                      
                       {!isSidebarCollapsed && (
-                        <span className="flex-1 text-left truncate">{item.label}</span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {item.label}
+                        </span>
                       )}
                     </button>
                   );
@@ -182,63 +293,139 @@ function AppContent() {
           ))}
         </nav>
 
-        {/* Bottom User Avatar */}
-        <div className="p-3 border-t border-[rgba(0,212,255,0.08)] bg-[#0C1A30]">
+        {/* User avatar at bottom */}
+        <div
+          style={{
+            padding: '12px 10px',
+            borderTop: `1px solid ${BB.border}`,
+            background: BB.surface,
+          }}
+        >
           <SidebarUserAvatar isCollapsed={isSidebarCollapsed} />
         </div>
       </aside>
 
-      {/* ── 2. MAIN WORKSPACE CANVAS ───────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-[#070E1C]/90">
-        
-        {/* Top Header Bar — 56px */}
+      {/* ── 2. MAIN CANVAS ─────────────────────────────────────────── */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          background: 'rgba(11,9,18,0.92)',
+        }}
+      >
+        {/* Top header — 56px */}
         <header
           style={{
             height: 56,
-            backgroundColor: 'rgba(7, 14, 28, 0.8)',
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0 24px',
+            backgroundColor: 'rgba(11,9,18,0.88)',
             backdropFilter: 'blur(12px)',
-            borderBottom: '1px solid rgba(0, 212, 255, 0.07)',
+            borderBottom: `1px solid ${BB.border}`,
           }}
-          className="px-6 flex items-center justify-between shrink-0"
         >
           {/* Breadcrumb */}
-          <div className="flex items-center gap-2 font-display text-sm">
-            <span className="text-[#64748B]">ML Playground</span>
-            <span className="text-[#334155]">&gt;</span>
-            <span className="text-[#00D4FF] font-semibold flex items-center gap-2">
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-ui)', fontSize: 13 }}
+          >
+            <span style={{ color: BB.muted }}>ML Playground</span>
+            <span style={{ color: BB.disabled }}>›</span>
+            <span
+              style={{
+                color: BB.primaryLight,
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
               {navItems.find((n) => n.id === activeTab)?.icon}
               {breadcrumbLabels[activeTab]}
             </span>
           </div>
 
-          {/* Right Header Controls */}
-          <div className="flex items-center gap-4">
-            {/* Dynamic Latest Model Selector Pill */}
+          {/* Right controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {/* Latest model pill */}
             <button
               onClick={() => latestModel.refetch()}
-              className="btn-secondary py-1.5! px-3! text-xs flex items-center gap-2 transition-all hover:border-[#00D4FF]/40 cursor-pointer"
-              title={`Latest Trained Model: ${latestModel.displayText} (Click to refresh)`}
+              title={`Latest model: ${latestModel.displayText} — click to refresh`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '5px 12px',
+                background: 'transparent',
+                border: `1px solid ${BB.border}`,
+                borderRadius: '8px 8px 0 8px',
+                color: BB.muted,
+                fontFamily: 'var(--font-ui)',
+                fontSize: 11,
+                cursor: 'pointer',
+                transition: 'all 150ms',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = BB.primaryLight
+                e.currentTarget.style.color = BB.text
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = BB.border
+                e.currentTarget.style.color = BB.muted
+              }}
             >
-              <span className="w-2 h-2 rounded-full bg-[#00F5A0] shadow-[0_0_8px_#00F5A0]" />
+              {/* Gold dot = healthy model */}
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ background: BB.gold, boxShadow: `0 0 6px ${BB.gold}99`, flexShrink: 0 }}
+              />
               <span>{latestModel.displayText}</span>
             </button>
 
-            {/* Real-Time Notification Bell Dropdown */}
+            {/* Notification bell */}
             <NotificationBell />
 
-            {/* User Avatar Pill — dynamic initials from AuthContext */}
+            {/* User avatar pill */}
             <div
-              className="w-7 h-7 rounded-full bg-[#101E36] border border-[#7B5CF5] flex items-center justify-center text-white text-xs font-bold"
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #4B3B7C, #6E1423)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: BB.text,
+                fontSize: 11,
+                fontWeight: 700,
+                fontFamily: 'var(--font-ui)',
+                boxShadow: '0 0 0 2px rgba(107,92,166,0.30)',
+                userSelect: 'none',
+                cursor: 'default',
+              }}
               title={user?.full_name || user?.email || 'User'}
             >
               {headerInitials}
             </div>
-
           </div>
         </header>
 
-        {/* Dynamic Page Views */}
-        <main className="flex-1 overflow-y-auto p-6 max-w-7xl w-full mx-auto space-y-8">
+        {/* Main content area */}
+        <main
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: 24,
+            maxWidth: 1280,
+            width: '100%',
+            margin: '0 auto',
+          }}
+          className="space-y-8"
+        >
           {activeTab === 'workspace' && (
             <EnterpriseWorkspace
               dataset={dataset}
@@ -257,7 +444,7 @@ function AppContent() {
         </main>
       </div>
 
-      {/* ── 3. FLOATING TOAST NOTIFICATIONS ───────────────────────── */}
+      {/* ── 3. TOAST STACK ─────────────────────────────────────────── */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
         {toasts.map((toast) => (
           <Toast

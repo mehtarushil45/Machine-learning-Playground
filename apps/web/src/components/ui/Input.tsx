@@ -37,7 +37,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         {label ? (
           <label
             htmlFor={inputId}
-            className="text-xs font-medium text-foreground/90 select-none"
+            className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9E93B8] select-none"
+            style={{ fontFamily: 'var(--font-ui)' }}
           >
             {label}
           </label>
@@ -45,7 +46,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 
         <div className="relative flex items-center">
           {startIcon ? (
-            <div className="absolute left-3 text-muted-foreground pointer-events-none">
+            <div className="absolute left-3 text-[#9E93B8] pointer-events-none">
               <Icon name={startIcon} size={16} />
             </div>
           ) : null}
@@ -56,29 +57,36 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             type={type}
             disabled={disabled}
             className={cn(
-              'flex h-9 w-full rounded-md border border-input bg-card px-3 py-1 text-sm shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50',
+              // Asymmetric corners: 8px 8px 0 8px
+              'flex h-9 w-full rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-none',
+              'border border-[rgba(107,92,166,0.20)] bg-transparent px-3 py-1 text-sm',
+              'text-[#F5F1EC] placeholder:text-[#5E5480]',
+              'transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:border-[#6C5CA6] focus-visible:ring-2 focus-visible:ring-[rgba(107,92,166,0.30)] focus-visible:ring-offset-1 focus-visible:ring-offset-[#0B0912]',
+              'disabled:cursor-not-allowed disabled:opacity-50',
               startIcon && 'pl-9',
               endIcon && 'pr-9',
-              error && 'border-destructive focus-visible:ring-destructive',
+              error && 'border-[rgba(178,58,78,0.50)] focus-visible:ring-[rgba(178,58,78,0.30)]',
               className,
             )}
+            style={{ fontFamily: 'var(--font-ui)' }}
             {...props}
           />
 
           {endIcon ? (
-            <div className="absolute right-3 text-muted-foreground pointer-events-none">
+            <div className="absolute right-3 text-[#9E93B8] pointer-events-none">
               <Icon name={endIcon} size={16} />
             </div>
           ) : null}
         </div>
 
         {error ? (
-          <p className="text-xs text-destructive flex items-center gap-1 font-medium">
+          <p className="text-xs text-[#B23A4E] flex items-center gap-1 font-medium">
             <Icon name="alert-circle" size={12} />
             {error}
           </p>
         ) : helperText ? (
-          <p className="text-xs text-muted-foreground">{helperText}</p>
+          <p className="text-xs text-[#9E93B8]">{helperText}</p>
         ) : null}
       </div>
     )

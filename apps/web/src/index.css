@@ -1,294 +1,326 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap');
+/* ── Google Fonts — Fraunces (display serif) + Space Grotesk (UI) + JetBrains Mono ── */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,700&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 /* ============================================================
-   ML PLAYGROUND — MISSION CONTROL / QUANTUM LAB UI SYSTEM (60-30-10)
+   ML PLAYGROUND — BLUEBERRY & MAROON DESIGN SYSTEM
+   Brand: Sophisticated · Confident · Quietly Powerful
    ============================================================ */
 
 :root {
-  /* 60% — Primary (Dominant Canvas) */
-  --void-black:      #040912;
-  --deep-space:      #070E1C;
+  /* ── Canvas backgrounds ──────────────────────────────────── */
+  --bb-base:           #0B0912;   /* 60% dominant — darkest */
+  --bb-surface:        #1B1530;   /* 30% — card/panel */
+  --bb-elevated:       #2A2247;   /* elevated panels */
+  --bb-overlay:        #211C3C;   /* tooltips, popovers */
 
-  /* 30% — Secondary (Structure & Depth) */
-  --midnight-slate:  #0C1A30;
-  --nebula-surface:  #101E36;
-  --orbit-rim:       #152540;
-  --ghost-layer:     rgba(16, 30, 54, 0.6);
+  /* ── Blueberry — primary brand ──────────────────────────── */
+  --bb-primary:        #4B3B7C;
+  --bb-primary-light:  #6C5CA6;
+  --bb-primary-faint:  rgba(107,92,166,0.12);
+  --bb-primary-border: rgba(107,92,166,0.18);
+  --bb-primary-ring:   rgba(107,92,166,0.35);
 
-  /* 10% — Accent (Energy & Interaction) */
-  --quantum-cyan:    #00D4FF;
-  --neural-violet:   #7B5CF5;
-  --plasma-green:    #00F5A0;
-  --alert-amber:     #F5A623;
-  --critical-red:    #FF4D6D;
+  /* ── Maroon — CTA / active indicator ────────────────────── */
+  --bb-maroon:         #6E1423;
+  --bb-maroon-hover:   #8E2A3C;
+  --bb-maroon-faint:   rgba(110,20,35,0.15);
+  --bb-maroon-border:  rgba(110,20,35,0.40);
 
-  /* Fonts */
-  --font-display: 'Space Grotesk', system-ui, sans-serif;
-  --font-sans:    'Inter', system-ui, sans-serif;
-  --font-mono:    'JetBrains Mono', monospace;
+  /* ── Gold — success / best-value ────────────────────────── */
+  --bb-gold:           #C9A24B;
+  --bb-gold-faint:     rgba(201,162,75,0.12);
+
+  /* ── Error ───────────────────────────────────────────────── */
+  --bb-error:          #B23A4E;
+  --bb-error-faint:    rgba(178,58,78,0.12);
+
+  /* ── Text ────────────────────────────────────────────────── */
+  --bb-text:           #F5F1EC;
+  --bb-muted:          #9E93B8;
+  --bb-placeholder:    #5E5480;
+  --bb-disabled:       #3D3558;
+
+  /* ── Fonts ───────────────────────────────────────────────── */
+  --font-display: 'Fraunces', 'Georgia', serif;
+  --font-ui:      'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Legacy aliases — keep for backward compat with Tailwind theme consumers */
+  --font-display-legacy: var(--font-ui);
+  --font-sans: var(--font-ui);
 }
 
-/* ── Neural Grid Canvas Animation ───────────────────────────── */
-.neural-grid-bg {
-  background-color: var(--void-black);
-  background-image: radial-gradient(rgba(0, 212, 255, 0.09) 1px, transparent 1px);
+/* ── Dark-mode Tailwind custom-properties bridge ─────────────────── */
+/* These map Tailwind's semantic tokens to BB palette */
+:root, .dark {
+  --background:         var(--bb-base);
+  --foreground:         var(--bb-text);
+  --card:               var(--bb-surface);
+  --card-foreground:    var(--bb-text);
+  --popover:            var(--bb-overlay);
+  --popover-foreground: var(--bb-text);
+  --primary:            var(--bb-maroon);
+  --primary-foreground: var(--bb-text);
+  --secondary:          var(--bb-elevated);
+  --secondary-foreground: var(--bb-muted);
+  --muted:              var(--bb-elevated);
+  --muted-foreground:   var(--bb-muted);
+  --accent:             var(--bb-primary);
+  --accent-foreground:  var(--bb-text);
+  --destructive:        var(--bb-error);
+  --destructive-foreground: var(--bb-text);
+  --border:             var(--bb-primary-border);
+  --input:              var(--bb-surface);
+  --ring:               var(--bb-primary-ring);
+}
+
+/* ── Base canvas — subtle dot pattern replaces cyan grid ──── */
+.bb-canvas {
+  background-color: var(--bb-base);
+  background-image: radial-gradient(rgba(107,92,166,0.07) 1px, transparent 1px);
   background-size: 32px 32px;
-  animation: gridDrift 20s linear infinite;
 }
 
-@keyframes gridDrift {
-  0%   { background-position: 0 0; }
-  100% { background-position: 32px 32px; }
-}
-
-/* ── Scanline Sweep Effect ──────────────────────────────────── */
-.scanline-sweep {
-  position: relative;
-  overflow: hidden;
-}
-.scanline-sweep::after {
-  content: '';
-  position: absolute;
-  top: -100%;
-  left: 0;
-  right: 0;
-  height: 4px;
-  background: linear-gradient(180deg, rgba(0, 212, 255, 0) 0%, rgba(0, 212, 255, 0.35) 50%, rgba(0, 212, 255, 0) 100%);
-  animation: sweep 6s ease-in-out infinite;
-  pointer-events: none;
-}
-@keyframes sweep {
-  0%   { top: -10%; opacity: 0; }
-  10%  { opacity: 1; }
-  90%  { opacity: 1; }
-  100% { top: 110%; opacity: 0; }
+/* Keep legacy class name working (used in App.tsx body div) */
+.neural-grid-bg {
+  background-color: var(--bb-base);
+  background-image: radial-gradient(rgba(107,92,166,0.07) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
 /* ── Scrollbars ─────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.2); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.4); }
+::-webkit-scrollbar-thumb { background: rgba(107,92,166,0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(107,92,166,0.45); }
 
-/* ── Typography & Headings ───────────────────────────────────── */
-.font-display { font-family: 'Space Grotesk', system-ui, sans-serif; }
-.font-sans    { font-family: 'Inter', system-ui, sans-serif; }
-.font-mono    { font-family: 'JetBrains Mono', monospace; }
+/* ── Selection ──────────────────────────────────────────────── */
+::selection { background: rgba(107,92,166,0.30); color: var(--bb-text); }
+
+/* ── Typography ─────────────────────────────────────────────── */
+body {
+  font-family: var(--font-ui);
+  color: var(--bb-text);
+  background: var(--bb-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display { font-family: var(--font-display); }
+.font-sans    { font-family: var(--font-ui); }
+.font-mono    { font-family: var(--font-mono); }
 
 .micro-label {
-  font-family: 'Inter', system-ui, sans-serif;
-  font-weight: 500;
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #64748B;
+  color: var(--bb-muted);
 }
 
 .heading-display {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #FFFFFF;
+  color: var(--bb-text);
 }
 
-/* ── 4 BUTTON REDESIGN SPECS ────────────────────────────────── */
+/* ── BUTTON SYSTEM (asymmetric corners: 8px 8px 0 8px) ──────── */
 
-/* 1. PRIMARY ACTION BUTTON */
+/* 1. PRIMARY ACTION — maroon CTA */
 .btn-primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: linear-gradient(135deg, #00D4FF 0%, #7B5CF5 100%);
+  background: var(--bb-maroon);
   border: none;
-  border-radius: 8px;
+  border-radius: 8px 8px 0 8px;   /* asymmetric brand corner */
   padding: 10px 24px;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-ui);
   font-weight: 600;
   font-size: 14px;
-  color: #FFFFFF;
+  color: var(--bb-text);
   cursor: pointer;
-  box-shadow: 0 0 0 0 transparent;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
 }
 .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 0 20px rgba(0, 212, 255, 0.45), 0 0 40px rgba(123, 92, 245, 0.2);
+  background: var(--bb-maroon-hover);
+  box-shadow: 0 4px 16px rgba(110,20,35,0.35);
   transform: translateY(-1px);
 }
-.btn-primary:active:not(:disabled) {
-  transform: scale(0.97);
-}
-.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary:active:not(:disabled) { transform: scale(0.97); }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* 2. SECONDARY / GHOST BUTTON */
+/* 2. SECONDARY — blueberry outline */
 .btn-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   background: transparent;
-  border: 1px solid rgba(0, 212, 255, 0.35);
-  border-radius: 8px;
+  border: 1px solid var(--bb-primary-border);
+  border-radius: 8px 8px 0 8px;
   padding: 10px 24px;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-ui);
   font-weight: 500;
   font-size: 14px;
-  color: #00D4FF;
+  color: var(--bb-primary-light);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
 }
 .btn-secondary:hover:not(:disabled) {
-  background: rgba(0, 212, 255, 0.08);
-  border-color: #00D4FF;
-  box-shadow: 0 0 12px rgba(0, 212, 255, 0.2), inset 0 0 12px rgba(0, 212, 255, 0.04);
+  background: var(--bb-primary-faint);
+  border-color: var(--bb-primary);
 }
 .btn-secondary:active:not(:disabled) { transform: scale(0.98); }
-.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* 3. ICON ACTION BUTTON */
+/* 3. ICON BUTTON */
 .btn-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
+  border: 1px solid var(--bb-primary-border);
   border-radius: 6px;
-  padding: 8px;
-  color: #94A3B8;
+  padding: 7px;
+  color: var(--bb-muted);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .btn-icon:hover:not(:disabled) {
-  background: rgba(0, 212, 255, 0.1);
-  border-color: rgba(0, 212, 255, 0.3);
-  color: #00D4FF;
+  background: var(--bb-primary-faint);
+  border-color: var(--bb-primary);
+  color: var(--bb-text);
 }
 
-/* 4. DANGER / DESTRUCTIVE BUTTON */
+/* 4. DANGER — maroon outline */
 .btn-danger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: rgba(255, 77, 109, 0.1);
-  border: 1px solid rgba(255, 77, 109, 0.3);
-  border-radius: 8px;
+  background: var(--bb-error-faint);
+  border: 1px solid var(--bb-maroon-border);
+  border-radius: 8px 8px 0 8px;
   padding: 10px 24px;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-ui);
   font-weight: 500;
   font-size: 14px;
-  color: #FF4D6D;
+  color: var(--bb-error);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .btn-danger:hover:not(:disabled) {
-  background: rgba(255, 77, 109, 0.2);
-  box-shadow: 0 0 16px rgba(255, 77, 109, 0.25);
+  background: rgba(178,58,78,0.18);
+  box-shadow: 0 2px 12px rgba(178,58,78,0.2);
 }
 
 /* ── CARDS & PANELS ─────────────────────────────────────────── */
 .quantum-card {
-  background: #101E36;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
+  background: var(--bb-surface);
+  border: 1px solid var(--bb-primary-border);
+  border-radius: 12px 12px 0 12px;   /* asymmetric card */
   padding: 20px 24px;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .quantum-card-interactive:hover {
-  border-color: rgba(0, 212, 255, 0.25);
-  box-shadow: 0 0 0 1px rgba(0, 212, 255, 0.1);
+  border-color: rgba(107,92,166,0.40);
+  box-shadow: 0 0 0 1px rgba(107,92,166,0.15);
 }
 
-/* Premium Glassmorphism Card */
+/* Elevated card for hero/panel use */
 .quantum-glass-hero {
-  background: rgba(16, 30, 54, 0.5);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 212, 255, 0.15);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background: rgba(27,21,48,0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--bb-primary-border);
+  border-radius: 16px 16px 0 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
-/* ── INPUT FIELDS & TEXTAREAS ───────────────────────────────── */
+/* ── INPUTS ─────────────────────────────────────────────────── */
 .quantum-input {
   width: 100%;
-  background: rgba(4, 9, 18, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--bb-primary-border);
+  border-radius: 8px 8px 0 8px;
   padding: 10px 14px;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-ui);
   font-size: 13px;
-  color: #E2E8F0;
+  color: var(--bb-text);
   outline: none;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.quantum-input::placeholder { color: #334155; }
+.quantum-input::placeholder { color: var(--bb-placeholder); }
 .quantum-input:focus {
-  border-color: rgba(0, 212, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
+  border-color: var(--bb-primary-light);
+  box-shadow: 0 0 0 3px var(--bb-primary-ring);
 }
 
 /* ── CODE / TERMINAL BLOCKS ─────────────────────────────────── */
 .quantum-terminal {
-  background: #040912;
-  border: 1px solid rgba(0, 212, 255, 0.1);
-  border-radius: 10px;
-  font-family: 'JetBrains Mono', monospace;
+  background: var(--bb-base);
+  border: 1px solid var(--bb-primary-border);
+  border-left: 2px solid var(--bb-primary);
+  border-radius: 10px 10px 0 10px;
+  font-family: var(--font-mono);
   font-size: 13px;
 }
 
 /* ── BADGES & STATUS TAGS ───────────────────────────────────── */
 .badge-running {
-  background: rgba(0, 245, 160, 0.1);
-  border: 1px solid rgba(0, 245, 160, 0.3);
-  color: #00F5A0;
-  border-radius: 20px;
+  background: rgba(107,92,166,0.14);
+  border: 1px solid rgba(107,92,166,0.30);
+  color: var(--bb-primary-light);
+  border-radius: 9999px;
   padding: 3px 10px;
-  font-family: 'Inter', sans-serif;
-  font-weight: 500;
+  font-family: var(--font-ui);
+  font-weight: 600;
   font-size: 11px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .badge-pending {
-  background: rgba(245, 166, 35, 0.1);
-  border: 1px solid rgba(245, 166, 35, 0.3);
-  color: #F5A623;
-  border-radius: 20px;
+  background: rgba(61,53,88,0.25);
+  border: 1px solid rgba(61,53,88,0.45);
+  color: var(--bb-muted);
+  border-radius: 9999px;
   padding: 3px 10px;
-  font-family: 'Inter', sans-serif;
-  font-weight: 500;
+  font-family: var(--font-ui);
+  font-weight: 600;
   font-size: 11px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .badge-failed {
-  background: rgba(255, 77, 109, 0.1);
-  border: 1px solid rgba(255, 77, 109, 0.3);
-  color: #FF4D6D;
-  border-radius: 20px;
+  background: var(--bb-error-faint);
+  border: 1px solid rgba(178,58,78,0.35);
+  color: var(--bb-error);
+  border-radius: 9999px;
   padding: 3px 10px;
-  font-family: 'Inter', sans-serif;
-  font-weight: 500;
+  font-family: var(--font-ui);
+  font-weight: 600;
   font-size: 11px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .badge-idle {
-  background: rgba(148, 163, 184, 0.07);
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  color: #64748B;
-  border-radius: 20px;
+  background: rgba(61,53,88,0.15);
+  border: 1px solid rgba(61,53,88,0.25);
+  color: var(--bb-disabled);
+  border-radius: 9999px;
   padding: 3px 10px;
-  font-family: 'Inter', sans-serif;
-  font-weight: 500;
+  font-family: var(--font-ui);
+  font-weight: 600;
   font-size: 11px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -297,6 +329,23 @@
   0%, 100% { transform: scale(1); opacity: 1; }
   50%      { transform: scale(1.4); opacity: 0.6; }
 }
-.animate-dot-pulse {
-  animation: dotPulse 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+.animate-dot-pulse { animation: dotPulse 2s cubic-bezier(0.4,0,0.2,1) infinite; }
+
+/* BB weave animation for thread nodes */
+@keyframes bbWeave {
+  0%   { stroke-dashoffset: 100; opacity: 0; }
+  30%  { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 1; }
 }
+.bb-weave {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: bbWeave 1.4s ease forwards;
+}
+
+/* BB pulse for status dots */
+@keyframes bbPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.5); opacity: 0.5; }
+}
+.bb-pulse { animation: bbPulse 1.8s ease-in-out infinite; }

@@ -13,8 +13,9 @@ export interface EmptyStateProps {
 }
 
 /**
- * EmptyState Component for ML Dashboard features.
- * Displays a styled empty state illustration matching the dark cyberpunk theme when list/table results are empty.
+ * EmptyState — Blueberry & Maroon brand.
+ * Uses a thread-node–style icon container (blueberry border, asymmetric corners).
+ * Left maroon border signals "empty" without cyan glows.
  */
 export function EmptyState({
   icon: IconComponent = Inbox,
@@ -29,21 +30,51 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div
-      className={`p-8 md:p-12 rounded-2xl border border-[rgba(0,212,255,0.15)] bg-[#0C1A30]/80 backdrop-blur-xl text-center flex flex-col items-center justify-center relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 ${className}`}
+      className={`p-8 md:p-12 text-center flex flex-col items-center justify-center relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 ${className}`}
+      style={{
+        background: '#1B1530',
+        border: '1px solid rgba(107,92,166,0.20)',
+        borderLeft: '3px solid rgba(107,92,166,0.40)',
+        borderRadius: '12px 12px 0 12px',  // asymmetric
+      }}
     >
-      {/* Background Ambient Glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full bg-[#00D4FF]/5 blur-3xl pointer-events-none" />
+      {/* Subtle ambient orb — blueberry, very faint */}
+      <div
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full pointer-events-none"
+        style={{ background: 'rgba(107,92,166,0.05)', filter: 'blur(40px)' }}
+      />
 
-      {/* Cyberpunk Icon Badge Container */}
-      <div className="w-14 h-14 rounded-2xl bg-[#081224] border border-[#00D4FF]/30 flex items-center justify-center text-[#00D4FF] mb-4 shadow-[0_0_20px_rgba(0,212,255,0.15)] relative">
+      {/* Icon container — blueberry node shape */}
+      <div
+        className="w-14 h-14 flex items-center justify-center mb-5 relative"
+        style={{
+          background: 'rgba(27,21,48,1)',
+          border: '1px solid rgba(107,92,166,0.30)',
+          borderRadius: '10px 10px 0 10px',  // asymmetric icon container
+          color: '#6C5CA6',
+        }}
+      >
         <IconComponent className="w-7 h-7" />
-        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#00F5A0] shadow-[0_0_8px_#00F5A0]" />
+        {/* Connection node dot */}
+        <span
+          className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full"
+          style={{ background: '#4B3B7C', boxShadow: '0 0 0 2px #0B0912' }}
+        />
       </div>
 
-      {/* Title & Description */}
-      <h4 className="text-sm md:text-base font-bold text-slate-100 mb-1 tracking-tight">{title}</h4>
+      {/* Title */}
+      <h4
+        className="text-sm md:text-base font-semibold text-[#F5F1EC] mb-2 tracking-tight"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        {title}
+      </h4>
+
+      {/* Description */}
       {description && (
-        <p className="text-xs text-[#94A3B8] max-w-md leading-relaxed mb-6">{description}</p>
+        <p className="text-xs text-[#9E93B8] max-w-md leading-relaxed mb-6">
+          {description}
+        </p>
       )}
 
       {/* Action Buttons */}
@@ -52,7 +83,12 @@ export function EmptyState({
           {secondaryActionLabel && onSecondaryAction && (
             <button
               onClick={onSecondaryAction}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-[#94A3B8] hover:text-slate-100 hover:bg-white/5 border border-transparent transition-all cursor-pointer"
+              className="px-4 py-2 text-xs font-medium text-[#9E93B8] hover:text-[#F5F1EC] transition-colors cursor-pointer"
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(107,92,166,0.20)',
+                borderRadius: '6px 6px 0 6px',
+              }}
             >
               {secondaryActionLabel}
             </button>
@@ -61,7 +97,12 @@ export function EmptyState({
           {actionLabel && onAction && (
             <button
               onClick={onAction}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-[#070E1C] bg-[#00D4FF] hover:bg-[#38E0FF] shadow-[0_0_15px_rgba(0,212,255,0.3)] transition-all cursor-pointer flex items-center gap-2"
+              className="px-4 py-2 text-xs font-semibold text-[#F5F1EC] flex items-center gap-2 cursor-pointer transition-all hover:-translate-y-px"
+              style={{
+                background: '#6E1423',
+                border: 'none',
+                borderRadius: '6px 6px 0 6px',
+              }}
             >
               {ActionIcon && <ActionIcon className="w-3.5 h-3.5" />}
               <span>{actionLabel}</span>

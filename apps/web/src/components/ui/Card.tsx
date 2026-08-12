@@ -7,15 +7,16 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, variant = 'default', ...props }, ref) => {
+    // Asymmetric brand corner: top-left, top-right, bottom-left rounded — bottom-right sharp
     const variants = {
       default:
-        'bg-card text-card-foreground border border-border shadow-xs rounded-xl',
+        'bg-[#1B1530] text-[#F5F1EC] border border-[rgba(107,92,166,0.18)] rounded-tl-xl rounded-tr-xl rounded-bl-xl rounded-br-none',
       glass:
-        'bg-card/80 backdrop-blur-md text-card-foreground border border-border/60 shadow-md rounded-xl',
+        'bg-[rgba(27,21,48,0.75)] backdrop-blur-md text-[#F5F1EC] border border-[rgba(107,92,166,0.18)] rounded-tl-xl rounded-tr-xl rounded-bl-xl rounded-br-none',
       outline:
-        'bg-transparent text-card-foreground border border-border rounded-xl',
+        'bg-transparent text-[#F5F1EC] border border-[rgba(107,92,166,0.20)] rounded-tl-xl rounded-tr-xl rounded-bl-xl rounded-br-none',
       interactive:
-        'bg-card text-card-foreground border border-border/80 shadow-xs rounded-xl hover:border-primary/50 hover:shadow-md transition-all duration-200 cursor-pointer',
+        'bg-[#1B1530] text-[#F5F1EC] border border-[rgba(107,92,166,0.18)] rounded-tl-xl rounded-tr-xl rounded-bl-xl rounded-br-none hover:border-[rgba(107,92,166,0.40)] hover:bg-[#2A2247] transition-all duration-200 cursor-pointer',
     }
 
     return (
@@ -48,9 +49,10 @@ export const CardTitle = React.forwardRef<
   <h3
     ref={ref}
     className={cn(
-      'text-base font-semibold leading-none tracking-tight text-foreground',
+      'text-base font-semibold leading-none tracking-tight text-[#F5F1EC]',
       className,
     )}
+    style={{ fontFamily: 'var(--font-display)' }}
     {...props}
   />
 ))
@@ -62,7 +64,7 @@ export const CardDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <p
     ref={ref}
-    className={cn('text-xs text-muted-foreground', className)}
+    className={cn('text-xs text-[#9E93B8]', className)}
     {...props}
   />
 ))
@@ -82,7 +84,7 @@ export const CardFooter = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn('flex items-center p-5 pt-0 border-t border-border/40 mt-3 pt-3', className)}
+    className={cn('flex items-center p-5 pt-3 mt-3 border-t border-[rgba(107,92,166,0.15)]', className)}
     {...props}
   />
 ))
