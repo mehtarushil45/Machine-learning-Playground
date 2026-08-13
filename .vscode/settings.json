@@ -1,5 +1,11 @@
 {
     "js/ts.tsdk.path": "node_modules\\typescript\\lib",
     "python-envs.defaultEnvManager": "ms-python.python:system",
-    "css.lint.unknownAtRules": "ignore"
-}
+    "css.lint.unknownAtRules": "ignore",
+    "python.analysis.extraPaths": [
+        "./services/api"
+    ],
+    "python.autoComplete.extraPaths": [
+        "./services/api"
+    ]
+}

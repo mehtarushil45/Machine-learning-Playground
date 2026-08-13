@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useAuthContext, getInitials } from '../../providers/AuthContext'
 import { LogOut, User as UserIcon, Shield } from 'lucide-react'
 
@@ -10,15 +10,44 @@ export interface SidebarUserAvatarProps {
 export function SidebarUserAvatar({ isCollapsed = false, className = '' }: SidebarUserAvatarProps) {
   const { user, logout, isAuthenticated } = useAuthContext()
   const [showMenu, setShowMenu] = useState(false)
+  const triggerRef              = useRef<HTMLDivElement>(null)
+  const menuRef                 = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos]   = useState({ bottom: 0, left: 0 })
 
   const displayName  = user?.full_name || user?.email?.split('@')[0] || 'Mehta R.'
   const displayEmail = user?.email || 'mehta.r@ml-platform.internal'
   const displayRole  = (user?.role || 'Admin').toUpperCase()
   const initials     = isAuthenticated ? getInitials(user?.full_name, user?.email) : 'MR'
 
+  // Compute popover position from trigger's screen coordinates
+  useLayoutEffect(() => {
+    if (showMenu && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setMenuPos({
+        bottom: window.innerHeight - rect.top + 8,   // appear ABOVE the trigger
+        left:   rect.left,
+      })
+    }
+  }, [showMenu])
+
+  // Close menu on outside click
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        menuRef.current    && !menuRef.current.contains(event.target as Node) &&
+        triggerRef.current && !triggerRef.current.contains(event.target as Node)
+      ) {
+        setShowMenu(false)
+      }
+    }
+    if (showMenu) document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showMenu])
+
   return (
     <div className={`relative ${className}`}>
       <div
+        ref={triggerRef}
         onClick={() => setShowMenu((prev) => !prev)}
         className={`flex items-center gap-3 p-2 transition-all duration-200 cursor-pointer select-none ${
           isCollapsed ? 'justify-center p-1.5' : ''
@@ -70,11 +99,16 @@ export function SidebarUserAvatar({ isCollapsed = false, className = '' }: Sideb
         )}
       </div>
 
-      {/* Popover User Menu */}
+      {/* Popover User Menu — fixed positioning to escape sidebar overflow clipping */}
       {showMenu && (
         <div
-          className="absolute bottom-full left-0 mb-2 w-56 p-2 shadow-2xl z-50 animate-in fade-in slide-in-from-bottom-2 duration-150"
+          ref={menuRef}
+          className="w-56 p-2 shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-150"
           style={{
+            position: 'fixed',
+            bottom:   menuPos.bottom,
+            left:     menuPos.left,
+            zIndex:   9000,
             background: 'rgba(27,21,48,0.97)',
             border: '1px solid rgba(107,92,166,0.25)',
             borderRadius: '10px 10px 0 10px',

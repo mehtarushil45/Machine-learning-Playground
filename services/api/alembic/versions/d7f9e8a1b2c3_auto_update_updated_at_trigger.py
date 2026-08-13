@@ -47,16 +47,16 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
     """)
 
-    # 2. Attach BEFORE UPDATE trigger to each table
+    # 2. Attach BEFORE UPDATE trigger to each table (two separate exec calls —
+    #    asyncpg does NOT allow multiple statements in one prepared statement)
     for table_name in TABLES:
         trigger_name = f"update_{table_name}_updated_at"
-        op.execute(f"""
-            DROP TRIGGER IF EXISTS {trigger_name} ON {table_name};
-            CREATE TRIGGER {trigger_name}
-            BEFORE UPDATE ON {table_name}
-            FOR EACH ROW
-            EXECUTE FUNCTION update_updated_at_column();
-        """)
+        op.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON {table_name};")
+        op.execute(
+            f"CREATE TRIGGER {trigger_name} "
+            f"BEFORE UPDATE ON {table_name} "
+            f"FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();"
+        )
 
 
 def downgrade() -> None:

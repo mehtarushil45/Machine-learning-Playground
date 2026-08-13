@@ -15,7 +15,7 @@ import io
 import os
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.ml.inference_engine import (
@@ -38,7 +38,13 @@ from app.schemas.prediction import (
     ValidationErrorResponse,
 )
 
-router = APIRouter(prefix="/predict", tags=["Prediction & Inference"])
+from app.dependencies import CurrentUser
+
+router = APIRouter(
+    prefix="/predict",
+    tags=["Prediction & Inference"],
+    dependencies=[Depends(CurrentUser)],  # ← all inference endpoints require auth
+)
 
 
 # ---------------------------------------------------------------------------

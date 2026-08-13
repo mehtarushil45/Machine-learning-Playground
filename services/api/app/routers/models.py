@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.ml.model_registry import (
@@ -66,9 +66,15 @@ from app.ml.model_governance import (
 
 from app.ml.model_factory import list_supported_algorithms
 
+from app.dependencies import CurrentUser
+
 logger = logging.getLogger("apex_ml.router.models")
 
-router = APIRouter(prefix="/models", tags=["Models"])
+router = APIRouter(
+    prefix="/models",
+    tags=["Models"],
+    dependencies=[Depends(CurrentUser)],  # ← all model endpoints require auth
+)
 
 
 @router.get("/algorithms", summary="List supported ML algorithms grouped by task")

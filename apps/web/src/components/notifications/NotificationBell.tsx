@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import {
   Bell,
   CheckCircle2,
@@ -28,11 +28,27 @@ export function NotificationBell() {
   const [isOpen, setIsOpen]     = useState(false)
   const [filter, setFilter]     = useState<'all' | 'unread'>('all')
   const popoverRef              = useRef<HTMLDivElement>(null)
+  const buttonRef               = useRef<HTMLButtonElement>(null)
+  const [popoverPos, setPopoverPos] = useState({ top: 0, right: 0 })
+
+  // Compute popover position from button's screen coordinates
+  useLayoutEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setPopoverPos({
+        top:   rect.bottom + 8,
+        right: window.innerWidth - rect.right,
+      })
+    }
+  }, [isOpen])
 
   // Close popover on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+      if (
+        popoverRef.current && !popoverRef.current.contains(event.target as Node) &&
+        buttonRef.current  && !buttonRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false)
       }
     }
@@ -66,9 +82,10 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="relative" ref={popoverRef}>
+    <div className="relative">
       {/* Bell trigger */}
       <button
+        ref={buttonRef}
         onClick={() => setIsOpen((prev) => !prev)}
         className="relative p-2 transition-all duration-150 cursor-pointer select-none"
         style={{
@@ -114,11 +131,16 @@ export function NotificationBell() {
         )}
       </button>
 
-      {/* Popover */}
+      {/* Popover — fixed positioning to escape all overflow:hidden ancestors */}
       {isOpen && (
         <div
-          className="absolute right-0 mt-2 w-80 sm:w-96 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
+          ref={popoverRef}
+          className="w-80 sm:w-96 animate-in fade-in slide-in-from-top-2 duration-150"
           style={{
+            position: 'fixed',
+            top:    popoverPos.top,
+            right:  popoverPos.right,
+            zIndex: 9000,   // above everything: z-index scale Dropdowns(40) → 9000 for portalled fixed
             background: 'rgba(27,21,48,0.97)',
             border: '1px solid rgba(107,92,166,0.22)',
             borderRadius: '12px 12px 0 12px',

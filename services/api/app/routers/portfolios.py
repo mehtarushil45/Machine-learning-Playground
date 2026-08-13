@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import Permission, check_user_permission
 from app.database import AsyncSessionLocal
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, CurrentUser
 from app.ml.certificate_generator import (
     CertificatePayload,
     generate_certificate,
@@ -29,7 +29,11 @@ from app.models.classroom import PortfolioProject, Submission
 from app.models.user import User
 from app.schemas.classroom import PortfolioProjectCreate, PortfolioProjectResponse
 
-router = APIRouter(prefix="/portfolios", tags=["Student Portfolio & Cryptographic Certificates"])
+router = APIRouter(
+    prefix="/portfolios",
+    tags=["Student Portfolio & Cryptographic Certificates"],
+    dependencies=[Depends(CurrentUser)],  # ← all portfolio endpoints require auth
+)
 
 
 async def get_db():

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.ml.explainability_engine import (
     compute_global_explainability,
@@ -32,7 +32,13 @@ from app.schemas.explainability import (
     WhatIfResponse,
 )
 
-router = APIRouter(prefix="/explainability", tags=["Explainability & Fairness Suite"])
+from app.dependencies import CurrentUser
+
+router = APIRouter(
+    prefix="/explainability",
+    tags=["Explainability & Fairness (V5B)"],
+    dependencies=[Depends(CurrentUser)],  # ← all explainability endpoints require auth
+)
 
 
 @router.post(

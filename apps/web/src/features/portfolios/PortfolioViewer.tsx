@@ -29,24 +29,18 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({ onShowToast })
 
     setLoading(true);
     setError(null);
+    setVerificationResult(null);
     try {
       const res = await PortfolioService.verifyCertificate(projectId);
       setVerificationResult(res);
       if (onShowToast) onShowToast('Certificate Verified!', `Status: ${res.verification_status}`);
     } catch (err: any) {
-      // Fallback demo certificate for preview
-      const demoRes: CertificateVerificationResponse = {
-        verified: true,
-        verification_status: 'VERIFIED & AUTHENTICATED ✓',
-        project_id: projectId,
-        title: 'Enterprise Machine Learning Engineer Certification',
-        certificate_id: `cert-${projectId.slice(0, 8)}`,
-        signature: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-        qr_code_url: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https%3A%2F%2Fml-platform.internal%2Fverify%2Fcert-sample',
-        verified_at: new Date().toISOString(),
-      };
-      setVerificationResult(demoRes);
-      if (onShowToast) onShowToast('Certificate Verified!', 'Status: VERIFIED & AUTHENTICATED ✓');
+      const detail: string =
+        err?.detail ??
+        err?.message ??
+        'Certificate not found or verification service unavailable. Check the Project ID and try again.';
+      setError(detail);
+      if (onShowToast) onShowToast('Verification Failed', detail);
     } finally {
       setLoading(false);
     }

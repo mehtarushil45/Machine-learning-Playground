@@ -27,6 +27,7 @@ from app.models.workspace import Workspace, WorkspaceStatus, WorkspaceVisibility
 from app.models.workspace_settings import WorkspaceSettings, DefaultDeploymentPolicy  # noqa: F401
 from app.models.workspace_member import WorkspaceMember, WorkspaceRole, MemberStatus  # noqa: F401
 from app.models.api_key import ApiKey  # noqa: F401
+from app.models.deployment import Deployment, DeploymentStatus  # noqa: F401
 
 __all__ = [
     "Organisation",
@@ -53,4 +54,7 @@ __all__ = [
     "WorkspaceRole",
     "MemberStatus",
     "ApiKey",
+    # Deployment Studio
+    "Deployment",
+    "DeploymentStatus",
 ]

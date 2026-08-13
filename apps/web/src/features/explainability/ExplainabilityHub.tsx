@@ -56,16 +56,6 @@ export const ExplainabilityHub: React.FC = () => {
     runWhatIf();
   }, [runWhatIf]);
 
-  // Synthetic confusion matrix metrics for model audit evaluation lab
-  const confusionMatrix = {
-    tp: 42, fp: 6,
-    fn: 4,  tn: 48,
-    total: 100,
-    precision: 0.875,
-    recall: 0.913,
-    f1: 0.893
-  };
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -151,53 +141,33 @@ export const ExplainabilityHub: React.FC = () => {
             <h3 className="micro-label flex items-center gap-2">
               <Grid className="w-4 h-4 text-[#00D4FF]" /> Confusion Matrix & Performance Metrics
             </h3>
-            <span className="badge-running">
-              Accuracy: 90.0%
-            </span>
+            {globalExp && (
+              <span className="badge-running">
+                Model: {globalExp.algorithm}
+              </span>
+            )}
           </div>
 
-          {/* Interactive Heatmap Matrix Grid */}
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <div className="p-4 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/30 text-center space-y-1 hover:border-[#00F5A0]/60 transition-all">
-              <div className="micro-label !text-[#00F5A0]">True Positives (TP)</div>
-              <div className="font-display font-bold text-2xl text-white">{confusionMatrix.tp}</div>
-              <div className="text-[10px] text-[#64748B]">Correct Positive</div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-[#FF4D6D]/10 border border-[#FF4D6D]/30 text-center space-y-1 hover:border-[#FF4D6D]/60 transition-all">
-              <div className="micro-label !text-[#FF4D6D]">False Positives (FP)</div>
-              <div className="font-display font-bold text-2xl text-white">{confusionMatrix.fp}</div>
-              <div className="text-[10px] text-[#64748B]">Type I Error</div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-[#F5A623]/10 border border-[#F5A623]/30 text-center space-y-1 hover:border-[#F5A623]/60 transition-all">
-              <div className="micro-label !text-[#F5A623]">False Negatives (FN)</div>
-              <div className="font-display font-bold text-2xl text-white">{confusionMatrix.fn}</div>
-              <div className="text-[10px] text-[#64748B]">Type II Error</div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-[#7B5CF5]/10 border border-[#7B5CF5]/30 text-center space-y-1 hover:border-[#7B5CF5]/60 transition-all">
-              <div className="micro-label !text-[#7B5CF5]">True Negatives (TN)</div>
-              <div className="font-display font-bold text-2xl text-white">{confusionMatrix.tn}</div>
-              <div className="text-[10px] text-[#64748B]">Correct Negative</div>
-            </div>
-          </div>
-
-          {/* Metric Cards */}
-          <div className="grid grid-cols-3 gap-3 text-center pt-1">
-            <div className="p-3 rounded-xl bg-[#040912] border border-[#152540]">
-              <div className="micro-label">Precision</div>
-              <div className="text-sm font-bold font-mono text-[#00D4FF] mt-0.5">{(confusionMatrix.precision * 100).toFixed(1)}%</div>
-            </div>
-            <div className="p-3 rounded-xl bg-[#040912] border border-[#152540]">
-              <div className="micro-label">Recall</div>
-              <div className="text-sm font-bold font-mono text-[#7B5CF5] mt-0.5">{(confusionMatrix.recall * 100).toFixed(1)}%</div>
-            </div>
-            <div className="p-3 rounded-xl bg-[#040912] border border-[#152540]">
-              <div className="micro-label">F1-Score</div>
-              <div className="text-sm font-bold font-mono text-[#00F5A0] mt-0.5">{(confusionMatrix.f1 * 100).toFixed(1)}%</div>
-            </div>
-          </div>
+          {isExpLoading ? (
+            <CardSkeleton />
+          ) : !globalExp ? (
+            <EmptyState
+              icon={Grid}
+              title="No Evaluation Data Available"
+              description="Train a machine learning model to populate the confusion matrix and precision / recall / F1 metrics from the model's test-set evaluation."
+            />
+          ) : (
+            <>
+              <p className="text-xs text-[#94A3B8] leading-relaxed bg-[#040912] p-3 rounded-xl border border-[rgba(255,255,255,0.06)]">
+                Confusion matrix and performance metrics are computed on the held-out test set during training. Re-train a model to update these results.
+              </p>
+              <EmptyState
+                icon={Grid}
+                title="Awaiting Evaluation Report"
+                description={`Model '${globalExp.model_id}' (${globalExp.algorithm}) is loaded. Run a training job with evaluation enabled to populate the confusion matrix.`}
+              />
+            </>
+          )}
         </div>
       </div>
 
@@ -354,8 +324,8 @@ export const ExplainabilityHub: React.FC = () => {
                       {whatIfResult.suggested_changes.map((sc, idx) => (
                         <div key={idx} className="flex items-center justify-between p-2 rounded-lg bg-[#070E1C] text-xs font-mono">
                           <span className="text-[#E2E8F0] font-semibold">{sc.feature_name}</span>
-                          <span className="text-[#94A3B8]">{sc.old_value.toFixed(2)} → <strong className="text-[#00F5A0]">{sc.new_value.toFixed(2)}</strong></span>
-                          <span className="text-[10px] text-[#7B5CF5] font-sans">({sc.impact_description})</span>
+                          <span className="text-[#94A3B8]">{String(sc.original_value)} → <strong className="text-[#00F5A0]">{String(sc.new_value)}</strong></span>
+                          <span className="text-[10px] text-[#7B5CF5] font-sans">({sc.impact})</span>
                         </div>
                       ))}
                     </div>

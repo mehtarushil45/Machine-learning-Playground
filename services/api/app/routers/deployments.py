@@ -5,8 +5,12 @@ Endpoints for:
   - Listing active deployments: GET /api/v1/deployments
   - Retrieving deployment details: GET /api/v1/deployments/{id}
   - Public/API prediction inference: POST /api/v1/deployments/{id}/predict
-  - Generating SDK & Web Widget snippets: GET /api/v1/deployments/{id}/snippet
+  - Generating SDK & Web Widget snippets: GET /api/v1/deployments/{id}/snippets
   - Updating status (ACTIVE/PAUSED/REVOKED): PATCH /api/v1/deployments/{id}/status
+
+All data-mutating endpoints require authentication (CurrentUser).
+Deployments are scoped to the authenticated owner — users cannot access
+or modify deployments they did not create.
 """
 
 from __future__ import annotations
@@ -15,14 +19,10 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
 
-from app.ml.deployment_manager import (
-    create_deployment,
-    generate_integration_snippets,
-    get_deployment,
-    list_deployments,
-    predict_deployed_model,
-    update_deployment_status,
-)
+from app.dependencies import CurrentUser, DBSession
+import app.services.deployment_service as dep_svc
+from app.ml.deployment_manager import generate_integration_snippets
+from app.ml.inference_engine import load_model, predict
 from app.schemas.deployment import (
     DeploymentCreate,
     DeploymentPredictRequest,
@@ -43,16 +43,29 @@ router = APIRouter(prefix="/deployments", tags=["Deployment Studio & Web Widgets
 async def create_deployment_endpoint(
     payload: DeploymentCreate,
     request: Request,
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> DeploymentResponse:
-    """Deploy a model version from registry with API key auth and rate limits."""
+    """Deploy a model version from registry with API key auth and rate limits.
+
+    Validates that the model exists and is loadable before persisting the
+    deployment record to PostgreSQL. The caller must be authenticated.
+    """
+    # Verify model is loadable before committing the record
     try:
-        base_url = str(request.base_url)
-        return create_deployment(payload, base_url=base_url)
+        load_model(model_id=payload.model_id)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Deployment creation failed: {str(exc)}",
+            detail=f"Model '{payload.model_id}' could not be loaded: {exc}",
         )
+
+    return await dep_svc.create_deployment(
+        payload,
+        owner_id=str(current_user.id),
+        base_url=str(request.base_url),
+        db=db,
+    )
 
 
 @router.get(
@@ -60,9 +73,12 @@ async def create_deployment_endpoint(
     response_model=List[DeploymentResponse],
     summary="List registered model deployments",
 )
-async def list_deployments_endpoint() -> List[DeploymentResponse]:
-    """Retrieve list of all active, paused, or revoked model deployments."""
-    return list_deployments()
+async def list_deployments_endpoint(
+    current_user: CurrentUser,
+    db: DBSession,
+) -> List[DeploymentResponse]:
+    """Retrieve all deployments owned by the authenticated user."""
+    return await dep_svc.list_deployments(owner_id=str(current_user.id), db=db)
 
 
 @router.get(
@@ -70,15 +86,19 @@ async def list_deployments_endpoint() -> List[DeploymentResponse]:
     response_model=DeploymentResponse,
     summary="Get deployment configuration details",
 )
-async def get_deployment_endpoint(deployment_id: str) -> DeploymentResponse:
-    """Retrieve deployment configuration, request counters, and status."""
-    dep = get_deployment(deployment_id)
-    if not dep:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Deployment '{deployment_id}' not found.",
-        )
-    return dep
+async def get_deployment_endpoint(
+    deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> DeploymentResponse:
+    """Retrieve deployment configuration, request counters, and status.
+
+    Returns 403 if the deployment exists but belongs to a different user.
+    """
+    from app.services.deployment_service import _to_response
+    dep = await dep_svc.get_deployment(deployment_id, db=db)
+    dep_svc.assert_owner(dep, str(current_user.id))
+    return _to_response(dep)
 
 
 @router.post(
@@ -89,23 +109,52 @@ async def get_deployment_endpoint(deployment_id: str) -> DeploymentResponse:
 async def predict_deployment_endpoint(
     deployment_id: str,
     payload: DeploymentPredictRequest,
+    db: DBSession,
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ) -> DeploymentPredictResponse:
-    """Execute inference against a deployed model endpoint."""
-    try:
-        return predict_deployed_model(
-            deployment_id=deployment_id,
-            features=payload.features,
-            provided_api_key=x_api_key,
+    """Execute inference against a deployed model endpoint.
+
+    This endpoint is intentionally unauthenticated — it is the public-facing
+    inference URL protected by the deployment's own X-API-Key header.
+    JWT auth is NOT required here by design.
+    """
+    import time
+    dep_info = await dep_svc.get_deployment_info(deployment_id, db=db)
+
+    if dep_info["status"] != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Deployment '{deployment_id}' is currently {dep_info['status']}.",
         )
-    except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    except PermissionError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+
+    if dep_info["require_api_key"]:
+        if not x_api_key or x_api_key != dep_info["api_key"]:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing X-API-Key header authentication.",
+            )
+
+    try:
+        start_t = time.perf_counter()
+        pred_res = predict(data=payload.features, model_id=dep_info["model_id"])
+        latency_ms = round((time.perf_counter() - start_t) * 1000.0, 2)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Prediction failed: {str(exc)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Prediction failed: {exc}",
+        )
+
+    # Fire-and-forget counter increment (best-effort; never blocks the response)
+    import asyncio
+    asyncio.create_task(dep_svc.increment_request_counter(deployment_id, db=db))
+
+    return DeploymentPredictResponse(
+        prediction=pred_res.get("prediction"),
+        confidence=pred_res.get("confidence"),
+        probabilities=pred_res.get("probabilities"),
+        latency_ms=latency_ms,
+        deployment_id=deployment_id,
+    )
 
 
 @router.get(
@@ -116,13 +165,21 @@ async def predict_deployment_endpoint(
 async def get_deployment_snippets_endpoint(
     deployment_id: str,
     request: Request,
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> IntegrationSnippets:
     """Retrieve cURL, Python, JavaScript, and HTML embeddable widget code snippets."""
-    try:
-        base_url = str(request.base_url)
-        return generate_integration_snippets(deployment_id=deployment_id, base_url=base_url)
-    except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    from app.services.deployment_service import _to_response
+    dep = await dep_svc.get_deployment(deployment_id, db=db)
+    dep_svc.assert_owner(dep, str(current_user.id))
+    dep_response = _to_response(dep)
+    # generate_integration_snippets is a pure function — no file I/O, safe to keep
+    return generate_integration_snippets(
+        deployment_id=deployment_id,
+        base_url=str(request.base_url),
+        api_key_override=dep_response.api_key,
+        deployment_name_override=dep_response.deployment_name,
+    )
 
 
 @router.patch(
@@ -133,14 +190,19 @@ async def get_deployment_snippets_endpoint(
 async def update_deployment_status_endpoint(
     deployment_id: str,
     new_status: str,
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> DeploymentResponse:
-    """Pause, reactivate, or revoke a deployment endpoint."""
-    try:
-        return update_deployment_status(deployment_id=deployment_id, new_status=new_status)
-    except KeyError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    """Pause, reactivate, or revoke a deployment endpoint.
+
+    Returns 403 if the deployment belongs to a different user.
+    """
+    return await dep_svc.update_status(
+        deployment_id,
+        new_status,
+        owner_id=str(current_user.id),
+        db=db,
+    )
 
 
 # ===========================================================================

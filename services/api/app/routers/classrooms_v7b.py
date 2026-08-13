@@ -24,8 +24,13 @@ from app.ml.classroom_analytics import (
     generate_experiment_grade,
 )
 from app.ml.experiment_tracker import get_experiment
+from app.dependencies import CurrentUser
 
-router = APIRouter(prefix="/classrooms", tags=["Classrooms & Analytics (V7B)"])
+router = APIRouter(
+    prefix="/classrooms",
+    tags=["Classrooms & Analytics (V7B)"],
+    dependencies=[Depends(CurrentUser)],  # ← all V7B classroom endpoints require auth
+)
 
 
 async def get_db():

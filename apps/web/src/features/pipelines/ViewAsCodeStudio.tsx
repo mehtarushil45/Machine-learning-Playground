@@ -18,7 +18,7 @@ import {
 import { PipelineService, PipelineDAG, CodeGenerationResponse } from '../../services/api';
 
 interface ViewAsCodeStudioProps {
-  onShowToast?: (title: string, description?: string) => void;
+  onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
 }
 
 export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast }) => {

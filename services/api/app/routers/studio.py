@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 
 from app.studio.dsl_engine import (
@@ -41,7 +41,13 @@ from app.schemas.studio import (
     DSLVersionEntry,
 )
 
-router = APIRouter(prefix="/studio", tags=["View-as-Code Studio"])
+from app.dependencies import CurrentUser
+
+router = APIRouter(
+    prefix="/studio",
+    tags=["View-as-Code Studio"],
+    dependencies=[Depends(CurrentUser)],  # ← all studio endpoints require auth
+)
 
 
 # ── DSL Builders ────────────────────────────────────────────────────────────────

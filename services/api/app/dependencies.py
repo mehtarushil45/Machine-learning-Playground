@@ -148,3 +148,32 @@ async def get_current_active_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
+
+
+# ── Admin-only gate ───────────────────────────────────────────────────────────
+
+_ADMIN_ROLES: frozenset[str] = frozenset({
+    "admin",
+    "org_admin",
+    "platform_admin",
+    "platform_owner",
+})
+
+
+async def get_admin_user(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> User:
+    """Verify the current user holds an administrative role.
+
+    Raises HTTP 403 (Forbidden) for any non-admin role, so that even
+    authenticated regular/learner/member users cannot reach admin routes.
+    """
+    if not current_user.role or current_user.role.value not in _ADMIN_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator access required.",
+        )
+    return current_user
+
+
+AdminUser = Annotated[User, Depends(get_admin_user)]

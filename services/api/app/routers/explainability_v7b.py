@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.ml.ethics_engine import (
     compute_ethics_score,
@@ -18,7 +18,13 @@ from app.ml.ethics_engine import (
     generate_trust_report,
 )
 
-router = APIRouter(prefix="/explainability", tags=["Explainability & Ethics (V7B)"])
+from app.dependencies import CurrentUser
+
+router = APIRouter(
+    prefix="/explainability",
+    tags=["Explainability & Ethics (V7B)"],
+    dependencies=[Depends(CurrentUser)],  # ← all ethics/trust endpoints require auth
+)
 
 
 class EthicsRequest:

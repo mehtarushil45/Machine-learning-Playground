@@ -19,8 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import AsyncSessionLocal
 from app.models.classroom import PortfolioProject
 from app.ml.portfolio_manager import build_public_profile, build_recruiter_view, compute_skill_summary
+from app.dependencies import CurrentUser
 
-router = APIRouter(prefix="/portfolios", tags=["Portfolio & Verification (V7B)"])
+router = APIRouter(
+    prefix="/portfolios",
+    tags=["Portfolio & Verification (V7B)"],
+    dependencies=[Depends(CurrentUser)],  # ← all V7B portfolio endpoints require auth
+)
 
 
 async def get_db():

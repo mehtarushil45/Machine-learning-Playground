@@ -18,7 +18,17 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger("apex_ml.certificate_generator")
 
-_SECRET_KEY = os.environ.get("MLPLAYGROUND_CERT_SECRET", "mlplayground-enterprise-cert-key-2026")
+_raw_cert_secret = os.environ.get("MLPLAYGROUND_CERT_SECRET", "")
+if not _raw_cert_secret:
+    import warnings
+    warnings.warn(
+        "⚠️  MLPLAYGROUND_CERT_SECRET is not set. "
+        "Certificate HMAC signatures will use an empty key — "
+        "set MLPLAYGROUND_CERT_SECRET in your .env file before production use.",
+        stacklevel=1,
+    )
+_SECRET_KEY = _raw_cert_secret or "mlplayground-cert-key-local-dev-only"
+
 
 
 class CertificatePayload(BaseModel):

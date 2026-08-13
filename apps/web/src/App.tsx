@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuthContext, getInitials } from './providers/AuthContext';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 import {
   Database,
@@ -311,7 +312,8 @@ function AppContent() {
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
+          overflow: 'visible',   // ← was 'hidden': caused header popovers (NotificationBell) to be clipped
+          minWidth: 0,           // prevent flex blowout
           background: 'rgba(11,9,18,0.92)',
         }}
       >
@@ -427,20 +429,42 @@ function AppContent() {
           className="space-y-8"
         >
           {activeTab === 'workspace' && (
-            <EnterpriseWorkspace
-              dataset={dataset}
-              selectedFeatures={selectedFeatures}
-              selectedTarget={selectedTarget}
-              onDataLoaded={handleDataLoaded}
-              onSelectedFeaturesChange={setSelectedFeatures}
-              onSelectedTargetChange={setSelectedTarget}
-            />
+            <ErrorBoundary key="workspace" onReset={() => setActiveTab('workspace')}>
+              <EnterpriseWorkspace
+                dataset={dataset}
+                selectedFeatures={selectedFeatures}
+                selectedTarget={selectedTarget}
+                onDataLoaded={handleDataLoaded}
+                onSelectedFeaturesChange={setSelectedFeatures}
+                onSelectedTargetChange={setSelectedTarget}
+              />
+            </ErrorBoundary>
           )}
-          {activeTab === 'code-studio'    && <ViewAsCodeStudio onShowToast={showToast} />}
-          {activeTab === 'explainability' && <ExplainabilityHub />}
-          {activeTab === 'classrooms'     && <ClassroomHub />}
-          {activeTab === 'deployments'    && <DeploymentStudio onShowToast={showToast} />}
-          {activeTab === 'portfolios'     && <PortfolioViewer onShowToast={showToast} />}
+          {activeTab === 'code-studio' && (
+            <ErrorBoundary key="code-studio" onReset={() => setActiveTab('workspace')}>
+              <ViewAsCodeStudio onShowToast={showToast} />
+            </ErrorBoundary>
+          )}
+          {activeTab === 'explainability' && (
+            <ErrorBoundary key="explainability" onReset={() => setActiveTab('workspace')}>
+              <ExplainabilityHub />
+            </ErrorBoundary>
+          )}
+          {activeTab === 'classrooms' && (
+            <ErrorBoundary key="classrooms" onReset={() => setActiveTab('workspace')}>
+              <ClassroomHub />
+            </ErrorBoundary>
+          )}
+          {activeTab === 'deployments' && (
+            <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
+              <DeploymentStudio onShowToast={showToast} />
+            </ErrorBoundary>
+          )}
+          {activeTab === 'portfolios' && (
+            <ErrorBoundary key="portfolios" onReset={() => setActiveTab('workspace')}>
+              <PortfolioViewer onShowToast={showToast} />
+            </ErrorBoundary>
+          )}
         </main>
       </div>
 

@@ -159,20 +159,36 @@ def update_deployment_status(deployment_id: str, new_status: str) -> DeploymentR
         return DeploymentResponse(**_DEPLOYMENTS_CACHE[deployment_id])
 
 
-def generate_integration_snippets(deployment_id: str, base_url: str = "http://localhost:8000") -> IntegrationSnippets:
-    """Generate cURL, Python, JS, and HTML/JS embeddable widget code for a deployment."""
-    dep = get_deployment(deployment_id)
-    if not dep:
-        raise KeyError(f"Deployment '{deployment_id}' not found.")
+def generate_integration_snippets(
+    deployment_id: str,
+    base_url: str = "http://localhost:8000",
+    api_key_override: Optional[str] = None,
+    deployment_name_override: Optional[str] = None,
+) -> IntegrationSnippets:
+    """Generate cURL, Python, JS, and HTML/JS embeddable widget code for a deployment.
+
+    ``api_key_override`` and ``deployment_name_override`` allow callers that
+    already have the deployment record (e.g. from the DB service) to skip the
+    file-cache lookup entirely.  When not provided, falls back to the legacy
+    cache-based ``get_deployment()`` call for backward-compatibility.
+    """
+    if api_key_override is not None:
+        api_key = api_key_override
+        dep_name = deployment_name_override or "ML Model Endpoint"
+    else:
+        dep = get_deployment(deployment_id)
+        if not dep:
+            raise KeyError(f"Deployment '{deployment_id}' not found.")
+        api_key = dep.api_key
+        dep_name = dep.deployment_name
 
     endpoint_url = f"{base_url.rstrip('/')}/api/v1/deployments/{deployment_id}/predict"
-    api_key = dep.api_key
 
     # cURL snippet
     curl_snippet = f"""curl -X POST "{endpoint_url}" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: {api_key}" \\
-  -d '{{\"features\": {{\"feature_1\": 10, \"feature_2\": 20}}}}'"""
+  -d '{{"features": {{"feature_1": 10, "feature_2": 20}}}}'"""
 
     # Python SDK snippet
     python_snippet = f"""import requests
@@ -210,7 +226,7 @@ print("Prediction:", response.json())"""
     # Embeddable HTML/JS Widget snippet
     embeddable_widget_html = f"""<!-- MLPlayground Embeddable Prediction Widget -->
 <div id="ml-prediction-widget" style="font-family: sans-serif; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; max-width: 400px;">
-  <h3 style="margin-top:0; color: #1e293b;">{dep.deployment_name}</h3>
+  <h3 style="margin-top:0; color: #1e293b;">{dep_name}</h3>
   <form id="ml-widget-form">
     <div id="widget-inputs-container"></div>
     <button type="submit" style="background:#2563eb; color:#fff; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; width:100%; margin-top:12px;">Predict</button>

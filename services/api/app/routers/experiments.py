@@ -17,9 +17,7 @@ Endpoints:
   POST   /models/{id}/restore            — restore an ARCHIVED model
 
 Design decisions:
-- No authentication headers are required on these endpoints (the
-  platform uses JWT auth on other routers; lifecycle management is
-  treated as an internal/admin surface for now).
+- All endpoints require a valid JWT token via CurrentUser dependency.
 - All mutation endpoints return the updated metadata dict so the
   client has an immediate consistent view without a follow-up GET.
 - /models/leaderboard and /models/compare are placed BEFORE
@@ -32,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.ml.artifact_manager import (
     cleanup_orphaned_artifacts,
@@ -63,7 +61,9 @@ from app.ml.model_registry import (
     demote_model,
 )
 
-router = APIRouter(tags=["Experiments & Models"])
+from app.dependencies import CurrentUser
+
+router = APIRouter(tags=["Experiments & Models"], dependencies=[Depends(CurrentUser)])
 
 
 # ===========================================================================

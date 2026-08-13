@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.ml.code_generator import (
     generate_python_code,
@@ -24,7 +24,13 @@ from app.schemas.pipeline import (
     PipelineValidationResponse,
 )
 
-router = APIRouter(prefix="/pipelines", tags=["Visual Pipelines & Code Studio"])
+from app.dependencies import CurrentUser
+
+router = APIRouter(
+    prefix="/pipelines",
+    tags=["Visual Pipelines & Code Studio"],
+    dependencies=[Depends(CurrentUser)],  # ← all pipeline endpoints require auth
+)
 
 
 @router.post(

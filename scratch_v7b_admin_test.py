@@ -5,13 +5,21 @@ import os
 import sys
 from fastapi.testclient import TestClient
 
-# Add project root to sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services", "api")))
+# Add project root services/api to sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "services", "api")))
 
 from app.main import app
+from app.dependencies import get_admin_user, get_current_active_user
+from app.models.user import User, UserRole
+
+# Mock admin user for test client execution
+mock_admin = User(role=UserRole.admin, is_active=True)
+app.dependency_overrides[get_admin_user] = lambda: mock_admin
+app.dependency_overrides[get_current_active_user] = lambda: mock_admin
 
 client = TestClient(app)
 BASE_URL = "/api/v1/admin"
+
 
 def test_system_settings():
     response = client.get(f"{BASE_URL}/system/settings")

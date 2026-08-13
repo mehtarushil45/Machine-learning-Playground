@@ -8,6 +8,7 @@ In Docker:
     docker compose -f infra/docker-compose.yml up api
 """
 
+import os as _os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -58,14 +59,28 @@ app = FastAPI(
 #
 # IMPORTANT: allow_credentials=True requires an explicit origin list.
 # Wildcard "*" is rejected by browsers when credentials (cookies) are included.
+#
+# Configure allowed origins via environment variable for production deployments:
+#   ALLOWED_ORIGINS=https://app.yourdomain.com,https://staging.yourdomain.com
+#
+# Multiple origins are separated by commas. Localhost origins are always included
+# as fallback defaults when ALLOWED_ORIGINS is not set (local development only).
+_default_origins = [
+    "http://localhost:5173",    # Vite dev server
+    "http://127.0.0.1:5173",   # Vite dev server (loopback alias)
+    "http://localhost:4173",    # Vite preview
+    "http://localhost:3000",    # CRA / alternate dev port
+]
+_env_origins_raw = _os.environ.get("ALLOWED_ORIGINS", "").strip()
+_allowed_origins: list[str] = (
+    [o.strip() for o in _env_origins_raw.split(",") if o.strip()]
+    if _env_origins_raw
+    else _default_origins
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",    # Vite dev server
-        "http://127.0.0.1:5173",   # Vite dev server (loopback alias)
-        "http://localhost:4173",    # Vite preview
-        "http://localhost:3000",    # CRA / alternate dev port
-    ],
+    allow_origins=_allowed_origins,
     allow_credentials=True,        # ← Required for httpOnly cookie auth
     allow_methods=["*"],
     allow_headers=["*"],

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from app.ml.workflow_integration import (
     generate_workflow_report,
@@ -15,7 +15,13 @@ from app.ml.workflow_integration import (
     get_workflow_status,
 )
 
-router = APIRouter(prefix="/workflow", tags=["Enterprise Workflow Integration"])
+from app.dependencies import CurrentUser
+
+router = APIRouter(
+    prefix="/workflow",
+    tags=["Enterprise Workflow Integration"],
+    dependencies=[Depends(CurrentUser)],  # ← all workflow endpoints require auth
+)
 
 
 @router.get("/status", response_model=Dict[str, Any], summary="Get end-to-end workflow status")
