@@ -16,7 +16,7 @@ describe('Toast component — variant rendering', () => {
     expect(screen.getByText('Job Complete')).toBeInTheDocument()
     expect(screen.getByText('Training finished.')).toBeInTheDocument()
     // Icon container carries the variant-specific colour class
-    const iconWrapper = screen.getByRole('alert').querySelector('.text-\\[\\#00F5A0\\]')
+    const iconWrapper = screen.getByRole('alert').querySelector('.text-\\[\\#C9A24B\\]')
     expect(iconWrapper).toBeTruthy()
   })
 
@@ -25,14 +25,14 @@ describe('Toast component — variant rendering', () => {
     const alert = screen.getByRole('alert')
     expect(alert).toBeInTheDocument()
     expect(screen.getByText('Upload Failed')).toBeInTheDocument()
-    const iconWrapper = alert.querySelector('.text-\\[\\#FF4D4D\\]')
+    const iconWrapper = alert.querySelector('.text-\\[\\#B23A4E\\]')
     expect(iconWrapper).toBeTruthy()
   })
 
-  it('renders an info toast with cyan icon class', () => {
+  it('renders an info toast with blueberry icon class', () => {
     render(<Toast variant="info" title="Processing" />)
     const alert = screen.getByRole('alert')
-    const iconWrapper = alert.querySelector('.text-\\[\\#00D4FF\\]')
+    const iconWrapper = alert.querySelector('.text-\\[\\#6C5CA6\\]')
     expect(iconWrapper).toBeTruthy()
   })
 

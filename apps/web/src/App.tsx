@@ -370,40 +370,42 @@ function AppContent() {
 
           {/* Right controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {/* Latest model pill */}
-            <button
-              onClick={() => latestModel.refetch()}
-              title={`Latest model: ${latestModel.displayText} — click to refresh`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 7,
-                padding: '5px 12px',
-                background: 'transparent',
-                border: `1px solid ${BB.border}`,
-                borderRadius: '8px 8px 0 8px',
-                color: BB.muted,
-                fontFamily: 'var(--font-ui)',
-                fontSize: 11,
-                cursor: 'pointer',
-                transition: 'all 150ms',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = BB.primaryLight
-                e.currentTarget.style.color = BB.text
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = BB.border
-                e.currentTarget.style.color = BB.muted
-              }}
-            >
-              {/* Gold dot = healthy model */}
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{ background: BB.gold, boxShadow: `0 0 6px ${BB.gold}99`, flexShrink: 0 }}
-              />
-              <span>{latestModel.displayText}</span>
-            </button>
+            {/* Latest model pill — rendered when a real trained model exists */}
+            {latestModel.hasModel && latestModel.displayText ? (
+              <button
+                onClick={() => latestModel.refetch()}
+                title={`Active model: ${latestModel.displayText} — click to refresh`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  padding: '5px 12px',
+                  background: 'transparent',
+                  border: `1px solid ${BB.border}`,
+                  borderRadius: '8px 8px 0 8px',
+                  color: BB.muted,
+                  fontFamily: 'var(--font-ui)',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  transition: 'all 150ms',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = BB.primaryLight
+                  e.currentTarget.style.color = BB.text
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = BB.border
+                  e.currentTarget.style.color = BB.muted
+                }}
+              >
+                {/* Gold dot = healthy model */}
+                <span
+                  className="w-2 h-2 rounded-full"
+                  style={{ background: BB.gold, boxShadow: `0 0 6px ${BB.gold}99`, flexShrink: 0 }}
+                />
+                <span>{latestModel.displayText}</span>
+              </button>
+            ) : null}
 
             {/* Notification bell */}
             <NotificationBell />

@@ -74,7 +74,6 @@ from app.schemas.job import JobStatusEnum
 from app.ml.cross_validator import cross_validate_pipeline
 from app.ml.experiment_tracker import save_experiment, start_experiment
 from app.ml.feature_importance import compute_feature_importance
-from app.ml.hyperparam_search import run_hyperparameter_search
 from app.ml.model_registry import register_model
 from app.ml.training_report import (
     build_dataset_version,
@@ -302,31 +301,9 @@ def execute_ml_training_pipeline_sync(
                 f"Searching best hyperparameters for '{algo_name}'",
                 estimated_seconds=15.0,
             )
-            try:
-                base_estimator = create_model(
-                    algorithm=algo_name, problem_type=problem_type, random_state=seed
-                )
-                base_pipeline = Pipeline(
-                    steps=[("preprocessor", preprocessor), ("estimator", base_estimator)]
-                )
-                best_pipeline, best_params, search_summary = run_hyperparameter_search(
-                    pipeline=base_pipeline,
-                    X=X_train,
-                    y=y_train,
-                    problem_type=problem_type,
-                    n_cv_splits=min(cv_n_splits, max(2, len(X_train) // 3)),
-                    n_iter_random=tuning_n_iter,
-                    search_strategy=tuning_strategy,
-                    random_state=seed,
-                )
-                # best_pipeline is already fitted by SearchCV (refit=True)
-                model_pipeline = best_pipeline
-                logger.info("Hyperparameter search complete: %s", best_params)
-            except Exception as exc:
-                logger.warning("Hyperparameter search failed; falling back: %s", exc)
-                search_summary = {"skipped": True, "reason": str(exc)}
-                # Fall through to build pipeline normally below
-                model_pipeline = None
+            # Hyperparameter search module pruned per A2
+            search_summary = {"skipped": True, "reason": "Tuning pruned in favor of baseline pipeline"}
+            model_pipeline = None
         else:
             if not enable_tuning:
                 search_summary = {"skipped": True, "reason": "disabled via config"}

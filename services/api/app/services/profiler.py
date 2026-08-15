@@ -236,14 +236,24 @@ class DatasetProfilerService:
             row_tuples.append(tuple(r.get(col) for col in data.columns))
         duplicate_rows = row_count - len(set(row_tuples)) if row_count > 0 else 0
 
-        # 2. Quality Analysis: Duplicate Columns
+        # 2. Quality Analysis: Duplicate Columns (both duplicate names & identical series)
         duplicate_columns = 0
         seen_headers = set()
+        seen_series_signatures = set()
         for col in data.columns:
             if col in seen_headers:
                 duplicate_columns += 1
             else:
                 seen_headers.add(col)
+                # Compute series signature for identical column values check
+                if row_count > 0:
+                    # Sample up to 500 rows for fast canonical signature
+                    sample_step = max(1, row_count // 500)
+                    sig = tuple(str(data.rows[i].get(col)) for i in range(0, row_count, sample_step))
+                    if sig in seen_series_signatures:
+                        duplicate_columns += 1
+                    else:
+                        seen_series_signatures.add(sig)
 
         # 3. Column Profiling Loop
         column_profiles: list[ColumnProfile] = []

@@ -7,17 +7,14 @@ Authentication & Multi-tenancy
 All endpoints require a valid Bearer token / httpOnly cookie via ``CurrentUser``.
 Read and write operations are strictly scoped to ``current_user.organisation_id``.
 
-Version 1:
-    POST /upload              — upload + immediate validate + parse + store
+Core Endpoints:
+    POST /upload              — upload + validate + parse + store
     POST /                    — alias for /upload
     GET  /                    — list organization datasets
+    GET  /{dataset_id}        — get dataset metadata by ID
     GET  /{dataset_id}/profile
     GET  /{dataset_id}/health
     GET  /{dataset_id}/recommendations
-
-Version 2:
-    POST /upload/v2           — streaming upload → background Celery ingestion pipeline
-                                Returns HTTP 202 Accepted + poll_url immediately.
 """
 
 import csv

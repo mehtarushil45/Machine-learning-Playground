@@ -5,11 +5,12 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api
 const DEFAULT_POLL_INTERVAL_MS = 30000 // 30 seconds
 
 export interface LatestModelInfo {
-  algorithm: string
-  version: string
+  algorithm: string | null
+  version: string | null
   jobId: string | null
   completedAt: string | null
-  displayText: string
+  displayText: string | null
+  hasModel: boolean
   isLoading: boolean
   error: string | null
   refetch: () => Promise<void>
@@ -18,6 +19,7 @@ export interface LatestModelInfo {
 /**
  * Custom React Hook that polls GET /api/v1/jobs every 30 seconds
  * and returns the algorithm name and version of the most recently completed ML training job.
+ * If no job has been completed yet, hasModel is false and displayText is null (never fake hardcoded values).
  */
 export function useLatestModel(pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS): LatestModelInfo {
   const [latestJob, setLatestJob] = useState<JobEntity | null>(null)
@@ -38,7 +40,7 @@ export function useLatestModel(pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS
 
       const data: JobListData = await res.json()
       
-      // Filter jobs with status COMPLETED or completed status string
+      // Filter jobs with status COMPLETED
       const completedJobs = (data.jobs || []).filter(
         (job) => job.status === 'COMPLETED' || job.status.toLowerCase() === 'completed'
       )
@@ -52,6 +54,10 @@ export function useLatestModel(pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS
         })
         if (isMountedRef.current) {
           setLatestJob(completedJobs[0])
+        }
+      } else {
+        if (isMountedRef.current) {
+          setLatestJob(null)
         }
       }
     } catch (err) {
@@ -81,22 +87,36 @@ export function useLatestModel(pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS
     }
   }, [fetchJobs, pollIntervalMs])
 
-  // Process algorithm name formatting
-  const rawAlgorithm = latestJob?.algorithm || 'Random Forest'
+  if (!latestJob) {
+    return {
+      algorithm: null,
+      version: null,
+      jobId: null,
+      completedAt: null,
+      displayText: null,
+      hasModel: false,
+      isLoading,
+      error,
+      refetch: fetchJobs,
+    }
+  }
+
+  // Format real algorithm name
+  const rawAlgorithm = latestJob.algorithm || 'Model'
   const algorithm = rawAlgorithm
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase())
 
-  // Derive version string (e.g. from job metadata or version property, defaulting to v2.4 / v1.0)
-  const version = (latestJob?.metadata as any)?.version || (latestJob?.metadata as any)?.model_version || 'v2.4'
+  const version = (latestJob.metadata as any)?.version || (latestJob.metadata as any)?.model_version || 'v1.0'
   const displayText = `${algorithm} ${version}`
 
   return {
     algorithm,
     version,
-    jobId: latestJob?.job_id || null,
-    completedAt: latestJob?.completed_at || null,
+    jobId: latestJob.job_id,
+    completedAt: latestJob.completed_at || null,
     displayText,
+    hasModel: true,
     isLoading,
     error,
     refetch: fetchJobs,

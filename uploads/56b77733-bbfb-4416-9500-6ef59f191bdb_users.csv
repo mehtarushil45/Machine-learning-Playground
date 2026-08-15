@@ -1,4 +1,0 @@
-id,age,income,is_member,created_at,notes
-USR-01,25,50000.5,true,2026-01-01T10:00:00,active user
-USR-02,30,65000.0,false,2026-01-02T11:00:00,regular
-USR-03,45,,true,2026-01-03T12:00:00,
