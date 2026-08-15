@@ -317,26 +317,29 @@ export function NotificationBell() {
             <span className="text-[10px]" style={{ color: '#5E5480' }}>
               Real-Time Telemetry Stream
             </span>
-            <button
-              onClick={() => triggerDemoNotification()}
-              className="px-2.5 py-1 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer"
-              style={{
-                background: 'rgba(107,92,166,0.12)',
-                border: '1px solid rgba(107,92,166,0.25)',
-                borderRadius: '6px 6px 0 6px',
-                color: '#6C5CA6',
-                fontFamily: 'var(--font-ui)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(107,92,166,0.22)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(107,92,166,0.12)'
-              }}
-            >
-              <Sparkles className="w-3 h-3" style={{ color: '#C9A24B' }} />
-              <span>Simulate Alert</span>
-            </button>
+            {/* Simulate Alert is a dev-only tool — hidden in production builds */}
+            {import.meta.env.DEV && (
+              <button
+                onClick={() => triggerDemoNotification()}
+                className="px-2.5 py-1 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer"
+                style={{
+                  background: 'rgba(107,92,166,0.12)',
+                  border: '1px solid rgba(107,92,166,0.25)',
+                  borderRadius: '6px 6px 0 6px',
+                  color: '#6C5CA6',
+                  fontFamily: 'var(--font-ui)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(107,92,166,0.22)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(107,92,166,0.12)'
+                }}
+              >
+                <Sparkles className="w-3 h-3" style={{ color: '#C9A24B' }} />
+                <span>Simulate Alert</span>
+              </button>
+            )}
           </div>
         </div>
       )}

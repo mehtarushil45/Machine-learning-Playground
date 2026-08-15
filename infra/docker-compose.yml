@@ -40,6 +40,26 @@ services:
       retries: 10
       start_period: 5s
 
+  # ── Database Migration (one-shot) ───────────────────────────────────────────
+  # Runs `alembic upgrade head` once, then exits with code 0.
+  # Both api and worker depend on this via service_completed_successfully so
+  # they never start against an un-migrated schema.
+  migrate:
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    working_dir: /app/services/api
+    restart: "no"
+    env_file:
+      - ../.env
+    environment:
+      - PYTHONPATH=/app:/app/services/api
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/mlplatform
+    depends_on:
+      db:
+        condition: service_healthy
+
   # ── FastAPI API ─────────────────────────────────────────────────────────────
   api:
     build:
@@ -63,6 +83,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ready || python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')\""]
       interval: 10s
@@ -95,6 +117,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "celery -A services.worker.celery_app inspect ping || exit 1"]
       interval: 10s

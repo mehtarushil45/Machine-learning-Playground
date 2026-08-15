@@ -14,17 +14,18 @@ import {
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider } from './providers/AuthContext';
+import { ProjectProvider, useProject } from './providers/ProjectContext';
 import { SidebarUserAvatar } from './components/layout/SidebarUserAvatar';
+import { LifecycleRail } from './components/layout/LifecycleRail';
 import { NotificationBell } from './components/notifications/NotificationBell';
 import { Toast } from './components/ui/Toast';
 import { useLatestModel } from './hooks/useLatestModel';
-import { EnterpriseWorkspace } from './features/datasets/EnterpriseWorkspace';
+import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { ExplainabilityHub } from './features/explainability/ExplainabilityHub';
 import { ClassroomHub } from './features/classrooms/ClassroomHub';
 import { DeploymentStudio } from './features/deployments/DeploymentStudio';
 import { PortfolioViewer } from './features/portfolios/PortfolioViewer';
-import type { Dataset } from './types/dataset';
 
 export type PlatformTab =
   | 'workspace'
@@ -62,15 +63,13 @@ const BB = {
 function AppContent() {
   const latestModel = useLatestModel();
   const { user, isAuthenticated } = useAuthContext();
+  const { lifecycleStage, setLifecycleStage } = useProject();
   const headerInitials = isAuthenticated
     ? getInitials(user?.full_name, user?.email)
     : 'ML';
 
   const [activeTab, setActiveTab]           = useState<PlatformTab>('workspace');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [dataset, setDataset]               = useState<Dataset | null>(null);
-  const [selectedFeatures, setSelectedFeatures] = useState<string[]>([]);
-  const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [toasts, setToasts]                 = useState<ToastMessage[]>([]);
 
   const showToast = (
@@ -85,38 +84,46 @@ function AppContent() {
     }, 3500);
   };
 
-  const handleDataLoaded = (loadedDataset: Dataset) => {
-    setDataset(loadedDataset);
-    setSelectedFeatures([]);
-    setSelectedTarget(null);
-    const count = loadedDataset.rowCount ?? loadedDataset.rows?.length ?? 0;
-    showToast('Dataset Ingested', `Successfully loaded dataset with ${count} rows.`);
+  /** Navigate to a tab — also keeps lifecycleStage in sync */
+  const handleNavigate = (tab: PlatformTab) => {
+    setActiveTab(tab);
+    // Map tab → lifecycle stage for the LifecycleRail
+    const tabToStage: Record<PlatformTab, typeof lifecycleStage> = {
+      workspace:      'dataset',
+      'code-studio':  'pipeline',
+      explainability: 'evaluate',
+      classrooms:     'verify',
+      deployments:    'deploy',
+      portfolios:     'certify',
+    };
+    setLifecycleStage(tabToStage[tab]);
   };
 
   // Keyboard shortcuts (⌘1–⌘6, ⌘B)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
-        if (e.key === '1') { e.preventDefault(); setActiveTab('workspace'); }
-        if (e.key === '2') { e.preventDefault(); setActiveTab('code-studio'); }
-        if (e.key === '3') { e.preventDefault(); setActiveTab('explainability'); }
-        if (e.key === '4') { e.preventDefault(); setActiveTab('classrooms'); }
-        if (e.key === '5') { e.preventDefault(); setActiveTab('deployments'); }
-        if (e.key === '6') { e.preventDefault(); setActiveTab('portfolios'); }
+        if (e.key === '1') { e.preventDefault(); handleNavigate('workspace'); }
+        if (e.key === '2') { e.preventDefault(); handleNavigate('code-studio'); }
+        if (e.key === '3') { e.preventDefault(); handleNavigate('explainability'); }
+        if (e.key === '4') { e.preventDefault(); handleNavigate('classrooms'); }
+        if (e.key === '5') { e.preventDefault(); handleNavigate('deployments'); }
+        if (e.key === '6') { e.preventDefault(); handleNavigate('portfolios'); }
         if (e.key === 'b') { e.preventDefault(); setIsSidebarCollapsed((prev) => !prev); }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const navItems: { id: PlatformTab; label: string; icon: React.ReactNode; group: string }[] = [
-    { id: 'workspace',      label: 'Dataset & Profiler',       icon: <Database className="w-4 h-4" />,      group: 'DATA LAB' },
-    { id: 'code-studio',    label: 'View-as-Code Studio',      icon: <Code2 className="w-4 h-4" />,          group: 'DATA LAB' },
-    { id: 'explainability', label: 'Explainability & Ethics',  icon: <Sparkles className="w-4 h-4" />,       group: 'EVALUATION' },
-    { id: 'classrooms',     label: 'Classrooms & Audit',       icon: <GraduationCap className="w-4 h-4" />,  group: 'EVALUATION' },
-    { id: 'deployments',    label: 'Deployment Studio',        icon: <Rocket className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
-    { id: 'portfolios',     label: 'Portfolios & Verification', icon: <Award className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
+    { id: 'workspace',      label: 'Dataset & Profiler',        icon: <Database className="w-4 h-4" />,      group: 'DATA LAB' },
+    { id: 'code-studio',    label: 'View-as-Code Studio',       icon: <Code2 className="w-4 h-4" />,          group: 'DATA LAB' },
+    { id: 'explainability', label: 'Explainability & Ethics',   icon: <Sparkles className="w-4 h-4" />,       group: 'EVALUATION' },
+    { id: 'classrooms',     label: 'Classrooms & Audit',        icon: <GraduationCap className="w-4 h-4" />,  group: 'EVALUATION' },
+    { id: 'deployments',    label: 'Deployment Studio',         icon: <Rocket className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
+    { id: 'portfolios',     label: 'Portfolios & Verification',  icon: <Award className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
   ];
 
   const groups = Array.from(new Set(navItems.map((n) => n.group)));
@@ -240,7 +247,7 @@ function AppContent() {
                   return (
                     <button
                       key={item.id}
-                      onClick={() => setActiveTab(item.id)}
+                      onClick={() => handleNavigate(item.id)}
                       title={isSidebarCollapsed ? item.label : undefined}
                       style={{
                         width: '100%',
@@ -331,24 +338,34 @@ function AppContent() {
             borderBottom: `1px solid ${BB.border}`,
           }}
         >
-          {/* Breadcrumb */}
+          {/* Breadcrumb + Lifecycle Rail */}
           <div
-            style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-ui)', fontSize: 13 }}
+            style={{ display: 'flex', alignItems: 'center', gap: 16, fontFamily: 'var(--font-ui)', fontSize: 13, minWidth: 0, flex: 1 }}
           >
-            <span style={{ color: BB.muted }}>ML Playground</span>
-            <span style={{ color: BB.disabled }}>›</span>
-            <span
-              style={{
-                color: BB.primaryLight,
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              {navItems.find((n) => n.id === activeTab)?.icon}
-              {breadcrumbLabels[activeTab]}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <span style={{ color: BB.muted }}>ML Playground</span>
+              <span style={{ color: BB.disabled }}>›</span>
+              <span
+                style={{
+                  color: BB.primaryLight,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {navItems.find((n) => n.id === activeTab)?.icon}
+                {breadcrumbLabels[activeTab]}
+              </span>
+            </div>
+
+            {/* Lifecycle Rail — always visible, tracks active tab */}
+            <div style={{ flex: 1, minWidth: 0, marginLeft: 8 }}>
+              <LifecycleRail
+                currentStage={lifecycleStage}
+                onNavigate={handleNavigate}
+              />
+            </div>
           </div>
 
           {/* Right controls */}
@@ -429,14 +446,10 @@ function AppContent() {
           className="space-y-8"
         >
           {activeTab === 'workspace' && (
-            <ErrorBoundary key="workspace" onReset={() => setActiveTab('workspace')}>
-              <EnterpriseWorkspace
-                dataset={dataset}
-                selectedFeatures={selectedFeatures}
-                selectedTarget={selectedTarget}
-                onDataLoaded={handleDataLoaded}
-                onSelectedFeaturesChange={setSelectedFeatures}
-                onSelectedTargetChange={setSelectedTarget}
+            <ErrorBoundary key="workspace" onReset={() => handleNavigate('workspace')}>
+              <DatasetProfilerPage
+                onShowToast={showToast}
+                onNavigate={handleNavigate}
               />
             </ErrorBoundary>
           )}
@@ -488,7 +501,9 @@ export default function App() {
   return (
     <ThemeProvider defaultTheme="system">
       <AuthProvider>
-        <AppContent />
+        <ProjectProvider>
+          <AppContent />
+        </ProjectProvider>
       </AuthProvider>
     </ThemeProvider>
   );

@@ -1,5 +1,4 @@
 import { memo, useMemo } from 'react'
-import { getNumericColumns } from '../../utils/columnAnalysis'
 import { selectTargetColumn, toggleFeatureColumn } from '../../utils/columnSelection'
 import type { Dataset } from '../../types/dataset'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
@@ -22,10 +21,7 @@ export const ColumnSelector = memo(function ColumnSelector({
   onSelectedTargetChange,
 }: ColumnSelectorProps) {
   const allColumns = useMemo(() => dataset.columns || [], [dataset.columns])
-  const numericSet = useMemo(
-    () => new Set(getNumericColumns(dataset.columns, dataset.rows)),
-    [dataset.columns, dataset.rows],
-  )
+
 
   const handleFeatureToggle = (column: string) => {
     onSelectedFeaturesChange(

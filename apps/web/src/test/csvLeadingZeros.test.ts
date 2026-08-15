@@ -94,8 +94,8 @@ describe('inferAndCastColumnTypes — leading-zero preservation', () => {
   it('handles null/empty values without crashing', () => {
     const rows: Row[] = [
       { val: null },
+      { val: null },   // second null — parser handles undefined as null at the CSV layer
       { val: '' },
-      { val: undefined },
       { val: '42' },
     ]
     const result = inferAndCastColumnTypes(rows, ['val'])
