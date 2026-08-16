@@ -94,33 +94,22 @@ export function computeClientRecommendations(
   let recommended_problem_type = 'Clustering'
   let problem_type_confidence = 0.75
   let problem_type_reasoning = 'No explicit target variable specified; unsupervised feature clustering recommended.'
-  let recommended_models = ['K-Means Clustering', 'DBSCAN', 'Hierarchical Agglomerative Clustering']
+  // Training choices come from the API-backed registry. This offline analyzer
+  // identifies the task only; it never owns a duplicate algorithm list.
+  let recommended_models: string[] = []
 
   if (primaryTarget && primaryTarget.suggested_task === 'Classification') {
     recommended_problem_type = 'Classification'
     problem_type_confidence = 0.95
     problem_type_reasoning = `Primary target candidate '${primaryTarget.column_name}' is discrete classification.`
-    recommended_models = [
-      'Random Forest Classifier',
-      'XGBoost Classifier',
-      'Logistic Regression',
-      'Gradient Boosting Classifier',
-    ]
   } else if (primaryTarget && primaryTarget.suggested_task === 'Regression') {
     recommended_problem_type = 'Regression'
     problem_type_confidence = 0.90
     problem_type_reasoning = `Primary target candidate '${primaryTarget.column_name}' is continuous numerical regression.`
-    recommended_models = [
-      'Random Forest Regressor',
-      'XGBoost Regressor',
-      'Ridge / Lasso Regression',
-      'Gradient Boosting Regressor',
-    ]
   } else if (datetimeCols.length > 0) {
     recommended_problem_type = 'Time Series'
     problem_type_confidence = 0.85
     problem_type_reasoning = `Dataset contains datetime temporal feature '${datetimeCols[0].name}'.`
-    recommended_models = ['ARIMA / SARIMAX', 'Prophet', 'LSTM / GRU Neural Network']
   }
 
   // 4. Preprocessing Pipeline
@@ -132,7 +121,7 @@ export function computeClientRecommendations(
   if (profile.columns.some((c) => c.type === 'categorical' || c.type === 'boolean'))
     recommended_preprocessing.push('One-Hot / Target Encoding')
   if (profile.columns.some((c) => c.type === 'numeric'))
-    recommended_preprocessing.push('StandardScaler Feature Normalization')
+    recommended_preprocessing.push('Feature Normalization')
 
   // 5. Feature Action Recommendations
   const feature_recommendations: FeatureRecommendation[] = profile.columns.map((col) => {

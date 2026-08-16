@@ -6,46 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-ALLOWED_ALGORITHMS = {
-    "logistic regression",
-    "random forest classifier",
-    "random forest",
-    "decision tree classifier",
-    "decision tree",
-    "gradient boosting classifier",
-    "gradient boosting",
-    "xgboost classifier",
-    "xgboost",
-    "lightgbm classifier",
-    "lightgbm",
-    "support vector machine (svm)",
-    "svm classifier",
-    "svm",
-    "k-nearest neighbors (knn)",
-    "knn classifier",
-    "knn",
-    "multi-layer perceptron (mlp)",
-    "mlp classifier",
-    "mlp",
-    "ridge classifier",
-    "ridge",
-    "lasso classifier",
-    "linear regression",
-    "random forest regressor",
-    "decision tree regressor",
-    "gradient boosting regressor",
-    "xgboost regressor",
-    "lightgbm regressor",
-    "support vector regression (svr)",
-    "svr regressor",
-    "k-nearest neighbors regressor (knn)",
-    "knn regressor",
-    "multi-layer perceptron regressor (mlp)",
-    "mlp regressor",
-    "ridge regressor",
-    "lasso",
-    "lasso regressor",
-}
+from app.ml.algorithm_factory import ALGORITHM_REGISTRY
+from app.ml.imputer_factory import IMPUTER_REGISTRY
+from app.ml.scaler_factory import SCALER_REGISTRY
 
 
 class JobStatusEnum(str, enum.Enum):
@@ -71,9 +34,9 @@ class TrainingRequest(BaseModel):
     dataset_id: str = Field(..., description="ID of the uploaded dataset")
     target_column: str = Field(..., description="Target column variable name")
     feature_columns: list[str] = Field(..., description="List of feature column names")
-    algorithm: str = Field("Random Forest Classifier", description="ML model algorithm")
-    scaler: str | None = Field("StandardScaler", description="Feature scaling strategy")
-    imputer: str | None = Field("Median", description="Missing value imputation strategy")
+    algorithm: str = Field("random_forest_classifier", description="Canonical ML model algorithm key")
+    scaler: str | None = Field("standard_scaler", description="Canonical feature scaling strategy key")
+    imputer: str | None = Field("median", description="Canonical missing-value imputation strategy key")
     train_test_split: float = Field(0.8, description="Train / Test split ratio (0.5 to 0.95)")
     random_seed: int | None = Field(42, description="Random seed for reproducibility")
     cross_validation: int | None = Field(5, description="Cross validation folds count")
@@ -86,9 +49,23 @@ class TrainingRequest(BaseModel):
     @field_validator("algorithm")
     @classmethod
     def validate_algorithm(cls, algo: str) -> str:
-        if not algo or algo.strip().lower() not in ALLOWED_ALGORITHMS:
-            raise ValueError(f"Algorithm '{algo}' is not in the allowed algorithms list.")
+        if algo not in ALGORITHM_REGISTRY:
+            raise ValueError(f"Algorithm '{algo}' is not a published training option.")
         return algo
+
+    @field_validator("scaler")
+    @classmethod
+    def validate_scaler(cls, scaler: str | None) -> str | None:
+        if scaler is not None and scaler not in SCALER_REGISTRY:
+            raise ValueError(f"Scaler '{scaler}' is not a published training option.")
+        return scaler
+
+    @field_validator("imputer")
+    @classmethod
+    def validate_imputer(cls, imputer: str | None) -> str | None:
+        if imputer is not None and imputer not in IMPUTER_REGISTRY:
+            raise ValueError(f"Imputer '{imputer}' is not a published training option.")
+        return imputer
 
     @field_validator("feature_columns")
     @classmethod

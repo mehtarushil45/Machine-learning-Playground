@@ -11,54 +11,23 @@ import type {
   TrainingRequestPayload,
   TrainingOptions,
 } from '../types/job'
+import { CANONICAL_TRAINING_OPTIONS } from '../types/job'
 import { apiClient, AuthExpiredError } from './apiClient'
 export { AuthExpiredError }
 
-export interface SupportedAlgorithms {
-  classification: string[]
-  regression: string[]
-}
-
-export async function fetchSupportedAlgorithms(signal?: AbortSignal): Promise<SupportedAlgorithms> {
+export async function fetchTrainingOptions(signal?: AbortSignal): Promise<TrainingOptions> {
   try {
-    return await apiClient.get<SupportedAlgorithms>('/algorithms', { signal })
+    const data = await apiClient.get<TrainingOptions>('/training-options', { signal })
+    if (data && data.algorithms && data.algorithms.length > 0) {
+      return data
+    }
+    return CANONICAL_TRAINING_OPTIONS
   } catch (err) {
-    if (err instanceof AuthExpiredError) throw err
     if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
       throw err
     }
-    return {
-      classification: [
-        'Random Forest Classifier',
-        'Logistic Regression',
-        'Decision Tree Classifier',
-        'Multi-Layer Perceptron (MLP)',
-        'K-Nearest Neighbors (KNN)',
-        'Support Vector Machine (SVM)',
-        'Gradient Boosting Classifier',
-        'XGBoost Classifier',
-        'LightGBM Classifier',
-        'Ridge Classifier',
-      ],
-      regression: [
-        'Random Forest Regressor',
-        'Linear Regression',
-        'Decision Tree Regressor',
-        'Multi-Layer Perceptron Regressor (MLP)',
-        'K-Nearest Neighbors Regressor (KNN)',
-        'Support Vector Regression (SVR)',
-        'Gradient Boosting Regressor',
-        'XGBoost Regressor',
-        'LightGBM Regressor',
-        'Ridge',
-        'Lasso',
-      ],
-    }
+    return CANONICAL_TRAINING_OPTIONS
   }
-}
-
-export async function fetchTrainingOptions(signal?: AbortSignal): Promise<TrainingOptions> {
-  return apiClient.get<TrainingOptions>('/training-options', { signal })
 }
 
 // ---------------------------------------------------------------------------

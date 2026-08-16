@@ -62,10 +62,12 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier
 
 # Sprint 3 modules
 from app.ml.dataset_loader import DatasetContext, DatasetValidationError, load_dataset_context
-from app.ml.model_factory import create_model
+from app.ml.algorithm_factory import ALGORITHM_REGISTRY, get_algorithm
 from app.ml.preprocessing import build_preprocessor
 from app.ml.problem_detector import ProblemType, detect_problem_type
 from app.schemas.job import JobStatusEnum
@@ -189,12 +191,12 @@ def execute_ml_training_pipeline_sync(
     dataset_id: str = config.get("dataset_id", "ds-default")
     target_col: str = config.get("target_column", "target")
     feature_cols: List[str] = config.get("feature_columns", [])
-    algo_name: str = config.get("algorithm", "Random Forest Classifier")
+    algo_key: str = config.get("algorithm", "random_forest_classifier")
     split_ratio: float = float(config.get("train_test_split", 0.8))
     seed: int = int(config.get("random_seed") or 42)
     use_scaling: bool = bool(config.get("normalization", True))
-    scaler_name: str = config.get("scaler", "StandardScaler") or "StandardScaler"
-    imputer_name: str = config.get("imputer", "Median") or "Median"
+    scaler_name: str = config.get("scaler", "standard_scaler") or "standard_scaler"
+    imputer_name: str = config.get("imputer", "median") or "median"
     rec_task: Optional[str] = config.get("recommended_task")
 
     # Sprint 4 flags (backward-compatible defaults)
@@ -253,6 +255,14 @@ def execute_ml_training_pipeline_sync(
             ProblemType.BINARY_CLASSIFICATION,
             ProblemType.MULTI_CLASSIFICATION,
         )
+        task_type = "classification" if is_classification else "regression"
+        algorithm_definition = ALGORITHM_REGISTRY[algo_key]
+        algo_name = algorithm_definition.display_name
+        estimator = get_algorithm(
+            key=algo_key,
+            task_type=task_type,
+            random_state=seed,
+        )
         logger.info("Detected problem type: %s", problem_type.value)
 
         # ── Stage 3: Build Preprocessing Pipeline ────────────────────────────
@@ -279,8 +289,17 @@ def execute_ml_training_pipeline_sync(
         )
 
         X: Any = ctx.dataframe[ctx.feature_columns]
+        class_labels: Optional[List[str]] = None
         if is_classification:
             y: Any = ctx.dataframe[ctx.target_column].astype(str)
+            # XGBoost's sklearn API requires consecutive integer class labels;
+            # the rest of the registry correctly accepts the platform's native
+            # string labels. Keep the source labels in job metadata so clients
+            # can map XGBoost predictions back to the uploaded target values.
+            if isinstance(estimator, XGBClassifier):
+                label_encoder = LabelEncoder()
+                class_labels = label_encoder.fit(y).classes_.astype(str).tolist()
+                y = label_encoder.transform(y)
         else:
             y = (
                 ctx.dataframe[ctx.target_column]
@@ -317,9 +336,6 @@ def execute_ml_training_pipeline_sync(
 
         # If tuning was skipped or failed, build and fit baseline pipeline
         if model_pipeline is None:
-            estimator = create_model(
-                algorithm=algo_name, problem_type=problem_type, random_state=seed
-            )
             model_pipeline = Pipeline(
                 steps=[("preprocessor", preprocessor), ("estimator", estimator)]
             )
@@ -580,6 +596,12 @@ def execute_ml_training_pipeline_sync(
             estimated_seconds=0.0,
             metadata_update={
                 "metrics": metrics,
+                "algorithm_key": algo_key,
+                "algorithm_display_name": algo_name,
+                "estimator_type": type(estimator).__name__,
+                "class_labels": class_labels,
+                "scaler": scaler_name if use_scaling else None,
+                "imputer": imputer_name,
                 "model_path": save_info["model_path"],
                 "problem_type": problem_type.value,
                 "experiment_id": experiment_id,
@@ -667,4 +689,3 @@ def _fail_job(job_id: str, error_message: str) -> None:
         f"Job execution failed: {error_message}",
         error_msg=error_message,
     )
-

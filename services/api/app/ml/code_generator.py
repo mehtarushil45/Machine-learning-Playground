@@ -218,6 +218,31 @@ _ALGO_CODE_MAP: Dict[str, Tuple[str, str, str]] = {
     ),
 }
 
+# Canonical training keys are the values emitted by /api/v1/training-options.
+# These entries keep generated code aligned with the executable registries.
+_ALGO_CODE_MAP.update({
+    "random_forest_classifier": ("from sklearn.ensemble import RandomForestClassifier", "RandomForestClassifier", "classification"),
+    "logistic_regression": ("from sklearn.linear_model import LogisticRegression", "LogisticRegression", "classification"),
+    "decision_tree_classifier": ("from sklearn.tree import DecisionTreeClassifier", "DecisionTreeClassifier", "classification"),
+    "k_nearest_neighbors_classifier": ("from sklearn.neighbors import KNeighborsClassifier", "KNeighborsClassifier", "classification"),
+    "support_vector_classifier": ("from sklearn.svm import SVC", "SVC", "classification"),
+    "gradient_boosting_classifier": ("from sklearn.ensemble import GradientBoostingClassifier", "GradientBoostingClassifier", "classification"),
+    "xgboost_classifier": ("from xgboost import XGBClassifier", "XGBClassifier", "classification"),
+    "lightgbm_classifier": ("from lightgbm import LGBMClassifier", "LGBMClassifier", "classification"),
+    "gaussian_nb": ("from sklearn.naive_bayes import GaussianNB", "GaussianNB", "classification"),
+    "ridge_classifier": ("from sklearn.linear_model import RidgeClassifier", "RidgeClassifier", "classification"),
+    "random_forest_regressor": ("from sklearn.ensemble import RandomForestRegressor", "RandomForestRegressor", "regression"),
+    "linear_regression": ("from sklearn.linear_model import LinearRegression", "LinearRegression", "regression"),
+    "decision_tree_regressor": ("from sklearn.tree import DecisionTreeRegressor", "DecisionTreeRegressor", "regression"),
+    "k_nearest_neighbors_regressor": ("from sklearn.neighbors import KNeighborsRegressor", "KNeighborsRegressor", "regression"),
+    "support_vector_regressor": ("from sklearn.svm import SVR", "SVR", "regression"),
+    "gradient_boosting_regressor": ("from sklearn.ensemble import GradientBoostingRegressor", "GradientBoostingRegressor", "regression"),
+    "xgboost_regressor": ("from xgboost import XGBRegressor", "XGBRegressor", "regression"),
+    "lightgbm_regressor": ("from lightgbm import LGBMRegressor", "LGBMRegressor", "regression"),
+    "ridge_regressor": ("from sklearn.linear_model import Ridge", "Ridge", "regression"),
+    "lasso_regressor": ("from sklearn.linear_model import Lasso", "Lasso", "regression"),
+})
+
 
 # ---------------------------------------------------------------------------
 # 1. Main Code Generation Entry Point
@@ -309,7 +334,7 @@ y = df[target_col]"""
 
     num_steps: List[str] = []
     if imputer_node:
-        strategy = str(imputer_node.params.get("strategy", "median")).lower().strip()
+        strategy = str(imputer_node.params.get("strategy", "median")).lower().strip().replace("_", "")
         if "knn" in strategy:
             imports.append("from sklearn.impute import KNNImputer")
             num_steps.append("('imputer', KNNImputer(n_neighbors=5))")
@@ -330,7 +355,7 @@ y = df[target_col]"""
         num_steps.append("('imputer', SimpleImputer(strategy='median'))")
 
     if scaler_node:
-        scaler_type = str(scaler_node.params.get("scaler_type", "standard")).lower().strip()
+        scaler_type = str(scaler_node.params.get("scaler_type", "standard")).lower().strip().replace("_", "")
         if "none" in scaler_type or "passthrough" in scaler_type or "raw" in scaler_type:
             pass
         elif "minmax" in scaler_type:
@@ -342,6 +367,9 @@ y = df[target_col]"""
         elif "maxabs" in scaler_type:
             imports.append("from sklearn.preprocessing import MaxAbsScaler")
             num_steps.append("('scaler', MaxAbsScaler())")
+        elif "normalizer" in scaler_type:
+            imports.append("from sklearn.preprocessing import Normalizer")
+            num_steps.append("('scaler', Normalizer())")
         else:
             imports.append("from sklearn.preprocessing import StandardScaler")
             num_steps.append("('scaler', StandardScaler())")

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Code2,
@@ -16,6 +16,9 @@ import {
   FileCode
 } from 'lucide-react';
 import { PipelineService, PipelineDAG, CodeGenerationResponse } from '../../services/api';
+import { Select } from '../../components/ui/Select';
+import { fetchTrainingOptions } from '../../services/jobService';
+import { CANONICAL_TRAINING_OPTIONS, type TrainingOptions } from '../../types/job';
 
 interface ViewAsCodeStudioProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
@@ -25,8 +28,9 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
   const [targetColumn, setTargetColumn] = useState('target');
   const [featureColumns, setFeatureColumns] = useState('feat_0, feat_1, feat_2, feat_3');
   const [imputerStrategy, setImputerStrategy] = useState('median');
-  const [scalerType, setScalerType] = useState('standard');
-  const [algorithm, setAlgorithm] = useState('RandomForestClassifier');
+  const [scalerType, setScalerType] = useState('standard_scaler');
+  const [algorithm, setAlgorithm] = useState('random_forest_classifier');
+  const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>(CANONICAL_TRAINING_OPTIONS);
   const [testSize, setTestSize] = useState(0.2);
 
   const [generatedCode, setGeneratedCode] = useState<CodeGenerationResponse | null>(null);
@@ -35,7 +39,27 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
   const [copied, setCopied] = useState(false);
   const [activeStep, setActiveStep] = useState<number | null>(1);
 
-  const handleGenerateCode = async () => {
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchTrainingOptions(controller.signal)
+      .then((options) => {
+        if (options && options.algorithms?.length > 0) {
+          setTrainingOptions(options);
+          setAlgorithm((current) => options.algorithms.some((option) => option.key === current) ? current : options.algorithms[0]?.key || 'random_forest_classifier');
+          setScalerType((current) => options.scalers.some((option) => option.key === current) ? current : options.scalers[0]?.key || 'standard_scaler');
+          setImputerStrategy((current) => options.imputers.some((option) => option.key === current) ? current : options.imputers[0]?.key || 'median');
+        }
+      })
+      .catch((err) => {
+        if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : 'Unable to load training options.');
+      });
+    return () => controller.abort();
+  }, []);
+
+  const handleGenerateCode = useCallback(async () => {
     setLoading(true);
     setError(null);
     const featureList = featureColumns.split(',').map((s) => s.trim()).filter(Boolean);
@@ -53,15 +77,46 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
     try {
       const res = await PipelineService.generateCode(dag, true, true);
       setGeneratedCode(res);
-    } catch (err: any) {
-      setError(err.message || 'Failed to generate code');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to generate code');
     } finally {
       setLoading(false);
     }
-  };
+  }, [algorithm, featureColumns, imputerStrategy, scalerType, targetColumn, testSize]);
 
   useEffect(() => {
-    handleGenerateCode();
+    let active = true;
+    if (imputerStrategy && scalerType && algorithm) {
+      (async () => {
+        const featureList = featureColumns.split(',').map((s) => s.trim()).filter(Boolean);
+        const dag: PipelineDAG = {
+          dataset_name: 'dataset.csv',
+          target_column: targetColumn,
+          feature_columns: featureList,
+          nodes: [
+            { node_id: 'n1', type: 'missing_value_handler', name: 'Imputer',          params: { strategy: imputerStrategy } },
+            { node_id: 'n2', type: 'scaler',                name: 'Scaler',           params: { scaler_type: scalerType }   },
+            { node_id: 'n3', type: 'train_test_split',       name: 'Train-Test Split', params: { test_size: testSize }       },
+            { node_id: 'n4', type: 'algorithm',              name: algorithm,          params: { algorithm }                 },
+          ],
+        };
+        try {
+          if (active) {
+            setLoading(true);
+            setError(null);
+          }
+          const res = await PipelineService.generateCode(dag, true, true);
+          if (active) setGeneratedCode(res);
+        } catch (err: unknown) {
+          if (active) setError(err instanceof Error ? err.message : 'Failed to generate code');
+        } finally {
+          if (active) setLoading(false);
+        }
+      })();
+    }
+    return () => {
+      active = false;
+    };
   }, [imputerStrategy, scalerType, algorithm, testSize, targetColumn, featureColumns]);
 
   const copyCode = async () => {
@@ -80,7 +135,7 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
         setCopied(true);
         if (onShowToast) onShowToast('Code Copied!', 'Python scikit-learn script copied to clipboard.');
         setTimeout(() => setCopied(false), 2000);
-      } catch (err) {
+      } catch {
         if (onShowToast) onShowToast('Copy Failed', 'Could not copy code to clipboard.', 'error');
       }
     }
@@ -91,7 +146,7 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
     { id: 2, title: 'Missing Value Imputer', desc: `strategy: ${imputerStrategy}`, icon: <Layers className="w-4 h-4 text-[#7B5CF5]" />, badge: 'Preprocess' },
     { id: 3, title: 'Feature Scaler', desc: `scaler: ${scalerType}`, icon: <Sliders className="w-4 h-4 text-[#7B5CF5]" />, badge: 'Preprocess' },
     { id: 4, title: 'Train/Test Split', desc: `ratio: ${(testSize * 100).toFixed(0)}% test`, icon: <Zap className="w-4 h-4 text-[#F5A623]" />, badge: 'Split' },
-    { id: 5, title: algorithm.replace('Classifier', '').replace('Regression', ''), desc: 'Model Trainer', icon: <Sparkles className="w-4 h-4 text-[#00F5A0]" />, badge: 'Model' },
+    { id: 5, title: trainingOptions.algorithms.find((option) => option.key === algorithm)?.display_name || 'Model', desc: 'Model Trainer', icon: <Sparkles className="w-4 h-4 text-[#00F5A0]" />, badge: 'Model' },
   ];
 
   return (
@@ -173,42 +228,46 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="micro-label block mb-1.5">Missing Imputer</label>
-                <select
+                <Select
                   value={imputerStrategy}
-                  onChange={(e) => setImputerStrategy(e.target.value)}
-                  className="quantum-input"
-                >
-                  <option value="median">Median Imputer</option>
-                  <option value="mean">Mean Imputer</option>
-                  <option value="most_frequent">Most Frequent</option>
-                </select>
+                  onChange={setImputerStrategy}
+                  options={trainingOptions.imputers.map((option) => ({ value: option.key, label: option.display_name }))}
+                  placeholder="Select imputer..."
+                />
               </div>
 
               <div>
                 <label className="micro-label block mb-1.5">Feature Scaler</label>
-                <select
+                <Select
                   value={scalerType}
-                  onChange={(e) => setScalerType(e.target.value)}
-                  className="quantum-input"
-                >
-                  <option value="standard">StandardScaler</option>
-                  <option value="minmax">MinMaxScaler [0,1]</option>
-                  <option value="robust">RobustScaler</option>
-                </select>
+                  onChange={setScalerType}
+                  options={trainingOptions.scalers.map((option) => ({ value: option.key, label: option.display_name }))}
+                  placeholder="Select scaler..."
+                />
               </div>
             </div>
 
             <div>
-              <label className="micro-label block mb-1.5">Classifier Model</label>
-              <select
+              <label className="micro-label block mb-1.5">Algorithm</label>
+              <Select
                 value={algorithm}
-                onChange={(e) => setAlgorithm(e.target.value)}
-                className="quantum-input"
-              >
-                <option value="RandomForestClassifier">Random Forest Classifier</option>
-                <option value="LogisticRegression">Logistic Regression</option>
-                <option value="DecisionTreeClassifier">Decision Tree Classifier</option>
-              </select>
+                onChange={setAlgorithm}
+                options={[
+                  {
+                    label: 'Classification',
+                    options: trainingOptions.algorithms
+                      .filter((option) => option.task_type === 'classification')
+                      .map((option) => ({ value: option.key, label: option.display_name })),
+                  },
+                  {
+                    label: 'Regression',
+                    options: trainingOptions.algorithms
+                      .filter((option) => option.task_type === 'regression')
+                      .map((option) => ({ value: option.key, label: option.display_name })),
+                  },
+                ]}
+                placeholder="Select algorithm..."
+              />
             </div>
 
             <div>

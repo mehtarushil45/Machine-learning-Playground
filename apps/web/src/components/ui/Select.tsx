@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
 
@@ -56,12 +56,10 @@ export function Select({
     top: number
     left: number
     width: number
-    openUpward: boolean
   }>({
     top: 0,
     left: 0,
     width: 0,
-    openUpward: false,
   })
 
   // Flatten options for label lookup
@@ -79,19 +77,15 @@ export function Select({
 
   const selectedOption = flatOptions.find((o) => o.value === value)
 
-  // Calculate coordinates & collision with viewport synchronously
+  // Calculate fixed portal coordinates. Training selects always open downward.
   const computePosition = useCallback(() => {
     if (!triggerRef.current) return null
     const rect = triggerRef.current.getBoundingClientRect()
-    const spaceBelow = window.innerHeight - rect.bottom
-    const dropdownHeight = 220
-    const openUpward = spaceBelow < dropdownHeight && rect.top > dropdownHeight
 
     return {
-      top: openUpward ? rect.top - 6 : rect.bottom + 6,
+      top: rect.bottom + 6,
       left: rect.left,
       width: Math.max(rect.width, 200),
-      openUpward,
     }
   }, [])
 
@@ -114,12 +108,6 @@ export function Select({
       setIsOpen(false)
     }
   }
-
-  useLayoutEffect(() => {
-    if (isOpen) {
-      updatePosition()
-    }
-  }, [isOpen, updatePosition])
 
   // Reposition on scroll or resize
   useEffect(() => {
@@ -212,13 +200,10 @@ export function Select({
             ref={popoverRef}
             style={{
               position: 'fixed',
-              top: dropdownPosition.openUpward ? undefined : dropdownPosition.top,
-              bottom: dropdownPosition.openUpward
-                ? window.innerHeight - dropdownPosition.top
-                : undefined,
+              top: dropdownPosition.top,
               left: dropdownPosition.left,
               width: dropdownPosition.width,
-              maxHeight: 220,
+              maxHeight: 196,
               overflowY: 'auto',
               zIndex: 99999, // Render via body portal above all cards and modals
               background: '#1B1530',
@@ -230,11 +215,16 @@ export function Select({
               fontFamily: 'var(--font-ui)',
             }}
           >
-            {options.map((item, idx) => {
-              if ('options' in item) {
-                // Render Group
-                return (
-                  <div key={item.label || idx} className="py-1">
+            {flatOptions.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-center" style={{ color: BB.muted }}>
+                No options available
+              </div>
+            ) : (
+              options.map((item, idx) => {
+                if ('options' in item) {
+                  // Render Group
+                  return (
+                    <div key={item.label || idx} className="py-1">
                     <div
                       className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider"
                       style={{ color: BB.gold }}
@@ -312,7 +302,8 @@ export function Select({
                   )}
                 </div>
               )
-            })}
+            })
+            )}
           </div>,
           document.body,
         )}

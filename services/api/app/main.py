@@ -147,22 +147,44 @@ app.include_router(workflow.router, prefix=API_V1_PREFIX)             # E2E Work
 
 @app.get(f"{API_V1_PREFIX}/algorithms", tags=["Algorithms"])
 async def get_algorithms():
-    """Return dictionary of supported classification and regression algorithms."""
-    from app.ml.model_factory import list_supported_algorithms
-    return list_supported_algorithms()
+    """Return supported training algorithms grouped by their explicit task type."""
+    from app.ml.algorithm_factory import ALGORITHM_REGISTRY
+
+    return {
+        task_type: [
+            definition.display_name
+            for definition in ALGORITHM_REGISTRY.values()
+            if definition.task_type == task_type
+        ]
+        for task_type in ("classification", "regression")
+    }
 
 
 @app.get(f"{API_V1_PREFIX}/training-options", tags=["Training Options"])
-@app.get("/training-options", tags=["Training Options"])
+@app.get("/training-options", tags=["Training Options"], include_in_schema=False)
 async def get_training_options():
     """Return the single source of truth for all supported training algorithms, scalers, and imputers."""
-    from app.ml.model_factory import list_supported_algorithms
-    from app.ml.preprocessing import list_supported_scalers, list_supported_imputers
+    from app.ml.algorithm_factory import ALGORITHM_REGISTRY
+    from app.ml.imputer_factory import IMPUTER_REGISTRY
+    from app.ml.scaler_factory import SCALER_REGISTRY
 
     return {
-        "algorithms": list_supported_algorithms(),
-        "scalers": list_supported_scalers(),
-        "imputers": list_supported_imputers(),
+        "algorithms": [
+            {
+                "key": definition.key,
+                "display_name": definition.display_name,
+                "task_type": definition.task_type,
+            }
+            for definition in ALGORITHM_REGISTRY.values()
+        ],
+        "scalers": [
+            {"key": definition.key, "display_name": definition.display_name}
+            for definition in SCALER_REGISTRY.values()
+        ],
+        "imputers": [
+            {"key": definition.key, "display_name": definition.display_name}
+            for definition in IMPUTER_REGISTRY.values()
+        ],
         "default_cv_folds": 5,
         "default_train_test_split": 0.8,
         "min_train_test_split": 0.5,
@@ -170,4 +192,3 @@ async def get_training_options():
         "min_cv_folds": 2,
         "max_cv_folds": 20,
     }
-

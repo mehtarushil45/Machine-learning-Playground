@@ -64,7 +64,7 @@ from app.ml.model_governance import (
     deprecate_governance,
 )
 
-from app.ml.model_factory import list_supported_algorithms
+from app.ml.algorithm_factory import ALGORITHM_REGISTRY
 
 from app.dependencies import CurrentUser
 
@@ -80,7 +80,14 @@ router = APIRouter(
 @router.get("/algorithms", summary="List supported ML algorithms grouped by task")
 def get_supported_algorithms() -> Dict[str, List[str]]:
     """Return dictionary of supported classification and regression algorithms."""
-    return list_supported_algorithms()
+    return {
+        task_type: [
+            definition.display_name
+            for definition in ALGORITHM_REGISTRY.values()
+            if definition.task_type == task_type
+        ]
+        for task_type in ("classification", "regression")
+    }
 
 
 # ---------------------------------------------------------------------------

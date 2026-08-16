@@ -26,7 +26,6 @@ import pandas as pd
 from services.worker.core.dataset_loader import find_dataset_path  # noqa: E402
 
 # Reuse the profiler's column-type inference — no duplicate logic.
-from app.services.profiler import infer_column_type  # noqa: E402
 
 logger = logging.getLogger("apex_ml.dataset_loader")
 
@@ -105,6 +104,11 @@ def load_dataset_context(
         FileNotFoundError: If no CSV can be found for *dataset_id*.
     """
     logger.info("Loading dataset '%s'", dataset_id)
+
+    # Import lazily to avoid a package-initialisation cycle: app.services
+    # exposes JobService, which validates a request by loading a dataset.
+    # The profiler remains the one source of truth for column inference.
+    from app.services.profiler import infer_column_type
 
     # ── 1. Resolve file path ─────────────────────────────────────────────────
     try:

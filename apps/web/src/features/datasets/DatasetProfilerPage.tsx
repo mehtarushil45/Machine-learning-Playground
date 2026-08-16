@@ -54,7 +54,10 @@ import {
   createTrainingJob,
   fetchTrainingOptions,
 } from '../../services/jobService';
-import type { OptionItem, TrainingOptions } from '../../types/job';
+import {
+  CANONICAL_TRAINING_OPTIONS,
+  type TrainingOptions,
+} from '../../types/job';
 import { getNumericColumns } from '../../utils/columnAnalysis';
 import {
   selectTargetColumn,
@@ -446,9 +449,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const [showScoreModal, setShowScoreModal] = useState(false);
 
   /* ── Training Form State ────────────────────────────────────────── */
-  const [algorithm, setAlgorithm] = useState('Random Forest Classifier');
-  const [scaler, setScaler] = useState('StandardScaler');
-  const [imputer, setImputer] = useState('Median');
+  const [algorithm, setAlgorithm] = useState('random_forest_classifier');
+  const [scaler, setScaler] = useState('standard_scaler');
+  const [imputer, setImputer] = useState('median');
   const [cvFolds, setCvFolds] = useState(5);
   const [trainTestSplit, setTrainTestSplit] = useState(0.8);
   const [isLaunching, setIsLaunching] = useState(false);
@@ -463,16 +466,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const [previewSearch, setPreviewSearch] = useState('');
 
   /* ── Dynamic Training Options from Backend (Single Source of Truth) ─ */
-  const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>({
-    algorithms: {
-      classification: [],
-      regression: [],
-    },
-    scalers: [],
-    imputers: [],
-    default_cv_folds: 5,
-    default_train_test_split: 0.8,
-  });
+  const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>(CANONICAL_TRAINING_OPTIONS);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -481,12 +475,20 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     const ctrl = new AbortController();
     fetchTrainingOptions(ctrl.signal)
       .then((data) => {
-        if (data) {
+        if (data && data.algorithms?.length > 0) {
           setTrainingOptions(data);
           if (data.default_cv_folds) setCvFolds(data.default_cv_folds);
           if (data.default_train_test_split) setTrainTestSplit(data.default_train_test_split);
-          if (data.scalers?.length && !scaler) setScaler(data.scalers[0].value);
-          if (data.imputers?.length && !imputer) setImputer(data.imputers[0].value);
+          if (data.scalers?.length) {
+            setScaler((current) =>
+              data.scalers.some((option) => option.key === current) ? current : data.scalers[0].key,
+            );
+          }
+          if (data.imputers?.length) {
+            setImputer((current) =>
+              data.imputers.some((option) => option.key === current) ? current : data.imputers[0].key,
+            );
+          }
         }
       })
       .catch(() => {});
@@ -497,21 +499,16 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   useEffect(() => {
     abortRef.current?.abort();
     if (!dataset) {
-      setProfile(null);
-      setHealth(null);
-      setRecommendations(null);
-      setIsAnalyzing(false);
-      setAnalyzeError(null);
       return;
     }
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    setIsAnalyzing(true);
-    setAnalyzeError(null);
 
     (async () => {
       try {
+        setIsAnalyzing(true);
+        setAnalyzeError(null);
         let prof: DatasetProfile | null = null;
         if (dataset.datasetId) {
           prof = await fetchDatasetProfile(dataset.datasetId, ctrl.signal).catch(() => null);
@@ -552,9 +549,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
           setSelectedFeatures(dataset.columns.filter((c) => c !== defaultTarget));
         }
 
-        if (recs.recommended_models[0]) {
-          setAlgorithm(recs.recommended_models[0]);
-        }
       } catch (err) {
         if (!ctrl.signal.aborted) {
           setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed.');
@@ -673,6 +667,87 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     setSelectedFeatures([]);
   }, [setSelectedFeatures]);
 
+  /* ── Calculations & Data Derived ────────────────────────────────── */
+  const qualityBreakdown = useMemo(() => {
+    return profile ? computeDetailedQualityScore(profile) : null;
+  }, [profile]);
+
+  const allColumns = dataset?.columns || [];
+  const numericSet = useMemo(
+    () => (dataset ? new Set(getNumericColumns(dataset.columns, dataset.rows)) : new Set<string>()),
+    [dataset],
+  );
+
+  const copilotMsgs = useMemo(() => {
+    return generateCopilotMessages(profile, recommendations, qualityBreakdown);
+  }, [profile, recommendations, qualityBreakdown]);
+
+  const issueCount = (health?.issues || []).filter((i) => i.severity !== 'info').length;
+
+  const selectedTaskType = useMemo<'classification' | 'regression'>(() => {
+    const targetSuggestion = recommendations?.target_suggestions.find(
+      (suggestion) => suggestion.column_name === selectedTarget,
+    );
+    const recommendedTask = targetSuggestion?.suggested_task || recommendations?.recommended_problem_type;
+    return recommendedTask === 'Regression' ? 'regression' : 'classification';
+  }, [recommendations, selectedTarget]);
+
+  const taskAlgorithms = useMemo(
+    () => trainingOptions.algorithms.filter((option) => option.task_type === selectedTaskType),
+    [selectedTaskType, trainingOptions.algorithms],
+  );
+
+  const effectiveAlgorithm = trainingOptions.algorithms.some((option) => option.key === algorithm)
+    ? algorithm
+    : taskAlgorithms[0]?.key || (selectedTaskType === 'classification' ? 'random_forest_classifier' : 'random_forest_regressor');
+
+  const effectiveScaler = trainingOptions.scalers.some((option) => option.key === scaler)
+    ? scaler
+    : trainingOptions.scalers[0]?.key || 'standard_scaler';
+
+  const effectiveImputer = trainingOptions.imputers.some((option) => option.key === imputer)
+    ? imputer
+    : trainingOptions.imputers[0]?.key || 'median';
+
+  const isIdentifier = (col: string) => {
+    const cp = profile?.columns.find((c) => c.name === col);
+    return cp?.type === 'identifier';
+  };
+
+  /* ── Dynamic Dropdown Options from Backend ──────────────────────── */
+  const algorithmSelectOptions = useMemo(() => {
+    const classificationOptions = trainingOptions.algorithms
+      .filter((option) => option.task_type === 'classification')
+      .map((option) => ({ value: option.key, label: option.display_name }));
+
+    const regressionOptions = trainingOptions.algorithms
+      .filter((option) => option.task_type === 'regression')
+      .map((option) => ({ value: option.key, label: option.display_name }));
+
+    const groups: { label: string; options: { value: string; label: string }[] }[] = [];
+    if (classificationOptions.length > 0) {
+      groups.push({
+        label: 'Classification',
+        options: classificationOptions,
+      });
+    }
+    if (regressionOptions.length > 0) {
+      groups.push({
+        label: 'Regression',
+        options: regressionOptions,
+      });
+    }
+    return groups;
+  }, [trainingOptions.algorithms]);
+
+  const scalerOptions = useMemo(() => {
+    return trainingOptions.scalers.map((option) => ({ value: option.key, label: option.display_name }));
+  }, [trainingOptions.scalers]);
+
+  const imputerOptions = useMemo(() => {
+    return trainingOptions.imputers.map((option) => ({ value: option.key, label: option.display_name }));
+  }, [trainingOptions.imputers]);
+
   /* ── Launch Job Handler (D3 Bug Fix Verified) ──────────────────── */
   const handleLaunch = useCallback(async () => {
     setLaunchError(null);
@@ -692,6 +767,14 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       setLaunchError(`Target column "${selectedTarget}" cannot be included in features.`);
       return;
     }
+    const launchAlgo = effectiveAlgorithm;
+    const launchScaler = effectiveScaler;
+    const launchImputer = effectiveImputer;
+
+    if (!launchAlgo || !launchScaler || !launchImputer) {
+      setLaunchError('Choose an algorithm, scaler, and imputer before launching.');
+      return;
+    }
 
     setIsLaunching(true);
     try {
@@ -699,13 +782,13 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         dataset_id: dataset.datasetId || `client-${dataset.fileName}`,
         target_column: selectedTarget,
         feature_columns: selectedFeatures,
-        algorithm,
-        scaler,
-        imputer,
+        algorithm: launchAlgo,
+        scaler: launchScaler,
+        imputer: launchImputer,
         train_test_split: trainTestSplit,
         random_seed: 42,
         cross_validation: cvFolds,
-        normalization: scaler === 'StandardScaler',
+        normalization: true,
         feature_selection: 'all',
         notes: `Trained on ${dataset.fileName} with ${selectedFeatures.length} features`,
       };
@@ -715,7 +798,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       setLifecycleStage('pipeline');
       onShowToast(
         'Training Job Started',
-        `Running ${algorithm} on ${selectedFeatures.length} features → ${selectedTarget}`,
+        `Running ${
+          trainingOptions.algorithms.find((option) => option.key === launchAlgo)?.display_name || launchAlgo
+        } on ${selectedFeatures.length} features → ${selectedTarget}`,
         'success',
       );
       onNavigate('code-studio');
@@ -730,38 +815,17 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     dataset,
     selectedTarget,
     selectedFeatures,
-    algorithm,
-    scaler,
-    imputer,
+    effectiveAlgorithm,
+    effectiveScaler,
+    effectiveImputer,
     trainTestSplit,
     cvFolds,
     setActiveJob,
     setLifecycleStage,
     onShowToast,
     onNavigate,
+    trainingOptions.algorithms,
   ]);
-
-  /* ── Calculations & Data Derived ────────────────────────────────── */
-  const qualityBreakdown = useMemo(() => {
-    return profile ? computeDetailedQualityScore(profile) : null;
-  }, [profile]);
-
-  const allColumns = dataset?.columns || [];
-  const numericSet = useMemo(
-    () => (dataset ? new Set(getNumericColumns(dataset.columns, dataset.rows)) : new Set<string>()),
-    [dataset],
-  );
-
-  const copilotMsgs = useMemo(() => {
-    return generateCopilotMessages(profile, recommendations, qualityBreakdown);
-  }, [profile, recommendations, qualityBreakdown]);
-
-  const issueCount = (health?.issues || []).filter((i) => i.severity !== 'info').length;
-
-  const isIdentifier = (col: string) => {
-    const cp = profile?.columns.find((c) => c.name === col);
-    return cp?.type === 'identifier';
-  };
 
   /* ── Filtered & Paginated Preview Rows ──────────────────────────── */
   const filteredPreviewRows = useMemo(() => {
@@ -778,42 +842,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     const start = (previewPage - 1) * previewPageSize;
     return filteredPreviewRows.slice(start, start + previewPageSize);
   }, [filteredPreviewRows, previewPage, previewPageSize]);
-
-  /* ── Dynamic Dropdown Options from Backend ──────────────────────── */
-  const algorithmSelectOptions = useMemo(() => {
-    const groups = [];
-
-    if (recommendations?.recommended_models && recommendations.recommended_models.length > 0) {
-      groups.push({
-        label: 'Recommended Models',
-        options: recommendations.recommended_models.map((a) => ({ value: a, label: a })),
-      });
-    }
-
-    if (trainingOptions.algorithms.classification.length > 0) {
-      groups.push({
-        label: 'Classification Algorithms',
-        options: trainingOptions.algorithms.classification.map((a) => ({ value: a, label: a })),
-      });
-    }
-
-    if (trainingOptions.algorithms.regression.length > 0) {
-      groups.push({
-        label: 'Regression Algorithms',
-        options: trainingOptions.algorithms.regression.map((a) => ({ value: a, label: a })),
-      });
-    }
-
-    return groups;
-  }, [recommendations, trainingOptions]);
-
-  const scalerOptions: OptionItem[] = useMemo(() => {
-    return trainingOptions.scalers || [];
-  }, [trainingOptions.scalers]);
-
-  const imputerOptions: OptionItem[] = useMemo(() => {
-    return trainingOptions.imputers || [];
-  }, [trainingOptions.imputers]);
 
   /* ═══════════════════════════════════════════════════════════════
      RENDER: Upload Prompt State
@@ -1280,16 +1308,17 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         missing_percentage: 0,
                         unique: 0,
                       } as Partial<ColumnProfile>))
-                    ).map((col: any, idx: number) => {
-                      const isExpanded = expandedColumns.has(col.name);
+                    ).map((col: Partial<ColumnProfile>, idx: number) => {
+                      const colName = col.name || '';
+                      const isExpanded = expandedColumns.has(colName);
                       return (
-                        <div key={col.name}>
+                        <div key={colName}>
                           <div
                             onClick={() => {
                               if (!profile) return;
                               const next = new Set(expandedColumns);
-                              if (isExpanded) next.delete(col.name);
-                              else next.add(col.name);
+                              if (isExpanded) next.delete(colName);
+                              else next.add(colName);
                               setExpandedColumns(next);
                             }}
                             style={{
@@ -1333,7 +1362,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                               }}
                             >
                               {(col.missing_percentage ?? 0) > 0
-                                ? `${Math.round(col.missing_percentage)}%`
+                                ? `${Math.round(col.missing_percentage ?? 0)}%`
                                 : '0%'}
                             </span>
                             <span
@@ -1661,7 +1690,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         Algorithm
                       </label>
                       <Select
-                        value={algorithm}
+                        value={effectiveAlgorithm}
                         onChange={setAlgorithm}
                         options={algorithmSelectOptions}
                         placeholder="Select algorithm..."
@@ -1685,7 +1714,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           Scaler
                         </label>
                         <Select
-                          value={scaler}
+                          value={effectiveScaler}
                           onChange={setScaler}
                           options={scalerOptions}
                           placeholder="Scaler..."
@@ -1707,7 +1736,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           Imputer
                         </label>
                         <Select
-                          value={imputer}
+                          value={effectiveImputer}
                           onChange={setImputer}
                           options={imputerOptions}
                           placeholder="Imputer..."

@@ -14,89 +14,22 @@ Supported column kinds:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import KNNImputer, SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
     FunctionTransformer,
-    MaxAbsScaler,
-    MinMaxScaler,
     OneHotEncoder,
-    RobustScaler,
-    StandardScaler,
 )
 
 from app.ml.dataset_loader import DatasetContext
+from app.ml.imputer_factory import get_imputer
+from app.ml.scaler_factory import get_scaler
 
 logger = logging.getLogger("apex_ml.preprocessing")
-
-
-# ---------------------------------------------------------------------------
-# Scaler & Imputer Registries
-# ---------------------------------------------------------------------------
-
-def _create_scaler(scaler_name: Optional[str]) -> Optional[Any]:
-    """Instantiate a scaler based on human-readable or canonical name."""
-    if not scaler_name:
-        return None
-    key = scaler_name.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
-    if key in ("standardscaler", "standard", "zscore", "true"):
-        return StandardScaler()
-    if key in ("minmaxscaler", "minmax", "min_max"):
-        return MinMaxScaler()
-    if key in ("robustscaler", "robust"):
-        return RobustScaler()
-    if key in ("maxabsscaler", "maxabs"):
-        return MaxAbsScaler()
-    if key in ("none", "raw", "passthrough", "false"):
-        return None
-    logger.warning("Unrecognised scaler '%s'; defaulting to StandardScaler.", scaler_name)
-    return StandardScaler()
-
-
-def _create_numeric_imputer(imputer_name: Optional[str]) -> Any:
-    """Instantiate an imputer for numeric columns."""
-    if not imputer_name:
-        return SimpleImputer(strategy="median")
-    key = imputer_name.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
-    if key in ("median",):
-        return SimpleImputer(strategy="median")
-    if key in ("mean", "average"):
-        return SimpleImputer(strategy="mean")
-    if key in ("mostfrequent", "mode"):
-        return SimpleImputer(strategy="most_frequent")
-    if key in ("constant", "constant(0)", "zero", "0", "fill0"):
-        return SimpleImputer(strategy="constant", fill_value=0.0)
-    if key in ("knnimputer", "knn"):
-        return KNNImputer(n_neighbors=5)
-    logger.warning("Unrecognised numeric imputer '%s'; defaulting to median.", imputer_name)
-    return SimpleImputer(strategy="median")
-
-
-def list_supported_scalers() -> List[Dict[str, str]]:
-    """Return list of supported scaler options with human-readable labels."""
-    return [
-        {"value": "StandardScaler", "label": "StandardScaler (Zero mean, Unit variance)"},
-        {"value": "MinMaxScaler", "label": "MinMaxScaler (0 to 1 range)"},
-        {"value": "RobustScaler", "label": "RobustScaler (IQR outlier-resistant)"},
-        {"value": "MaxAbsScaler", "label": "MaxAbsScaler (Scale by absolute maximum)"},
-        {"value": "None", "label": "None (Raw features)"},
-    ]
-
-
-def list_supported_imputers() -> List[Dict[str, str]]:
-    """Return list of supported imputer options with human-readable labels."""
-    return [
-        {"value": "Median", "label": "Median (Robust for skewed numerics)"},
-        {"value": "Mean", "label": "Mean (Standard continuous)"},
-        {"value": "Most Frequent", "label": "Most Frequent (Categorical mode)"},
-        {"value": "Constant (0)", "label": "Constant (Fill 0 / default)"},
-        {"value": "KNN Imputer", "label": "KNN Imputer (K-Nearest Neighbors)"},
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +86,8 @@ def _bool_to_int(X: np.ndarray) -> np.ndarray:
 def build_preprocessor(
     ctx: DatasetContext,
     use_scaling: bool = True,
-    scaler: Optional[str] = None,
-    imputer: Optional[str] = None,
+    scaler: Optional[str] = "standard_scaler",
+    imputer: Optional[str] = "median",
 ) -> ColumnTransformer:
     """Construct an unfitted ColumnTransformer for *ctx*.
 
@@ -162,8 +95,9 @@ def build_preprocessor(
         ctx: A :class:`~app.ml.dataset_loader.DatasetContext` describing the
              dataset's column schema.
         use_scaling: Boolean flag for backward compatibility. If False, overrides scaler to None.
-        scaler: Human-readable or canonical scaler name (e.g. "MinMaxScaler", "RobustScaler", "StandardScaler", "None").
-        imputer: Human-readable or canonical imputer name (e.g. "Median", "Mean", "Most Frequent", "Constant (0)", "KNN Imputer").
+        scaler: Canonical key from ``scaler_factory``. ``None`` is supported
+            only for legacy requests that explicitly disable normalization.
+        imputer: Canonical key from ``imputer_factory``.
 
     Returns:
         An unfitted :class:`~sklearn.compose.ColumnTransformer` ready to be
@@ -173,9 +107,8 @@ def build_preprocessor(
     transformers: List = []
 
     # Determine effective scaler instance
-    effective_scaler_name = scaler if use_scaling else "None"
-    scaler_instance = _create_scaler(effective_scaler_name)
-    numeric_imputer_instance = _create_numeric_imputer(imputer)
+    scaler_instance = get_scaler(scaler or "standard_scaler") if use_scaling else None
+    numeric_imputer_instance = get_imputer(imputer or "median")
 
     # ── Numeric columns ───────────────────────────────────────────────────────
     if ctx.numeric_columns:
@@ -190,7 +123,7 @@ def build_preprocessor(
     # ── Categorical columns ───────────────────────────────────────────────────
     if ctx.categorical_columns:
         cat_steps = [
-            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("imputer", get_imputer("most_frequent")),
             ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
         ]
         transformers.append(
@@ -202,11 +135,11 @@ def build_preprocessor(
     if ctx.boolean_columns:
         bool_steps = [
             ("cast_obj", FunctionTransformer(_cast_to_object, validate=False)),
-            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("imputer", get_imputer("most_frequent")),
             ("to_int", FunctionTransformer(_bool_to_int, validate=False)),
         ]
         if scaler_instance is not None:
-            bool_steps.append(("scaler", scaler_instance))
+            bool_steps.append(("scaler", get_scaler(scaler or "standard_scaler")))
         transformers.append(
             ("boolean", Pipeline(steps=bool_steps), ctx.boolean_columns)
         )
@@ -215,11 +148,11 @@ def build_preprocessor(
     # ── Datetime columns ──────────────────────────────────────────────────────
     if ctx.datetime_columns:
         dt_steps = [
-            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("imputer", get_imputer("most_frequent")),
             ("to_ts", FunctionTransformer(_to_unix_timestamp, validate=False)),
         ]
         if scaler_instance is not None:
-            dt_steps.append(("scaler", scaler_instance))
+            dt_steps.append(("scaler", get_scaler(scaler or "standard_scaler")))
         transformers.append(
             ("datetime", Pipeline(steps=dt_steps), ctx.datetime_columns)
         )

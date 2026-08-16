@@ -23,6 +23,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
+from app.ml.algorithm_factory import (
+    ALGORITHM_REGISTRY,
+    AlgorithmTaskMismatchError,
+    get_algorithm,
+)
+from app.ml.dataset_loader import DatasetValidationError, load_dataset_context
+from app.ml.problem_detector import ProblemType, detect_problem_type
 from app.models.job import Job
 from app.schemas.job import (
     JobCancelResponse,
@@ -38,6 +45,37 @@ logger = logging.getLogger("apex_job_service")
 
 # In-memory store — preserved for test compatibility & fast lookup
 _JOBS_STORE: Dict[str, JobResponse] = {}
+
+
+def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
+    """Verify the selected algorithm matches the uploaded target before queuing work."""
+    try:
+        context = load_dataset_context(
+            dataset_id=request.dataset_id,
+            target_column=request.target_column,
+            feature_columns=request.feature_columns,
+        )
+    except (DatasetValidationError, FileNotFoundError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Training request cannot be validated: {exc}",
+        ) from exc
+
+    problem_type = detect_problem_type(context)
+    task_type = (
+        "classification"
+        if problem_type in (ProblemType.BINARY_CLASSIFICATION, ProblemType.MULTI_CLASSIFICATION)
+        else "regression"
+    )
+    try:
+        get_algorithm(request.algorithm, task_type=task_type, random_state=request.random_seed or 42)
+    except AlgorithmTaskMismatchError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    return ALGORITHM_REGISTRY[request.algorithm].display_name
 
 
 def is_redis_available(host: str = "localhost", port: int = 6379, timeout: float = 0.5) -> bool:
@@ -209,6 +247,7 @@ class JobService:
         *,
         user_id: str,
     ) -> JobResponse:
+        algorithm_display_name = _validate_algorithm_target_compatibility(request)
         job_uuid = uuid.uuid4()
         job_id = str(job_uuid)
         now = datetime.now(timezone.utc)
@@ -218,8 +257,8 @@ class JobService:
             "target_column": request.target_column,
             "feature_columns": request.feature_columns,
             "algorithm": request.algorithm,
-            "scaler": getattr(request, "scaler", "StandardScaler") or "StandardScaler",
-            "imputer": getattr(request, "imputer", "Median") or "Median",
+            "scaler": getattr(request, "scaler", "standard_scaler") or "standard_scaler",
+            "imputer": getattr(request, "imputer", "median") or "median",
             "train_test_split": getattr(request, "train_test_split", 0.8),
             "random_seed": getattr(request, "random_seed", 42),
             "cross_validation": getattr(request, "cross_validation", 5),
@@ -239,7 +278,7 @@ class JobService:
             updated_at=now,
             started_at=now,
             job_type="training",
-            algorithm=request.algorithm,
+            algorithm=algorithm_display_name,
             target_column=request.target_column,
             feature_columns=request.feature_columns,
             progress=0.0,
@@ -275,7 +314,7 @@ class JobService:
                     dataset_id=dataset_uuid,
                     status=JobStatusEnum.QUEUED.value,
                     job_type="training",
-                    algorithm=request.algorithm,
+                    algorithm=algorithm_display_name,
                     target_column=request.target_column,
                     feature_columns=request.feature_columns,
                     job_metadata=config,

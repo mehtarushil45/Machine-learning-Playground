@@ -295,8 +295,8 @@ export function ApexPlayground() {
           </TableHeader>
           <TableBody>
             {[
-              { id: 'EXP-801', model: 'Random Forest Classifier', score: '98.4%', status: 'success' },
-              { id: 'EXP-802', model: 'Logistic Regression', score: '92.1%', status: 'success' },
+              { id: 'EXP-801', model: 'Experiment A', score: '98.4%', status: 'success' },
+              { id: 'EXP-802', model: 'Experiment B', score: '92.1%', status: 'success' },
               { id: 'EXP-803', model: 'Gradient Boosting Machine', score: '0.0%', status: 'warning' },
             ].map((row) => (
               <TableRow key={row.id}>
