@@ -61,6 +61,71 @@ _ALGO_CODE_MAP: Dict[str, Tuple[str, str, str]] = {
         "DecisionTreeClassifier",
         "classification",
     ),
+    "gradientboostingclassifier": (
+        "from sklearn.ensemble import GradientBoostingClassifier",
+        "GradientBoostingClassifier",
+        "classification",
+    ),
+    "gradient_boosting_classifier": (
+        "from sklearn.ensemble import GradientBoostingClassifier",
+        "GradientBoostingClassifier",
+        "classification",
+    ),
+    "xgboostclassifier": (
+        "from xgboost import XGBClassifier",
+        "XGBClassifier",
+        "classification",
+    ),
+    "xgboost_classifier": (
+        "from xgboost import XGBClassifier",
+        "XGBClassifier",
+        "classification",
+    ),
+    "lightgbmclassifier": (
+        "from lightgbm import LGBMClassifier",
+        "LGBMClassifier",
+        "classification",
+    ),
+    "lightgbm_classifier": (
+        "from lightgbm import LGBMClassifier",
+        "LGBMClassifier",
+        "classification",
+    ),
+    "supportvectormachine(svm)": (
+        "from sklearn.svm import SVC",
+        "SVC",
+        "classification",
+    ),
+    "svm": (
+        "from sklearn.svm import SVC",
+        "SVC",
+        "classification",
+    ),
+    "knearestneighbors(knn)": (
+        "from sklearn.neighbors import KNeighborsClassifier",
+        "KNeighborsClassifier",
+        "classification",
+    ),
+    "knn": (
+        "from sklearn.neighbors import KNeighborsClassifier",
+        "KNeighborsClassifier",
+        "classification",
+    ),
+    "multilayerperceptron(mlp)": (
+        "from sklearn.neural_network import MLPClassifier",
+        "MLPClassifier",
+        "classification",
+    ),
+    "mlp": (
+        "from sklearn.neural_network import MLPClassifier",
+        "MLPClassifier",
+        "classification",
+    ),
+    "ridgeclassifier": (
+        "from sklearn.linear_model import RidgeClassifier",
+        "RidgeClassifier",
+        "classification",
+    ),
     "linearregression": (
         "from sklearn.linear_model import LinearRegression",
         "LinearRegression",
@@ -89,6 +154,66 @@ _ALGO_CODE_MAP: Dict[str, Tuple[str, str, str]] = {
     "decision_tree_regressor": (
         "from sklearn.tree import DecisionTreeRegressor",
         "DecisionTreeRegressor",
+        "regression",
+    ),
+    "gradientboostingregressor": (
+        "from sklearn.ensemble import GradientBoostingRegressor",
+        "GradientBoostingRegressor",
+        "regression",
+    ),
+    "gradient_boosting_regressor": (
+        "from sklearn.ensemble import GradientBoostingRegressor",
+        "GradientBoostingRegressor",
+        "regression",
+    ),
+    "xgboostregressor": (
+        "from xgboost import XGBRegressor",
+        "XGBRegressor",
+        "regression",
+    ),
+    "xgboost_regressor": (
+        "from xgboost import XGBRegressor",
+        "XGBRegressor",
+        "regression",
+    ),
+    "lightgbmregressor": (
+        "from lightgbm import LGBMRegressor",
+        "LGBMRegressor",
+        "regression",
+    ),
+    "lightgbm_regressor": (
+        "from lightgbm import LGBMRegressor",
+        "LGBMRegressor",
+        "regression",
+    ),
+    "supportvectorregression(svr)": (
+        "from sklearn.svm import SVR",
+        "SVR",
+        "regression",
+    ),
+    "svr": (
+        "from sklearn.svm import SVR",
+        "SVR",
+        "regression",
+    ),
+    "knearestneighborsregressor(knn)": (
+        "from sklearn.neighbors import KNeighborsRegressor",
+        "KNeighborsRegressor",
+        "regression",
+    ),
+    "multilayerperceptronregressor(mlp)": (
+        "from sklearn.neural_network import MLPRegressor",
+        "MLPRegressor",
+        "regression",
+    ),
+    "ridge": (
+        "from sklearn.linear_model import Ridge",
+        "Ridge",
+        "regression",
+    ),
+    "lasso": (
+        "from sklearn.linear_model import Lasso",
+        "Lasso",
         "regression",
     ),
 }
@@ -184,21 +309,39 @@ y = df[target_col]"""
 
     num_steps: List[str] = []
     if imputer_node:
-        strategy = imputer_node.params.get("strategy", "median")
-        imports.append("from sklearn.impute import SimpleImputer")
-        num_steps.append(f"('imputer', SimpleImputer(strategy='{strategy}'))")
+        strategy = str(imputer_node.params.get("strategy", "median")).lower().strip()
+        if "knn" in strategy:
+            imports.append("from sklearn.impute import KNNImputer")
+            num_steps.append("('imputer', KNNImputer(n_neighbors=5))")
+        elif "constant" in strategy or "0" in strategy:
+            imports.append("from sklearn.impute import SimpleImputer")
+            num_steps.append("('imputer', SimpleImputer(strategy='constant', fill_value=0.0))")
+        elif "frequent" in strategy or "mode" in strategy:
+            imports.append("from sklearn.impute import SimpleImputer")
+            num_steps.append("('imputer', SimpleImputer(strategy='most_frequent'))")
+        elif "mean" in strategy:
+            imports.append("from sklearn.impute import SimpleImputer")
+            num_steps.append("('imputer', SimpleImputer(strategy='mean'))")
+        else:
+            imports.append("from sklearn.impute import SimpleImputer")
+            num_steps.append("('imputer', SimpleImputer(strategy='median'))")
     else:
         imports.append("from sklearn.impute import SimpleImputer")
         num_steps.append("('imputer', SimpleImputer(strategy='median'))")
 
     if scaler_node:
-        scaler_type = str(scaler_node.params.get("scaler_type", "standard")).lower()
-        if "minmax" in scaler_type:
+        scaler_type = str(scaler_node.params.get("scaler_type", "standard")).lower().strip()
+        if "none" in scaler_type or "passthrough" in scaler_type or "raw" in scaler_type:
+            pass
+        elif "minmax" in scaler_type:
             imports.append("from sklearn.preprocessing import MinMaxScaler")
             num_steps.append("('scaler', MinMaxScaler())")
         elif "robust" in scaler_type:
             imports.append("from sklearn.preprocessing import RobustScaler")
             num_steps.append("('scaler', RobustScaler())")
+        elif "maxabs" in scaler_type:
+            imports.append("from sklearn.preprocessing import MaxAbsScaler")
+            num_steps.append("('scaler', MaxAbsScaler())")
         else:
             imports.append("from sklearn.preprocessing import StandardScaler")
             num_steps.append("('scaler', StandardScaler())")

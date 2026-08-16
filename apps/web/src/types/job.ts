@@ -16,11 +16,33 @@ export type JobStatus =
   | 'CANCELLED'
   | 'RETRYING'
 
+export interface OptionItem {
+  value: string
+  label: string
+}
+
+export interface TrainingOptions {
+  algorithms: {
+    classification: string[]
+    regression: string[]
+  }
+  scalers: OptionItem[]
+  imputers: OptionItem[]
+  default_cv_folds: number
+  default_train_test_split: number
+  min_train_test_split?: number
+  max_train_test_split?: number
+  min_cv_folds?: number
+  max_cv_folds?: number
+}
+
 export interface TrainingRequestPayload {
   dataset_id: string
   target_column: string
   feature_columns: string[]
   algorithm?: string
+  scaler?: string
+  imputer?: string
   train_test_split?: number
   random_seed?: number | null
   cross_validation?: number | null
@@ -52,14 +74,21 @@ export interface JobEntity {
   retry_count: number
   owner_id?: string | null
   metadata?: {
+    scaler?: string
+    imputer?: string
     train_test_split?: number
     random_seed?: number | null
     cross_validation?: number | null
     normalization?: boolean
     feature_selection?: string
     class_weight?: string
-    notes?: string
+    [key: string]: any
   }
+}
+
+export interface JobListData {
+  total: number
+  jobs: JobEntity[]
 }
 
 export interface JobProgressInfo {
@@ -68,25 +97,22 @@ export interface JobProgressInfo {
   progress: number
   current_stage: string
   message?: string | null
+  estimated_seconds?: number | null
   estimated_seconds_remaining?: number | null
-}
-
-export interface JobListData {
-  total: number
-  jobs: JobEntity[]
+  error_message?: string | null
+  updated_at: string
 }
 
 export interface JobCancelResult {
   job_id: string
-  status: string
-  cancelled_at: string
+  status: JobStatus
   message: string
 }
 
 export interface JobRetryResult {
-  original_job_id: string
-  new_job_id: string
-  status: string
-  retry_count: number
+  job_id: string
+  status: JobStatus
   message: string
+  retry_count: number
+  new_job_id?: string | null
 }

@@ -9,6 +9,7 @@ import type {
   JobCancelResult,
   JobRetryResult,
   TrainingRequestPayload,
+  TrainingOptions,
 } from '../types/job'
 import { apiClient, AuthExpiredError } from './apiClient'
 export { AuthExpiredError }
@@ -54,6 +55,10 @@ export async function fetchSupportedAlgorithms(signal?: AbortSignal): Promise<Su
       ],
     }
   }
+}
+
+export async function fetchTrainingOptions(signal?: AbortSignal): Promise<TrainingOptions> {
+  return apiClient.get<TrainingOptions>('/training-options', { signal })
 }
 
 // ---------------------------------------------------------------------------

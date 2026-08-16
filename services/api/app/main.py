@@ -150,3 +150,24 @@ async def get_algorithms():
     """Return dictionary of supported classification and regression algorithms."""
     from app.ml.model_factory import list_supported_algorithms
     return list_supported_algorithms()
+
+
+@app.get(f"{API_V1_PREFIX}/training-options", tags=["Training Options"])
+@app.get("/training-options", tags=["Training Options"])
+async def get_training_options():
+    """Return the single source of truth for all supported training algorithms, scalers, and imputers."""
+    from app.ml.model_factory import list_supported_algorithms
+    from app.ml.preprocessing import list_supported_scalers, list_supported_imputers
+
+    return {
+        "algorithms": list_supported_algorithms(),
+        "scalers": list_supported_scalers(),
+        "imputers": list_supported_imputers(),
+        "default_cv_folds": 5,
+        "default_train_test_split": 0.8,
+        "min_train_test_split": 0.5,
+        "max_train_test_split": 0.95,
+        "min_cv_folds": 2,
+        "max_cv_folds": 20,
+    }
+

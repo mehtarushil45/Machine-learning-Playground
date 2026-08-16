@@ -193,12 +193,14 @@ def execute_ml_training_pipeline_sync(
     split_ratio: float = float(config.get("train_test_split", 0.8))
     seed: int = int(config.get("random_seed") or 42)
     use_scaling: bool = bool(config.get("normalization", True))
+    scaler_name: str = config.get("scaler", "StandardScaler") or "StandardScaler"
+    imputer_name: str = config.get("imputer", "Median") or "Median"
     rec_task: Optional[str] = config.get("recommended_task")
 
     # Sprint 4 flags (backward-compatible defaults)
     enable_cv: bool = bool(config.get("enable_cv", True))
     enable_tuning: bool = bool(config.get("enable_tuning", True))
-    cv_n_splits: int = int(config.get("cv_n_splits", 5))
+    cv_n_splits: int = int(config.get("cross_validation") or config.get("cv_n_splits") or 5)
     cv_strategy: Optional[str] = config.get("cv_strategy")
     tuning_strategy: Optional[str] = config.get("tuning_strategy")
     tuning_n_iter: int = int(config.get("tuning_n_iter", 20))
@@ -259,10 +261,12 @@ def execute_ml_training_pipeline_sync(
             JobStatusEnum.RUNNING.value,
             30.0,
             "Building Preprocessing Pipeline",
-            "Constructing ColumnTransformer (imputer + scaler + encoder)",
+            f"Constructing ColumnTransformer (imputer={imputer_name}, scaler={scaler_name})",
             estimated_seconds=4.5,
         )
-        preprocessor = build_preprocessor(ctx, use_scaling=use_scaling)
+        preprocessor = build_preprocessor(
+            ctx, use_scaling=use_scaling, scaler=scaler_name, imputer=imputer_name
+        )
 
         # ── Stage 4: Train/Test Split ─────────────────────────────────────────
         update_job_state(

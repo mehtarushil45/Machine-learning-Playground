@@ -79,21 +79,41 @@ export function Select({
 
   const selectedOption = flatOptions.find((o) => o.value === value)
 
-  // Calculate coordinates & collision with viewport
-  const updatePosition = useCallback(() => {
-    if (!triggerRef.current) return
+  // Calculate coordinates & collision with viewport synchronously
+  const computePosition = useCallback(() => {
+    if (!triggerRef.current) return null
     const rect = triggerRef.current.getBoundingClientRect()
     const spaceBelow = window.innerHeight - rect.bottom
-    const dropdownHeight = 220 // max-height estimation
+    const dropdownHeight = 220
     const openUpward = spaceBelow < dropdownHeight && rect.top > dropdownHeight
 
-    setDropdownPosition({
+    return {
       top: openUpward ? rect.top - 6 : rect.bottom + 6,
       left: rect.left,
       width: Math.max(rect.width, 200),
       openUpward,
-    })
+    }
   }, [])
+
+  const updatePosition = useCallback(() => {
+    const pos = computePosition()
+    if (pos) {
+      setDropdownPosition(pos)
+    }
+  }, [computePosition])
+
+  const toggleDropdown = () => {
+    if (disabled) return
+    if (!isOpen) {
+      const pos = computePosition()
+      if (pos) {
+        setDropdownPosition(pos)
+      }
+      setIsOpen(true)
+    } else {
+      setIsOpen(false)
+    }
+  }
 
   useLayoutEffect(() => {
     if (isOpen) {
@@ -138,7 +158,11 @@ export function Select({
     if (disabled) return
     if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
       e.preventDefault()
-      if (!isOpen) setIsOpen(true)
+      if (!isOpen) {
+        const pos = computePosition()
+        if (pos) setDropdownPosition(pos)
+        setIsOpen(true)
+      }
     } else if (e.key === 'Escape') {
       setIsOpen(false)
     }
@@ -158,9 +182,9 @@ export function Select({
         name={name}
         type="button"
         disabled={disabled}
-        onClick={() => !disabled && setIsOpen((prev) => !prev)}
+        onClick={toggleDropdown}
         onKeyDown={handleKeyDown}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-all select-none cursor-pointer focus:outline-none focus:ring-1"
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium rounded-lg select-none cursor-pointer focus:outline-none"
         style={{
           background: BB.elevated,
           border: `1px solid ${isOpen ? BB.primaryLight : BB.border}`,
@@ -168,6 +192,7 @@ export function Select({
           fontFamily: 'var(--font-ui)',
           opacity: disabled ? 0.5 : 1,
           cursor: disabled ? 'not-allowed' : 'pointer',
+          transition: 'border-color 120ms ease',
         }}
       >
         <span className="truncate text-left flex-1">
@@ -185,7 +210,6 @@ export function Select({
         createPortal(
           <div
             ref={popoverRef}
-            className="animate-in fade-in-0 duration-100"
             style={{
               position: 'fixed',
               top: dropdownPosition.openUpward ? undefined : dropdownPosition.top,
@@ -196,11 +220,11 @@ export function Select({
               width: dropdownPosition.width,
               maxHeight: 220,
               overflowY: 'auto',
-              zIndex: 9999, // Render via body portal above all cards and modals
-              background: 'rgba(27,21,48,0.98)',
-              border: `1px solid ${BB.border}`,
+              zIndex: 99999, // Render via body portal above all cards and modals
+              background: '#1B1530',
+              border: `1px solid ${BB.borderHover}`,
               borderRadius: '8px',
-              boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
               backdropFilter: 'blur(16px)',
               padding: '4px',
               fontFamily: 'var(--font-ui)',

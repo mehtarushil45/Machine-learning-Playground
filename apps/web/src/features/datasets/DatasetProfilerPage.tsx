@@ -1,18 +1,17 @@
 /**
- * DatasetProfilerPage — Page 1 of the six-page ML Platform rebuild.
- *
- * Visual Spec: dataset_profiler_redesign.html
+ * DatasetProfilerPage — Page 1 of the ML Platform rebuild.
  *
  * Implements:
- *  - C1: Segmented View Toggle ("Workspace" / "Preview data") below Lifecycle Rail
- *  - C2: 4-Panel Grid Workspace (Overview & Quality, Column Schema, Feature & Target, Training Setup)
- *  - C3: Full-width Preview Data View with real pagination & filtering
- *  - C4: Explainable Data Quality Score with itemized deduction breakdown modal/popover
+ *  - A4: AI Copilot controlled via top-right symbol button (opens/closes right drawer)
+ *  - B1: Portal dropdown selects with zero-latency instant positioning
+ *  - B2: Ultra-smooth train/test split slider with custom gradient track
+ *  - C1: 4-Panel Grid with dual-axis manual resizing & zero visible white lines between boxes
+ *  - C2: "Upload new" button positioned contextually inside Overview & Quality panel
+ *  - C3: Full-width Preview Data View with search & pagination
+ *  - C4: Explainable Data Quality Score with itemized deduction breakdown modal
  *  - D3: Bug-free training launch with verified feature/target payload
- *  - D5: Docked & Manually Resizable AI Copilot Panel (320px – 560px drag-to-resize)
- *  - B1: Portal-based dropdown selects for Algorithm, Scaler, Imputer
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -21,7 +20,9 @@ import {
   Layers,
   Loader2,
   Play,
+  RotateCcw,
   Search,
+  Sparkles,
   Table as TableIcon,
   Upload,
   X,
@@ -51,9 +52,9 @@ import {
 } from '../../services/recommendationService';
 import {
   createTrainingJob,
-  fetchSupportedAlgorithms,
-  type SupportedAlgorithms,
+  fetchTrainingOptions,
 } from '../../services/jobService';
+import type { OptionItem, TrainingOptions } from '../../types/job';
 import { getNumericColumns } from '../../utils/columnAnalysis';
 import {
   selectTargetColumn,
@@ -111,7 +112,6 @@ function computeDetailedQualityScore(profile: DatasetProfile): QualityScoreBreak
 
   const deductions: QualityDeduction[] = [];
 
-  // Missing values deduction
   if (profile.total_missing_values > 0) {
     const pts = Math.min(Math.round(missingPct * 1.5), 35);
     if (pts > 0) {
@@ -124,7 +124,6 @@ function computeDetailedQualityScore(profile: DatasetProfile): QualityScoreBreak
     }
   }
 
-  // Duplicate rows deduction
   if (profile.duplicate_rows > 0) {
     const pts = Math.min(Math.round(dupRowPct * 0.8), 20);
     if (pts > 0) {
@@ -137,7 +136,6 @@ function computeDetailedQualityScore(profile: DatasetProfile): QualityScoreBreak
     }
   }
 
-  // Empty columns deduction
   if (profile.empty_columns > 0) {
     const pts = Math.min(profile.empty_columns * 5, 15);
     deductions.push({
@@ -148,7 +146,6 @@ function computeDetailedQualityScore(profile: DatasetProfile): QualityScoreBreak
     });
   }
 
-  // Duplicate columns / series deduction
   if (profile.duplicate_columns > 0) {
     const pts = Math.min(profile.duplicate_columns * 5, 10);
     deductions.push({
@@ -159,7 +156,6 @@ function computeDetailedQualityScore(profile: DatasetProfile): QualityScoreBreak
     });
   }
 
-  // Check identifier columns
   const idCols = profile.columns.filter((c) => c.type === 'identifier');
   if (idCols.length > 0) {
     deductions.push({
@@ -219,7 +215,7 @@ function QualityScoreRing({
   onClick?: () => void;
 }) {
   const color = getQualityColor(score);
-  const R = 22;
+  const R = 20;
   const circ = 2 * Math.PI * R;
   const offset = circ * (1 - score / 100);
 
@@ -228,22 +224,22 @@ function QualityScoreRing({
       onClick={onClick}
       style={{
         position: 'relative',
-        width: 58,
-        height: 58,
+        width: 50,
+        height: 50,
         flexShrink: 0,
         cursor: onClick ? 'pointer' : 'default',
       }}
       title="Click to view full Quality Score explanation"
     >
-      <svg width={58} height={58} style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={29} cy={29} r={R} fill="none" stroke={BB.elevated} strokeWidth={5} />
+      <svg width={50} height={50} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={25} cy={25} r={R} fill="none" stroke={BB.elevated} strokeWidth={4} />
         <circle
-          cx={29}
-          cy={29}
+          cx={25}
+          cy={25}
           r={R}
           fill="none"
           stroke={color}
-          strokeWidth={5}
+          strokeWidth={4}
           strokeDasharray={circ}
           strokeDashoffset={offset}
           strokeLinecap="round"
@@ -262,7 +258,7 @@ function QualityScoreRing({
       >
         <span
           style={{
-            fontSize: 13,
+            fontSize: 12,
             fontWeight: 800,
             color,
             lineHeight: 1,
@@ -273,13 +269,13 @@ function QualityScoreRing({
         </span>
         <span
           style={{
-            fontSize: 8,
+            fontSize: 7,
             color: BB.muted,
             letterSpacing: '0.06em',
             textTransform: 'uppercase',
           }}
         >
-          quality
+          score
         </span>
       </div>
     </div>
@@ -300,9 +296,9 @@ function TypePill({ type }: { type: string }) {
     <span
       style={{
         display: 'inline-block',
-        padding: '2px 7px',
+        padding: '1px 5px',
         borderRadius: 4,
-        fontSize: 10,
+        fontSize: 9,
         fontWeight: 700,
         fontFamily: 'var(--font-mono)',
         letterSpacing: '0.04em',
@@ -327,7 +323,6 @@ function generateCopilotMessages(
   profile: DatasetProfile | null,
   recommendations: DatasetRecommendations | null,
   breakdown: QualityScoreBreakdown | null,
-  _dataset: Dataset | null,
 ): CopilotMsg[] {
   const msgs: CopilotMsg[] = [];
 
@@ -336,7 +331,6 @@ function generateCopilotMessages(
     return msgs;
   }
 
-  // Quality score breakdown insight
   if (breakdown) {
     if (breakdown.deductions.length === 0) {
       msgs.push({
@@ -353,7 +347,6 @@ function generateCopilotMessages(
     }
   }
 
-  // Target hint
   if (recommendations?.target_suggestions[0]) {
     const t = recommendations.target_suggestions[0];
     msgs.push({
@@ -365,7 +358,6 @@ function generateCopilotMessages(
     });
   }
 
-  // Identifier warning
   const idCols = profile.columns.filter((c) => c.type === 'identifier');
   if (idCols.length > 0) {
     msgs.push({
@@ -373,11 +365,10 @@ function generateCopilotMessages(
       type: 'warning',
       text: `**${idCols.map((c) => c.name).join(', ')}** identified as ID column${
         idCols.length > 1 ? 's' : ''
-      } and excluded from the feature matrix to prevent data leakage.`,
+      } and excluded from feature matrix to prevent data leakage.`,
     });
   }
 
-  // Missing values
   const missingCols = profile.columns.filter((c) => c.missing_percentage > 5);
   if (missingCols.length > 0) {
     msgs.push({
@@ -389,7 +380,6 @@ function generateCopilotMessages(
     });
   }
 
-  // Readiness
   if (recommendations?.overall_readiness) {
     const ready = recommendations.overall_readiness.includes('Ready');
     msgs.push({
@@ -406,6 +396,8 @@ function generateCopilotMessages(
 interface DatasetProfilerPageProps {
   onShowToast: (title: string, desc?: string, type?: 'success' | 'info' | 'error') => void;
   onNavigate: (tab: PlatformTab) => void;
+  isCopilotOpen?: boolean;
+  onToggleCopilot?: () => void;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -414,6 +406,8 @@ interface DatasetProfilerPageProps {
 export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   onShowToast,
   onNavigate,
+  isCopilotOpen = false,
+  onToggleCopilot,
 }: DatasetProfilerPageProps) {
   const {
     dataset,
@@ -427,8 +421,19 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     setLifecycleStage,
   } = useProject();
 
-  /* ── View Toggle State (C1: Workspace vs Preview data) ────────── */
+  /* ── View Toggle State (Workspace vs Preview data) ─────────────── */
   const [activeView, setActiveView] = useState<'workspace' | 'preview'>('workspace');
+
+  /* ── Manual 4-Panel Grid Resizing State (C1) ──────────────────── */
+  const [splitCol, setSplitCol] = useState<number>(50);
+  const [splitRow, setSplitRow] = useState<number>(46);
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+  const [isResizingCol, setIsResizingCol] = useState(false);
+  const [isResizingRow, setIsResizingRow] = useState(false);
+
+  /* ── Dedicated Right AI Panel Width ─────────────────────────────── */
+  const [copilotWidth, setCopilotWidth] = useState<number>(340);
+  const [isDraggingCopilot, setIsDraggingCopilot] = useState<boolean>(false);
 
   /* ── Analysis State ─────────────────────────────────────────────── */
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
@@ -437,10 +442,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
-  /* ── Quality Score Breakdown Modal State (C4) ──────────────────── */
+  /* ── Quality Score Breakdown Modal State ────────────────────────── */
   const [showScoreModal, setShowScoreModal] = useState(false);
 
-  /* ── Training Form State (B1 Dropdowns) ─────────────────────────── */
+  /* ── Training Form State ────────────────────────────────────────── */
   const [algorithm, setAlgorithm] = useState('Random Forest Classifier');
   const [scaler, setScaler] = useState('StandardScaler');
   const [imputer, setImputer] = useState('Median');
@@ -452,59 +457,39 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   /* ── Column Schema Table State ──────────────────────────────────── */
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
 
-  /* ── Data Preview Table State (C3: Pagination & Search) ────────── */
+  /* ── Data Preview Table State ───────────────────────────────────── */
   const [previewPage, setPreviewPage] = useState(1);
   const [previewPageSize, setPreviewPageSize] = useState(15);
   const [previewSearch, setPreviewSearch] = useState('');
 
-  /* ── AI Copilot Resizable Width (D5: 320px–560px) ──────────────── */
-  const [copilotWidth, setCopilotWidth] = useState(380);
-  const [isDraggingCopilot, setIsDraggingCopilot] = useState(false);
-
-  /* ── Supported Algorithms State ─────────────────────────────────── */
-  const [supportedAlgos, setSupportedAlgos] = useState<SupportedAlgorithms>({
-    classification: [
-      'Random Forest Classifier',
-      'Logistic Regression',
-      'Decision Tree Classifier',
-      'Gradient Boosting Classifier',
-      'XGBoost Classifier',
-      'LightGBM Classifier',
-      'Support Vector Machine (SVM)',
-      'K-Nearest Neighbors (KNN)',
-      'Multi-Layer Perceptron (MLP)',
-      'Ridge Classifier',
-    ],
-    regression: [
-      'Random Forest Regressor',
-      'Linear Regression',
-      'Decision Tree Regressor',
-      'Gradient Boosting Regressor',
-      'XGBoost Regressor',
-      'LightGBM Regressor',
-      'Support Vector Regression (SVR)',
-      'Ridge',
-      'Lasso',
-    ],
+  /* ── Dynamic Training Options from Backend (Single Source of Truth) ─ */
+  const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>({
+    algorithms: {
+      classification: [],
+      regression: [],
+    },
+    scalers: [],
+    imputers: [],
+    default_cv_folds: 5,
+    default_train_test_split: 0.8,
   });
 
   const abortRef = useRef<AbortController | null>(null);
 
-  /* ── Load Supported Algorithms Once ────────────────────────────── */
+  /* ── Fetch Real Training Options from Backend API ───────────────── */
   useEffect(() => {
     const ctrl = new AbortController();
-    fetchSupportedAlgorithms(ctrl.signal)
+    fetchTrainingOptions(ctrl.signal)
       .then((data) => {
-        if (data?.classification?.length || data?.regression?.length) {
-          setSupportedAlgos({
-            classification: data.classification || [],
-            regression: data.regression || [],
-          });
+        if (data) {
+          setTrainingOptions(data);
+          if (data.default_cv_folds) setCvFolds(data.default_cv_folds);
+          if (data.default_train_test_split) setTrainTestSplit(data.default_train_test_split);
+          if (data.scalers?.length && !scaler) setScaler(data.scalers[0].value);
+          if (data.imputers?.length && !imputer) setImputer(data.imputers[0].value);
         }
       })
-      .catch(() => {
-        /* keep defaults */
-      });
+      .catch(() => {});
     return () => ctrl.abort();
   }, []);
 
@@ -551,7 +536,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         if (ctrl.signal.aborted) return;
         setRecommendations(recs);
 
-        // Auto-select recommended target if not already set
         if (recs.target_suggestions[0] && !selectedTarget) {
           const tgt = recs.target_suggestions[0].column_name;
           const { selectedTarget: t, selectedFeatures: f } = selectTargetColumn(
@@ -563,13 +547,11 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
           setSelectedTarget(t);
           setSelectedFeatures(f);
         } else if (selectedFeatures.length === 0 && dataset.columns.length > 1) {
-          // Default all non-target columns as features
           const defaultTarget = selectedTarget || dataset.columns[dataset.columns.length - 1];
           setSelectedTarget(defaultTarget);
           setSelectedFeatures(dataset.columns.filter((c) => c !== defaultTarget));
         }
 
-        // Auto-select recommended algorithm
         if (recs.recommended_models[0]) {
           setAlgorithm(recs.recommended_models[0]);
         }
@@ -586,8 +568,53 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataset]);
 
-  /* ── Drag to Resize AI Copilot Panel (D5) ───────────────────────── */
-  const handleMouseDownResize = useCallback((e: React.MouseEvent) => {
+  /* ── Dual-Axis Grid Splitter Drag Handlers (C1: No White Lines) ── */
+  const handleColResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingCol(true);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!gridContainerRef.current) return;
+      const rect = gridContainerRef.current.getBoundingClientRect();
+      const relativeX = moveEvent.clientX - rect.left;
+      const pct = (relativeX / rect.width) * 100;
+      setSplitCol(Math.max(25, Math.min(75, pct)));
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingCol(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  const handleRowResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingRow(true);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!gridContainerRef.current) return;
+      const rect = gridContainerRef.current.getBoundingClientRect();
+      const relativeY = moveEvent.clientY - rect.top;
+      const pct = (relativeY / rect.height) * 100;
+      setSplitRow(Math.max(25, Math.min(75, pct)));
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingRow(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  /* ── Dedicated AI Copilot Panel Resize Drag (A4) ────────────────── */
+  const handleCopilotResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsDraggingCopilot(true);
 
@@ -595,8 +622,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     const startWidth = copilotWidth;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = startX - moveEvent.clientX; // dragging left increases width
-      const newWidth = Math.max(320, Math.min(560, startWidth + deltaX));
+      const deltaX = startX - moveEvent.clientX;
+      const newWidth = Math.max(260, Math.min(520, startWidth + deltaX));
       setCopilotWidth(newWidth);
     };
 
@@ -673,6 +700,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         target_column: selectedTarget,
         feature_columns: selectedFeatures,
         algorithm,
+        scaler,
+        imputer,
         train_test_split: trainTestSplit,
         random_seed: 42,
         cross_validation: cvFolds,
@@ -702,9 +731,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     selectedTarget,
     selectedFeatures,
     algorithm,
+    scaler,
+    imputer,
     trainTestSplit,
     cvFolds,
-    scaler,
     setActiveJob,
     setLifecycleStage,
     onShowToast,
@@ -723,8 +753,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   );
 
   const copilotMsgs = useMemo(() => {
-    return generateCopilotMessages(profile, recommendations, qualityBreakdown, dataset);
-  }, [profile, recommendations, qualityBreakdown, dataset]);
+    return generateCopilotMessages(profile, recommendations, qualityBreakdown);
+  }, [profile, recommendations, qualityBreakdown]);
 
   const issueCount = (health?.issues || []).filter((i) => i.severity !== 'info').length;
 
@@ -733,7 +763,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     return cp?.type === 'identifier';
   };
 
-  /* ── Filtered & Paginated Preview Rows (C3) ────────────────────── */
+  /* ── Filtered & Paginated Preview Rows ──────────────────────────── */
   const filteredPreviewRows = useMemo(() => {
     if (!dataset) return [];
     if (!previewSearch.trim()) return dataset.rows;
@@ -749,7 +779,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     return filteredPreviewRows.slice(start, start + previewPageSize);
   }, [filteredPreviewRows, previewPage, previewPageSize]);
 
-  /* ── Algorithm Options for Shared Select (B1) ───────────────────── */
+  /* ── Dynamic Dropdown Options from Backend ──────────────────────── */
   const algorithmSelectOptions = useMemo(() => {
     const groups = [];
 
@@ -760,40 +790,37 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       });
     }
 
-    groups.push({
-      label: 'Classification Algorithms',
-      options: supportedAlgos.classification.map((a) => ({ value: a, label: a })),
-    });
+    if (trainingOptions.algorithms.classification.length > 0) {
+      groups.push({
+        label: 'Classification Algorithms',
+        options: trainingOptions.algorithms.classification.map((a) => ({ value: a, label: a })),
+      });
+    }
 
-    groups.push({
-      label: 'Regression Algorithms',
-      options: supportedAlgos.regression.map((a) => ({ value: a, label: a })),
-    });
+    if (trainingOptions.algorithms.regression.length > 0) {
+      groups.push({
+        label: 'Regression Algorithms',
+        options: trainingOptions.algorithms.regression.map((a) => ({ value: a, label: a })),
+      });
+    }
 
     return groups;
-  }, [recommendations, supportedAlgos]);
+  }, [recommendations, trainingOptions]);
 
-  const scalerOptions = [
-    { value: 'StandardScaler', label: 'StandardScaler (Zero mean, Unit variance)' },
-    { value: 'MinMaxScaler', label: 'MinMaxScaler (0 to 1 range)' },
-    { value: 'RobustScaler', label: 'RobustScaler (IQR outlier-resistant)' },
-    { value: 'None', label: 'None (Raw features)' },
-  ];
+  const scalerOptions: OptionItem[] = useMemo(() => {
+    return trainingOptions.scalers || [];
+  }, [trainingOptions.scalers]);
 
-  const imputerOptions = [
-    { value: 'Median', label: 'Median (Robust for skewed numerics)' },
-    { value: 'Mean', label: 'Mean (Standard continuous)' },
-    { value: 'Most Frequent', label: 'Most Frequent (Categorical mode)' },
-    { value: 'Constant (0)', label: 'Constant (Fill 0 / default)' },
-    { value: 'Drop Rows', label: 'Drop Rows with Missing Values' },
-  ];
+  const imputerOptions: OptionItem[] = useMemo(() => {
+    return trainingOptions.imputers || [];
+  }, [trainingOptions.imputers]);
 
   /* ═══════════════════════════════════════════════════════════════
      RENDER: Upload Prompt State
      ═══════════════════════════════════════════════════════════════ */
   if (!dataset) {
     return (
-      <div style={{ padding: '0 0 24px' }}>
+      <div style={{ padding: '0 0 24px', flex: 1, display: 'flex', flexDirection: 'column' }}>
         <DataUpload onDataLoaded={handleDataLoaded} />
       </div>
     );
@@ -804,883 +831,1030 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const fileSize = profile ? formatBytes(profile.memory_usage_bytes) : '—';
 
   /* ═══════════════════════════════════════════════════════════════
-     RENDER: Dataset Ingested View
+     RENDER: Dataset Ingested Studio Layout
      ═══════════════════════════════════════════════════════════════ */
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 12,
+        gap: 8,
         fontFamily: 'var(--font-ui)',
         color: BB.text,
-        minHeight: 'calc(100vh - 120px)',
+        height: '100%',
+        width: '100%',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
       }}
     >
       {/* ─────────────────────────────────────────────────────────────
-          SUBHEADER: View Toggle (C1) + Quick Indicators
+          TOP CONTROL BAR: View Toggle (Workspace / Preview) & Actions
           ───────────────────────────────────────────────────────────── */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 4px 4px',
+          padding: '0 2px',
           gap: 12,
-          flexWrap: 'wrap',
+          flexShrink: 0,
         }}
       >
-        {/* Segmented Control for Views */}
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            background: BB.surface,
-            border: `1px solid ${BB.border}`,
-            borderRadius: '8px 8px 0 8px',
-            padding: 3,
-            gap: 4,
-          }}
-        >
-          <button
-            onClick={() => setActiveView('workspace')}
+        {/* Segmented View Switcher */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
-              padding: '6px 14px',
-              borderRadius: '6px 6px 0 6px',
-              border: 'none',
-              background: activeView === 'workspace' ? BB.primary : 'transparent',
-              color: activeView === 'workspace' ? BB.text : BB.muted,
-              fontSize: 12,
-              fontWeight: activeView === 'workspace' ? 700 : 500,
-              cursor: 'pointer',
-              transition: 'all 150ms',
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: '7px',
+              padding: 3,
+              gap: 3,
             }}
           >
-            <Layers style={{ width: 13, height: 13 }} />
-            <span>Workspace</span>
-          </button>
+            <button
+              onClick={() => setActiveView('workspace')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 12px',
+                borderRadius: '5px',
+                border: 'none',
+                background: activeView === 'workspace' ? BB.primary : 'transparent',
+                color: activeView === 'workspace' ? BB.text : BB.muted,
+                fontSize: 11,
+                fontWeight: activeView === 'workspace' ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 150ms',
+              }}
+            >
+              <Layers style={{ width: 12, height: 12 }} />
+              <span>Workspace (4-Panel)</span>
+            </button>
 
-          <button
-            onClick={() => setActiveView('preview')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 14px',
-              borderRadius: '6px 6px 0 6px',
-              border: 'none',
-              background: activeView === 'preview' ? BB.primary : 'transparent',
-              color: activeView === 'preview' ? BB.text : BB.muted,
-              fontSize: 12,
-              fontWeight: activeView === 'preview' ? 700 : 500,
-              cursor: 'pointer',
-              transition: 'all 150ms',
-            }}
-          >
-            <TableIcon style={{ width: 13, height: 13 }} />
-            <span>Preview data ({rowCount} rows)</span>
-          </button>
+            <button
+              onClick={() => setActiveView('preview')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 12px',
+                borderRadius: '5px',
+                border: 'none',
+                background: activeView === 'preview' ? BB.primary : 'transparent',
+                color: activeView === 'preview' ? BB.text : BB.muted,
+                fontSize: 11,
+                fontWeight: activeView === 'preview' ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 150ms',
+              }}
+            >
+              <TableIcon style={{ width: 12, height: 12 }} />
+              <span>Preview Data ({rowCount} rows)</span>
+            </button>
+          </div>
+
+          {/* Reset Layout button */}
+          {activeView === 'workspace' && (
+            <button
+              onClick={() => {
+                setSplitCol(50);
+                setSplitRow(46);
+              }}
+              title="Reset 4-Panel Grid Layout to 50/50"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: `1px solid ${BB.border}`,
+                background: 'transparent',
+                color: BB.muted,
+                fontSize: 10,
+                cursor: 'pointer',
+              }}
+            >
+              <RotateCcw style={{ width: 10, height: 10 }} />
+              <span>Reset Layout</span>
+            </button>
+          )}
         </div>
 
-        {/* Right Action: Upload New Dataset */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Right Status */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {isAnalyzing && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: BB.muted }}>
-              <Loader2 style={{ width: 13, height: 13, animation: 'spin 1s linear infinite' }} />
+              <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
               <span>Analyzing…</span>
             </div>
           )}
           {analyzeError && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: BB.maroonLight }}>
-              <AlertCircle style={{ width: 13, height: 13 }} />
+              <AlertCircle style={{ width: 12, height: 12 }} />
               <span>{analyzeError}</span>
             </div>
           )}
-          <button
-            onClick={() => resetProject()}
-            title="Clear and upload a new dataset"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              borderRadius: '6px 6px 0 6px',
-              border: `1px solid ${BB.border}`,
-              background: 'transparent',
-              color: BB.muted,
-              fontSize: 11,
-              cursor: 'pointer',
-              transition: 'all 150ms',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = BB.primaryLight;
-              e.currentTarget.style.color = BB.text;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = BB.border;
-              e.currentTarget.style.color = BB.muted;
-            }}
-          >
-            <Upload style={{ width: 12, height: 12 }} />
-            <span>Upload new dataset</span>
-          </button>
         </div>
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          MAIN CONTENT AREA (Center content + Resizable Copilot)
+          STUDIO CANVAS (Main Left Content + Dedicated Right AI Panel)
           ───────────────────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 14, alignItems: 'stretch', flex: 1, minHeight: 0 }}>
-        {/* CENTER CONTENT */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          display: 'flex',
+          flex: 1,
+          minHeight: 0,
+          gap: isCopilotOpen ? 10 : 0,
+          width: '100%',
+          position: 'relative',
+          userSelect: isResizingCol || isResizingRow || isDraggingCopilot ? 'none' : 'auto',
+        }}
+      >
+        {/* ── LEFT / CENTER MAIN WORKSPACE ───────────────────────── */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: '100%' }}>
           {activeView === 'workspace' ? (
-            /* ── C2: 4-Panel Grid Workspace ──────────────────────── */
+            /* ── C1: Manually Resizable 4-Panel Grid (No White Lines) ── */
             <div
+              ref={gridContainerRef}
               style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gridTemplateRows: 'auto 1fr',
-                gap: 14,
+                display: 'flex',
+                flexDirection: 'column',
                 flex: 1,
                 minHeight: 0,
+                width: '100%',
+                position: 'relative',
               }}
             >
-              {/* PANEL 1: Overview & Quality (Top-Left) ─────────────── */}
+              {/* TOP ROW: Overview & Quality + Column Schema */}
               <div
                 style={{
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 12,
-                  padding: '16px 18px',
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
+                  height: `${splitRow}%`,
+                  minHeight: 140,
+                  maxHeight: 'calc(100% - 140px)',
+                  width: '100%',
                 }}
               >
-                {/* Dataset Identity Row */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        letterSpacing: '0.08em',
-                        textTransform: 'uppercase',
-                        color: BB.muted,
-                        display: 'block',
-                      }}
-                    >
-                      Overview &amp; quality
-                    </span>
-                    <div
-                      style={{
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: BB.text,
-                        fontFamily: 'var(--font-mono)',
-                        marginTop: 2,
-                      }}
-                    >
-                      {dataset.fileName}
-                    </div>
-                  </div>
+                {/* PANEL 1: Overview & Quality (Top-Left) */}
+                <div
+                  style={{
+                    width: `${splitCol}%`,
+                    minWidth: 200,
+                    maxWidth: 'calc(100% - 200px)',
+                    background: BB.surface,
+                    border: `1px solid ${BB.border}`,
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 10,
+                    overflowY: 'auto',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            letterSpacing: '0.08em',
+                            textTransform: 'uppercase',
+                            color: BB.muted,
+                          }}
+                        >
+                          Overview &amp; quality
+                        </span>
 
-                  {/* Quality Ring with Explainability Trigger (C4) */}
-                  {qualityBreakdown && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {/* C2: "Upload new" button moved inside Panel 1 Header */}
+                        <button
+                          onClick={() => resetProject()}
+                          title="Upload a new dataset file"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '2px 7px',
+                            borderRadius: 4,
+                            border: `1px solid ${BB.border}`,
+                            background: 'rgba(107,92,166,0.12)',
+                            color: BB.primaryLight,
+                            fontSize: 9,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 150ms',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = BB.primaryLight;
+                            e.currentTarget.style.color = BB.text;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = BB.border;
+                            e.currentTarget.style.color = BB.primaryLight;
+                          }}
+                        >
+                          <Upload style={{ width: 10, height: 10 }} />
+                          <span>Upload new</span>
+                        </button>
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: BB.text,
+                          fontFamily: 'var(--font-mono)',
+                          marginTop: 2,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {dataset.fileName}
+                      </div>
+                    </div>
+
+                    {qualityBreakdown && (
                       <QualityScoreRing
                         score={qualityBreakdown.score}
                         onClick={() => setShowScoreModal(true)}
                       />
+                    )}
+                  </div>
+
+                  {/* Dataset Stats Row */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gap: 6,
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      background: BB.elevated,
+                      fontSize: 10,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div>
+                      <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>ROWS</span>
+                      <strong style={{ color: BB.text, fontFamily: 'var(--font-mono)' }}>{rowCount}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>COLS</span>
+                      <strong style={{ color: BB.text, fontFamily: 'var(--font-mono)' }}>{colCount}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>SIZE</span>
+                      <strong style={{ color: BB.text, fontFamily: 'var(--font-mono)' }}>{fileSize}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>QUALITY</span>
+                      <button
+                        onClick={() => setShowScoreModal(true)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: qualityBreakdown ? getQualityColor(qualityBreakdown.score) : BB.text,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: 0,
+                          textDecoration: 'underline',
+                        }}
+                      >
+                        {qualityBreakdown ? `${qualityBreakdown.score}/100` : '—'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Next Best Actions */}
+                  {health?.recommendations && health.recommendations.length > 0 && (
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          color: BB.muted,
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.08em',
+                          marginBottom: 4,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <span>Next best actions</span>
+                        {issueCount > 0 && (
+                          <span
+                            style={{
+                              fontSize: 8,
+                              padding: '1px 5px',
+                              borderRadius: 10,
+                              background: 'rgba(178,58,78,0.2)',
+                              color: BB.maroonLight,
+                            }}
+                          >
+                            {issueCount} issues
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {health.recommendations.slice(0, 2).map((rec, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: 6,
+                              fontSize: 10,
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            <span style={{ color: BB.primaryLight, flexShrink: 0 }}>→</span>
+                            <span style={{ color: BB.muted }}>{rec}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {/* Dataset Stats Bar */}
+                {/* C1: Seamless Vertical Splitter (No White Line) */}
                 <div
+                  onMouseDown={handleColResizeMouseDown}
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(4, 1fr)',
-                    gap: 8,
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    background: BB.elevated,
-                    fontSize: 11,
-                    textAlign: 'center',
-                  }}
-                >
-                  <div>
-                    <span style={{ color: BB.disabled, fontSize: 10, display: 'block' }}>ROWS</span>
-                    <strong style={{ color: BB.text, fontFamily: 'var(--font-mono)' }}>{rowCount}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: BB.disabled, fontSize: 10, display: 'block' }}>COLS</span>
-                    <strong style={{ color: BB.text, fontFamily: 'var(--font-mono)' }}>{colCount}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: BB.disabled, fontSize: 10, display: 'block' }}>SIZE</span>
-                    <strong style={{ color: BB.text, fontFamily: 'var(--font-mono)' }}>{fileSize}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: BB.disabled, fontSize: 10, display: 'block' }}>QUALITY</span>
-                    <button
-                      onClick={() => setShowScoreModal(true)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: qualityBreakdown ? getQualityColor(qualityBreakdown.score) : BB.text,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        padding: 0,
-                        textDecoration: 'underline',
-                        textUnderlineOffset: 2,
-                      }}
-                    >
-                      {qualityBreakdown ? `${qualityBreakdown.score}/100` : '—'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Next Best Action List */}
-                {health?.recommendations && health.recommendations.length > 0 && (
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: BB.muted,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.08em',
-                        marginBottom: 6,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-                      <span>Next best actions</span>
-                      {issueCount > 0 && (
-                        <span
-                          style={{
-                            fontSize: 9,
-                            padding: '1px 6px',
-                            borderRadius: 10,
-                            background: 'rgba(178,58,78,0.2)',
-                            color: BB.maroonLight,
-                          }}
-                        >
-                          {issueCount} issues detected
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {health.recommendations.slice(0, 3).map((rec, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: 7,
-                            fontSize: 11,
-                            lineHeight: 1.4,
-                          }}
-                        >
-                          <span style={{ color: BB.primaryLight, flexShrink: 0 }}>→</span>
-                          <span style={{ color: BB.muted }}>{rec}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* PANEL 2: Column Schema (Top-Right) ───────────────── */}
-              <div
-                style={{
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 12,
-                  overflow: 'hidden',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  maxHeight: 280,
-                }}
-              >
-                <div
-                  style={{
-                    padding: '12px 16px 10px',
+                    width: 6,
+                    cursor: 'col-resize',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    borderBottom: `1px solid ${BB.border}`,
+                    justifyContent: 'center',
+                    zIndex: 5,
+                    flexShrink: 0,
+                    background: 'transparent',
                   }}
+                  title="Drag to resize columns"
                 >
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: '0.08em',
-                      textTransform: 'uppercase',
-                      color: BB.muted,
-                    }}
-                  >
-                    Column schema ({colCount} columns)
-                  </span>
-                  <span style={{ fontSize: 10, color: BB.disabled }}>Click row to view stats</span>
-                </div>
-
-                <div style={{ overflowY: 'auto', flex: 1 }}>
-                  {/* Table Header */}
                   <div
                     style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 56px 60px 52px',
-                      padding: '6px 16px',
-                      gap: 8,
-                      fontSize: 9,
-                      fontWeight: 700,
-                      letterSpacing: '0.1em',
-                      textTransform: 'uppercase',
-                      color: BB.disabled,
+                      width: 2,
+                      height: '30%',
+                      background: isResizingCol ? BB.primaryLight : 'transparent',
+                      borderRadius: 1,
+                      transition: 'background 120ms',
+                    }}
+                  />
+                </div>
+
+                {/* PANEL 2: Column Schema (Top-Right) */}
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 200,
+                    background: BB.surface,
+                    border: `1px solid ${BB.border}`,
+                    borderRadius: '10px',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <div
+                    style={{
+                      padding: '10px 14px 8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
                       borderBottom: `1px solid ${BB.border}`,
-                      position: 'sticky',
-                      top: 0,
-                      background: BB.surface,
                     }}
                   >
-                    <span>Column</span>
-                    <span>Type</span>
-                    <span style={{ textAlign: 'right' }}>Missing</span>
-                    <span style={{ textAlign: 'right' }}>Unique</span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        color: BB.muted,
+                      }}
+                    >
+                      Column schema ({colCount} cols)
+                    </span>
+                    <span style={{ fontSize: 9, color: BB.disabled }}>Click row to expand</span>
                   </div>
 
-                  {/* Rows */}
-                  {(
-                    profile?.columns ||
-                    allColumns.map((name) => ({
-                      name,
-                      type: numericSet.has(name) ? 'numeric' : 'categorical',
-                      missing: 0,
-                      missing_percentage: 0,
-                      unique: 0,
-                    } as Partial<ColumnProfile>))
-                  ).map((col: any, idx: number) => {
-                    const isExpanded = expandedColumns.has(col.name);
-                    return (
-                      <div key={col.name}>
-                        <div
-                          onClick={() => {
-                            if (!profile) return;
-                            const next = new Set(expandedColumns);
-                            if (isExpanded) next.delete(col.name);
-                            else next.add(col.name);
-                            setExpandedColumns(next);
-                          }}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '1fr 56px 60px 52px',
-                            padding: '6px 16px',
-                            gap: 8,
-                            alignItems: 'center',
-                            fontSize: 11,
-                            cursor: profile ? 'pointer' : 'default',
-                            background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
-                            transition: 'background 100ms',
-                            borderBottom: `1px solid ${BB.border}`,
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'rgba(107,92,166,0.06)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background =
-                              idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)';
-                          }}
-                        >
-                          <span
-                            style={{
-                              color: BB.text,
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: 11,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {col.name}
-                          </span>
-                          <TypePill type={col.type || 'text'} />
-                          <span
-                            style={{
-                              textAlign: 'right',
-                              color: (col.missing_percentage ?? 0) > 5 ? BB.gold : BB.muted,
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: 11,
-                            }}
-                          >
-                            {(col.missing_percentage ?? 0) > 0
-                              ? `${Math.round(col.missing_percentage)}%`
-                              : '0%'}
-                          </span>
-                          <span
-                            style={{
-                              textAlign: 'right',
-                              color: BB.muted,
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: 11,
-                            }}
-                          >
-                            {col.unique ?? '—'}
-                          </span>
-                        </div>
+                  <div style={{ overflowY: 'auto', flex: 1 }}>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 50px 55px 48px',
+                        padding: '5px 14px',
+                        gap: 6,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        color: BB.disabled,
+                        borderBottom: `1px solid ${BB.border}`,
+                        position: 'sticky',
+                        top: 0,
+                        background: BB.surface,
+                        zIndex: 2,
+                      }}
+                    >
+                      <span>Column</span>
+                      <span>Type</span>
+                      <span style={{ textAlign: 'right' }}>Null</span>
+                      <span style={{ textAlign: 'right' }}>Uniq</span>
+                    </div>
 
-                        {/* Expanded Statistics */}
-                        {isExpanded && profile && (
+                    {(
+                      profile?.columns ||
+                      allColumns.map((name) => ({
+                        name,
+                        type: numericSet.has(name) ? 'numeric' : 'categorical',
+                        missing: 0,
+                        missing_percentage: 0,
+                        unique: 0,
+                      } as Partial<ColumnProfile>))
+                    ).map((col: any, idx: number) => {
+                      const isExpanded = expandedColumns.has(col.name);
+                      return (
+                        <div key={col.name}>
                           <div
+                            onClick={() => {
+                              if (!profile) return;
+                              const next = new Set(expandedColumns);
+                              if (isExpanded) next.delete(col.name);
+                              else next.add(col.name);
+                              setExpandedColumns(next);
+                            }}
                             style={{
-                              padding: '8px 16px 10px 32px',
-                              background: BB.elevated,
-                              borderBottom: `1px solid ${BB.border}`,
-                              display: 'flex',
-                              flexWrap: 'wrap',
-                              gap: '6px 18px',
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 50px 55px 48px',
+                              padding: '5px 14px',
+                              gap: 6,
+                              alignItems: 'center',
                               fontSize: 10,
-                              color: BB.muted,
+                              cursor: profile ? 'pointer' : 'default',
+                              background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
+                              borderBottom: `1px solid ${BB.border}`,
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'rgba(107,92,166,0.06)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background =
+                                idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)';
                             }}
                           >
-                            {col.statistics?.mean !== undefined && (
-                              <span>
-                                mean: <b style={{ color: BB.text }}>{col.statistics.mean?.toFixed(2)}</b>
-                              </span>
-                            )}
-                            {col.statistics?.std !== undefined && (
-                              <span>
-                                std: <b style={{ color: BB.text }}>{col.statistics.std?.toFixed(2)}</b>
-                              </span>
-                            )}
-                            {col.statistics?.min !== undefined && (
-                              <span>
-                                min: <b style={{ color: BB.text }}>{col.statistics.min?.toFixed(2)}</b>
-                              </span>
-                            )}
-                            {col.statistics?.max !== undefined && (
-                              <span>
-                                max: <b style={{ color: BB.text }}>{col.statistics.max?.toFixed(2)}</b>
-                              </span>
-                            )}
-                            {col.statistics?.most_frequent_value !== undefined && (
-                              <span>
-                                top: <b style={{ color: BB.text }}>{col.statistics.most_frequent_value}</b>
-                              </span>
-                            )}
+                            <span
+                              style={{
+                                color: BB.text,
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 10,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {col.name}
+                            </span>
+                            <TypePill type={col.type || 'text'} />
+                            <span
+                              style={{
+                                textAlign: 'right',
+                                color: (col.missing_percentage ?? 0) > 5 ? BB.gold : BB.muted,
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 10,
+                              }}
+                            >
+                              {(col.missing_percentage ?? 0) > 0
+                                ? `${Math.round(col.missing_percentage)}%`
+                                : '0%'}
+                            </span>
+                            <span
+                              style={{
+                                textAlign: 'right',
+                                color: BB.muted,
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 10,
+                              }}
+                            >
+                              {col.unique ?? '—'}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+
+                          {isExpanded && profile && (
+                            <div
+                              style={{
+                                padding: '6px 14px 8px 24px',
+                                background: BB.elevated,
+                                borderBottom: `1px solid ${BB.border}`,
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: '4px 14px',
+                                fontSize: 9,
+                                color: BB.muted,
+                              }}
+                            >
+                              {col.statistics?.mean !== undefined && (
+                                <span>
+                                  mean: <b style={{ color: BB.text }}>{col.statistics.mean?.toFixed(2)}</b>
+                                </span>
+                              )}
+                              {col.statistics?.std !== undefined && (
+                                <span>
+                                  std: <b style={{ color: BB.text }}>{col.statistics.std?.toFixed(2)}</b>
+                                </span>
+                              )}
+                              {col.statistics?.min !== undefined && (
+                                <span>
+                                  min: <b style={{ color: BB.text }}>{col.statistics.min?.toFixed(2)}</b>
+                                </span>
+                              )}
+                              {col.statistics?.max !== undefined && (
+                                <span>
+                                  max: <b style={{ color: BB.text }}>{col.statistics.max?.toFixed(2)}</b>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
-              {/* PANEL 3: Feature & Target Selection (Bottom-Left) ── */}
+              {/* C1: Seamless Horizontal Splitter (No White Line) */}
+              <div
+                onMouseDown={handleRowResizeMouseDown}
+                style={{
+                  height: 6,
+                  cursor: 'row-resize',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 5,
+                  flexShrink: 0,
+                  background: 'transparent',
+                }}
+                title="Drag to resize rows"
+              >
+                <div
+                  style={{
+                    height: 2,
+                    width: '25%',
+                    background: isResizingRow ? BB.primaryLight : 'transparent',
+                    borderRadius: 1,
+                    transition: 'background 120ms',
+                  }}
+                />
+              </div>
+
+              {/* BOTTOM ROW: Feature & Target + Training Setup */}
               <div
                 style={{
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 12,
-                  padding: '16px 18px',
                   display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                  maxHeight: 340,
+                  flex: 1,
+                  minHeight: 140,
+                  width: '100%',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                {/* PANEL 3: Feature & Target Selection (Bottom-Left) */}
+                <div
+                  style={{
+                    width: `${splitCol}%`,
+                    minWidth: 200,
+                    maxWidth: 'calc(100% - 200px)',
+                    background: BB.surface,
+                    border: `1px solid ${BB.border}`,
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    overflow: 'hidden',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        color: BB.muted,
+                      }}
+                    >
+                      Feature &amp; target selection
+                    </span>
+                    <div style={{ display: 'flex', gap: 6, fontSize: 9 }}>
+                      <button
+                        onClick={handleSelectAllFeatures}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: BB.primaryLight,
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        All
+                      </button>
+                      <span style={{ color: BB.disabled }}>·</span>
+                      <button
+                        onClick={handleDeselectAllFeatures}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: BB.muted,
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        None
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 10, color: BB.muted }}>
+                    Features: <strong style={{ color: BB.text }}>{selectedFeatures.length}</strong> · Target:{' '}
+                    <strong style={{ color: selectedTarget ? BB.maroonLight : BB.disabled }}>
+                      {selectedTarget || 'None'}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      overflowY: 'auto',
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                      paddingRight: 2,
+                    }}
+                  >
+                    {allColumns.map((col) => {
+                      const isFeature = selectedFeatures.includes(col);
+                      const isTarget = selectedTarget === col;
+                      const isId = isIdentifier(col);
+                      const colType =
+                        profile?.columns.find((c) => c.name === col)?.type ??
+                        (numericSet.has(col) ? 'numeric' : 'categorical');
+                      const excluded = isId;
+
+                      return (
+                        <div
+                          key={col}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: '18px 1fr 18px',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            background: isTarget
+                              ? 'rgba(110,20,35,0.18)'
+                              : isFeature
+                              ? 'rgba(75,59,124,0.12)'
+                              : 'transparent',
+                            border: `1px solid ${
+                              isTarget
+                                ? 'rgba(110,20,35,0.35)'
+                                : isFeature
+                                ? 'rgba(107,92,166,0.25)'
+                                : 'transparent'
+                            }`,
+                            opacity: excluded ? 0.4 : 1,
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isFeature}
+                            disabled={excluded || isTarget}
+                            onChange={() => !excluded && handleFeatureToggle(col)}
+                            style={{
+                              width: 13,
+                              height: 13,
+                              accentColor: BB.primaryLight,
+                              cursor: excluded || isTarget ? 'not-allowed' : 'pointer',
+                            }}
+                          />
+
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 600,
+                                color: isTarget ? BB.maroonLight : BB.text,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {col}
+                            </div>
+                            <div style={{ fontSize: 9, color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <TypePill type={colType} />
+                              {isId && <span style={{ color: BB.disabled }}>id</span>}
+                              {isTarget && (
+                                <span style={{ color: BB.maroonLight, fontSize: 8, fontWeight: 700 }}>
+                                  TARGET
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <input
+                            type="radio"
+                            name="target-variable"
+                            checked={isTarget}
+                            disabled={excluded}
+                            onChange={() => !excluded && handleTargetChange(col)}
+                            style={{
+                              width: 13,
+                              height: 13,
+                              accentColor: BB.maroon,
+                              cursor: excluded ? 'not-allowed' : 'pointer',
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* C1: Seamless Vertical Splitter (Bottom) */}
+                <div
+                  onMouseDown={handleColResizeMouseDown}
+                  style={{
+                    width: 6,
+                    cursor: 'col-resize',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 5,
+                    flexShrink: 0,
+                    background: 'transparent',
+                  }}
+                  title="Drag to resize columns"
+                >
+                  <div
+                    style={{
+                      width: 2,
+                      height: '30%',
+                      background: isResizingCol ? BB.primaryLight : 'transparent',
+                      borderRadius: 1,
+                      transition: 'background 120ms',
+                    }}
+                  />
+                </div>
+
+                {/* PANEL 4: Training Setup (Bottom-Right) */}
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 200,
+                    background: BB.surface,
+                    border: `1px solid ${BB.border}`,
+                    borderRadius: '10px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    overflow: 'hidden',
+                    boxSizing: 'border-box',
+                  }}
+                >
                   <span
                     style={{
-                      fontSize: 11,
+                      fontSize: 10,
                       fontWeight: 700,
                       letterSpacing: '0.08em',
                       textTransform: 'uppercase',
                       color: BB.muted,
                     }}
                   >
-                    Feature &amp; target selection
+                    Training setup
                   </span>
-                  <div style={{ display: 'flex', gap: 8, fontSize: 10 }}>
-                    <button
-                      onClick={handleSelectAllFeatures}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: BB.primaryLight,
-                        cursor: 'pointer',
-                        padding: 0,
-                      }}
-                    >
-                      Select All
-                    </button>
-                    <span style={{ color: BB.disabled }}>·</span>
-                    <button
-                      onClick={handleDeselectAllFeatures}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: BB.muted,
-                        cursor: 'pointer',
-                        padding: 0,
-                      }}
-                    >
-                      Deselect
-                    </button>
-                  </div>
-                </div>
 
-                <div style={{ fontSize: 11, color: BB.muted }}>
-                  Features: <strong style={{ color: BB.text }}>{selectedFeatures.length}</strong> · Target:{' '}
-                  <strong style={{ color: selectedTarget ? BB.maroonLight : BB.disabled }}>
-                    {selectedTarget || 'None'}
-                  </strong>
-                </div>
-
-                {/* Column Checklist */}
-                <div
-                  style={{
-                    overflowY: 'auto',
-                    flex: 1,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 3,
-                    paddingRight: 4,
-                  }}
-                >
-                  {allColumns.map((col) => {
-                    const isFeature = selectedFeatures.includes(col);
-                    const isTarget = selectedTarget === col;
-                    const isId = isIdentifier(col);
-                    const colType =
-                      profile?.columns.find((c) => c.name === col)?.type ??
-                      (numericSet.has(col) ? 'numeric' : 'categorical');
-                    const excluded = isId;
-
-                    return (
-                      <div
-                        key={col}
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: '20px 1fr 20px',
-                          alignItems: 'center',
-                          gap: 10,
-                          padding: '6px 10px',
-                          borderRadius: 7,
-                          background: isTarget
-                            ? 'rgba(110,20,35,0.18)'
-                            : isFeature
-                            ? 'rgba(75,59,124,0.12)'
-                            : 'transparent',
-                          border: `1px solid ${
-                            isTarget
-                              ? 'rgba(110,20,35,0.35)'
-                              : isFeature
-                              ? 'rgba(107,92,166,0.25)'
-                              : 'transparent'
-                          }`,
-                          opacity: excluded ? 0.4 : 1,
-                          transition: 'all 120ms',
-                        }}
-                      >
-                        {/* Feature Checkbox */}
-                        <input
-                          type="checkbox"
-                          checked={isFeature}
-                          disabled={excluded || isTarget}
-                          onChange={() => !excluded && handleFeatureToggle(col)}
-                          style={{
-                            width: 14,
-                            height: 14,
-                            accentColor: BB.primaryLight,
-                            cursor: excluded || isTarget ? 'not-allowed' : 'pointer',
-                          }}
-                        />
-
-                        {/* Column Name & Type */}
-                        <div style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: isTarget ? BB.maroonLight : BB.text,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {col}
-                          </div>
-                          <div style={{ fontSize: 10, color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <TypePill type={colType} />
-                            {isId && <span style={{ color: BB.disabled }}>id excluded</span>}
-                            {isTarget && (
-                              <span
-                                style={{
-                                  color: BB.maroonLight,
-                                  fontSize: 9,
-                                  fontWeight: 700,
-                                  letterSpacing: '0.08em',
-                                  textTransform: 'uppercase',
-                                }}
-                              >
-                                TARGET
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Target Radio */}
-                        <input
-                          type="radio"
-                          name="target-variable"
-                          checked={isTarget}
-                          disabled={excluded}
-                          onChange={() => !excluded && handleTargetChange(col)}
-                          style={{
-                            width: 14,
-                            height: 14,
-                            accentColor: BB.maroon,
-                            cursor: excluded ? 'not-allowed' : 'pointer',
-                          }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* PANEL 4: Training Setup (Bottom-Right) ────────────── */}
-              <div
-                style={{
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 12,
-                  padding: '16px 18px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                  maxHeight: 340,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    color: BB.muted,
-                  }}
-                >
-                  Training setup
-                </span>
-
-                <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {/* Algorithm Select with Portal (B1) */}
-                  <div>
-                    <label
-                      style={{
-                        display: 'block',
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: BB.disabled,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.08em',
-                        marginBottom: 4,
-                      }}
-                    >
-                      Algorithm
-                    </label>
-                    <Select
-                      value={algorithm}
-                      onChange={setAlgorithm}
-                      options={algorithmSelectOptions}
-                      placeholder="Select algorithm..."
-                    />
-                  </div>
-
-                  {/* Scaler & Imputer in 2 cols */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* Algorithm Select */}
                     <div>
                       <label
                         style={{
                           display: 'block',
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: 700,
                           color: BB.disabled,
                           textTransform: 'uppercase',
                           letterSpacing: '0.08em',
-                          marginBottom: 4,
+                          marginBottom: 3,
                         }}
                       >
-                        Feature Scaler
+                        Algorithm
                       </label>
                       <Select
-                        value={scaler}
-                        onChange={setScaler}
-                        options={scalerOptions}
-                        placeholder="Feature scaler..."
+                        value={algorithm}
+                        onChange={setAlgorithm}
+                        options={algorithmSelectOptions}
+                        placeholder="Select algorithm..."
                       />
                     </div>
 
-                    <div>
-                      <label
-                        style={{
-                          display: 'block',
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: BB.disabled,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.08em',
-                          marginBottom: 4,
-                        }}
-                      >
-                        Missing Imputer
-                      </label>
-                      <Select
-                        value={imputer}
-                        onChange={setImputer}
-                        options={imputerOptions}
-                        placeholder="Missing imputer..."
-                      />
-                    </div>
-                  </div>
-
-                  {/* CV Folds & Train/Test Split */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 12, alignItems: 'center' }}>
-                    <div>
-                      <label
-                        style={{
-                          display: 'block',
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: BB.disabled,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.08em',
-                          marginBottom: 4,
-                        }}
-                      >
-                        CV Folds
-                      </label>
-                      <input
-                        type="number"
-                        min={2}
-                        max={20}
-                        value={cvFolds}
-                        onChange={(e) => setCvFolds(parseInt(e.target.value) || 5)}
-                        style={{
-                          width: '100%',
-                          padding: '7px 8px',
-                          borderRadius: 7,
-                          border: `1px solid ${BB.border}`,
-                          background: BB.elevated,
-                          color: BB.text,
-                          fontSize: 11,
-                          fontFamily: 'var(--font-mono)',
-                          outline: 'none',
-                          boxSizing: 'border-box',
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    {/* Scaler & Imputer in 2 cols */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div>
                         <label
                           style={{
-                            fontSize: 10,
+                            display: 'block',
+                            fontSize: 9,
                             fontWeight: 700,
                             color: BB.disabled,
                             textTransform: 'uppercase',
                             letterSpacing: '0.08em',
+                            marginBottom: 3,
                           }}
                         >
-                          Train / Test split
+                          Scaler
                         </label>
-                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: BB.primaryLight }}>
-                          {Math.round(trainTestSplit * 100)}% / {Math.round((1 - trainTestSplit) * 100)}%
-                        </span>
+                        <Select
+                          value={scaler}
+                          onChange={setScaler}
+                          options={scalerOptions}
+                          placeholder="Scaler..."
+                        />
                       </div>
-                      <input
-                        type="range"
-                        min={0.5}
-                        max={0.95}
-                        step={0.05}
-                        value={trainTestSplit}
-                        onChange={(e) => setTrainTestSplit(parseFloat(e.target.value))}
-                        style={{ width: '100%', accentColor: BB.maroon, cursor: 'pointer' }}
-                      />
+
+                      <div>
+                        <label
+                          style={{
+                            display: 'block',
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: BB.disabled,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.08em',
+                            marginBottom: 3,
+                          }}
+                        >
+                          Imputer
+                        </label>
+                        <Select
+                          value={imputer}
+                          onChange={setImputer}
+                          options={imputerOptions}
+                          placeholder="Imputer..."
+                        />
+                      </div>
                     </div>
+
+                    {/* CV Folds & B2 Smooth Train/Test Split Slider */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 8, alignItems: 'center' }}>
+                      <div>
+                        <label
+                          style={{
+                            display: 'block',
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: BB.disabled,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.08em',
+                            marginBottom: 3,
+                          }}
+                        >
+                          CV Folds
+                        </label>
+                        <input
+                          type="number"
+                          min={2}
+                          max={20}
+                          value={cvFolds}
+                          onChange={(e) => setCvFolds(parseInt(e.target.value) || 5)}
+                          style={{
+                            width: '100%',
+                            padding: '5px 6px',
+                            borderRadius: 6,
+                            border: `1px solid ${BB.border}`,
+                            background: BB.elevated,
+                            color: BB.text,
+                            fontSize: 10,
+                            fontFamily: 'var(--font-mono)',
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+
+                      {/* B2: Enhanced Smooth Train / Test Slider */}
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                          <label
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: BB.disabled,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.08em',
+                            }}
+                          >
+                            Split
+                          </label>
+                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: BB.text }}>
+                            <strong style={{ color: BB.maroonLight }}>{Math.round(trainTestSplit * 100)}%</strong> Train ·{' '}
+                            <strong style={{ color: BB.primaryLight }}>{Math.round((1 - trainTestSplit) * 100)}%</strong> Test
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={0.95}
+                          step={0.01}
+                          value={trainTestSplit}
+                          onChange={(e) => setTrainTestSplit(parseFloat(e.target.value))}
+                          style={{
+                            width: '100%',
+                            height: 6,
+                            borderRadius: 3,
+                            appearance: 'none',
+                            outline: 'none',
+                            cursor: 'grab',
+                            background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${
+                              trainTestSplit * 100
+                            }%, rgba(107,92,166,0.25) ${trainTestSplit * 100}%, rgba(107,92,166,0.25) 100%)`,
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {launchError && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 6,
+                          padding: '6px 8px',
+                          borderRadius: 6,
+                          background: 'rgba(110,20,35,0.18)',
+                          border: '1px solid rgba(178,58,78,0.3)',
+                          fontSize: 10,
+                          color: BB.maroonLight,
+                        }}
+                      >
+                        <AlertCircle style={{ width: 12, height: 12, flexShrink: 0, marginTop: 1 }} />
+                        <span>{launchError}</span>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Inline Launch Validation Error */}
-                  {launchError && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: 7,
-                        padding: '8px 10px',
-                        borderRadius: 7,
-                        background: 'rgba(110,20,35,0.18)',
-                        border: '1px solid rgba(178,58,78,0.3)',
-                        fontSize: 11,
-                        color: BB.maroonLight,
-                      }}
-                    >
-                      <AlertCircle style={{ width: 13, height: 13, flexShrink: 0, marginTop: 1 }} />
-                      <span>{launchError}</span>
-                    </div>
-                  )}
+                  {/* Sticky Launch Button */}
+                  <button
+                    onClick={handleLaunch}
+                    disabled={isLaunching || !selectedTarget || selectedFeatures.length === 0}
+                    style={{
+                      width: '100%',
+                      padding: '9px 0',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background:
+                        isLaunching || !selectedTarget || selectedFeatures.length === 0
+                          ? BB.disabled
+                          : `linear-gradient(135deg, ${BB.maroon} 0%, #A01830 100%)`,
+                      color: BB.text,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor:
+                        isLaunching || !selectedTarget || selectedFeatures.length === 0
+                          ? 'not-allowed'
+                          : 'pointer',
+                      fontFamily: 'var(--font-ui)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      boxShadow:
+                        isLaunching || !selectedTarget ? 'none' : '0 3px 12px rgba(110,20,35,0.30)',
+                    }}
+                  >
+                    {isLaunching ? (
+                      <>
+                        <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
+                        <span>Launching…</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play style={{ width: 11, height: 11, fill: 'currentColor' }} />
+                        <span>Launch training job →</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-
-                {/* Sticky Launch Button (D3) */}
-                <button
-                  onClick={handleLaunch}
-                  disabled={isLaunching || !selectedTarget || selectedFeatures.length === 0}
-                  style={{
-                    width: '100%',
-                    padding: '11px 0',
-                    borderRadius: '8px 8px 0 8px',
-                    border: 'none',
-                    background:
-                      isLaunching || !selectedTarget || selectedFeatures.length === 0
-                        ? BB.disabled
-                        : `linear-gradient(135deg, ${BB.maroon} 0%, #A01830 100%)`,
-                    color: BB.text,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor:
-                      isLaunching || !selectedTarget || selectedFeatures.length === 0
-                        ? 'not-allowed'
-                        : 'pointer',
-                    fontFamily: 'var(--font-ui)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    boxShadow:
-                      isLaunching || !selectedTarget ? 'none' : '0 4px 16px rgba(110,20,35,0.35)',
-                    letterSpacing: '0.02em',
-                  }}
-                >
-                  {isLaunching ? (
-                    <>
-                      <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} />
-                      <span>Launching ML Job…</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play style={{ width: 13, height: 13, fill: 'currentColor' }} />
-                      <span>Launch training job →</span>
-                    </>
-                  )}
-                </button>
               </div>
             </div>
           ) : (
@@ -1689,7 +1863,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
               style={{
                 background: BB.surface,
                 border: `1px solid ${BB.border}`,
-                borderRadius: 12,
+                borderRadius: 10,
                 overflow: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
@@ -1699,29 +1873,23 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
               {/* Preview Controls Bar */}
               <div
                 style={{
-                  padding: '12px 18px',
+                  padding: '10px 14px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: 12,
+                  gap: 10,
                   borderBottom: `1px solid ${BB.border}`,
                   background: BB.elevated,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div
-                    style={{
-                      position: 'relative',
-                      display: 'flex',
-                      alignItems: 'center',
-                    }}
-                  >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                     <Search
                       style={{
                         position: 'absolute',
-                        left: 10,
-                        width: 13,
-                        height: 13,
+                        left: 8,
+                        width: 12,
+                        height: 12,
                         color: BB.muted,
                       }}
                     />
@@ -1734,27 +1902,27 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       }}
                       placeholder="Search row values..."
                       style={{
-                        padding: '6px 12px 6px 30px',
-                        borderRadius: 6,
+                        padding: '5px 10px 5px 26px',
+                        borderRadius: 5,
                         border: `1px solid ${BB.border}`,
                         background: BB.surface,
                         color: BB.text,
-                        fontSize: 11,
+                        fontSize: 10,
                         fontFamily: 'var(--font-ui)',
                         outline: 'none',
-                        width: 200,
+                        width: 180,
                       }}
                     />
                   </div>
-                  <span style={{ fontSize: 11, color: BB.muted }}>
-                    Showing {filteredPreviewRows.length} matching rows
+                  <span style={{ fontSize: 10, color: BB.muted }}>
+                    {filteredPreviewRows.length} matching rows
                   </span>
                 </div>
 
                 {/* Pagination Controls */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 11 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: BB.disabled, fontSize: 10 }}>PAGE SIZE:</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ color: BB.disabled, fontSize: 9 }}>PAGE SIZE:</span>
                     <select
                       value={previewPageSize}
                       onChange={(e) => {
@@ -1762,12 +1930,12 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         setPreviewPage(1);
                       }}
                       style={{
-                        padding: '3px 6px',
+                        padding: '2px 4px',
                         borderRadius: 4,
                         border: `1px solid ${BB.border}`,
                         background: BB.surface,
                         color: BB.text,
-                        fontSize: 11,
+                        fontSize: 10,
                         outline: 'none',
                       }}
                     >
@@ -1779,14 +1947,14 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   </div>
 
                   <span style={{ color: BB.muted }}>
-                    Page {previewPage} of {totalPreviewPages}
+                    Page {previewPage} / {totalPreviewPages}
                   </span>
-                  <div style={{ display: 'flex', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 3 }}>
                     <button
                       onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
                       disabled={previewPage === 1}
                       style={{
-                        padding: '4px 8px',
+                        padding: '3px 6px',
                         borderRadius: 4,
                         border: `1px solid ${BB.border}`,
                         background: 'transparent',
@@ -1794,13 +1962,13 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         cursor: previewPage === 1 ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      <ChevronLeft style={{ width: 14, height: 14 }} />
+                      <ChevronLeft style={{ width: 12, height: 12 }} />
                     </button>
                     <button
                       onClick={() => setPreviewPage((p) => Math.min(totalPreviewPages, p + 1))}
                       disabled={previewPage === totalPreviewPages}
                       style={{
-                        padding: '4px 8px',
+                        padding: '3px 6px',
                         borderRadius: 4,
                         border: `1px solid ${BB.border}`,
                         background: 'transparent',
@@ -1808,22 +1976,22 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         cursor: previewPage === totalPreviewPages ? 'not-allowed' : 'pointer',
                       }}
                     >
-                      <ChevronRight style={{ width: 14, height: 14 }} />
+                      <ChevronRight style={{ width: 12, height: 12 }} />
                     </button>
                   </div>
                 </div>
               </div>
 
               {/* Data Table */}
-              <div style={{ overflowX: 'auto', flex: 1, maxHeight: 560 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <div style={{ overflowX: 'auto', flex: 1 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                   <thead>
                     <tr style={{ background: BB.surface, borderBottom: `1px solid ${BB.border}` }}>
                       <th
                         style={{
-                          padding: '8px 12px',
+                          padding: '6px 10px',
                           textAlign: 'left',
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: 700,
                           color: BB.disabled,
                           letterSpacing: '0.08em',
@@ -1839,9 +2007,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         <th
                           key={col}
                           style={{
-                            padding: '8px 14px',
+                            padding: '6px 12px',
                             textAlign: 'left',
-                            fontSize: 11,
+                            fontSize: 10,
                             fontWeight: 700,
                             color: selectedTarget === col ? BB.maroonLight : BB.text,
                             fontFamily: 'var(--font-mono)',
@@ -1849,14 +2017,14 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                             whiteSpace: 'nowrap',
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                             <span>{col}</span>
                             {selectedTarget === col && (
                               <span
                                 style={{
                                   fontSize: 8,
-                                  padding: '1px 4px',
-                                  borderRadius: 3,
+                                  padding: '1px 3px',
+                                  borderRadius: 2,
                                   background: 'rgba(110,20,35,0.25)',
                                   color: BB.maroonLight,
                                 }}
@@ -1880,10 +2048,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       >
                         <td
                           style={{
-                            padding: '6px 12px',
+                            padding: '5px 10px',
                             color: BB.disabled,
                             fontFamily: 'var(--font-mono)',
-                            fontSize: 10,
+                            fontSize: 9,
                             position: 'sticky',
                             left: 0,
                             background: rIdx % 2 === 0 ? BB.surface : BB.elevated,
@@ -1899,9 +2067,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                             <td
                               key={col}
                               style={{
-                                padding: '6px 14px',
+                                padding: '5px 12px',
                                 fontFamily: 'var(--font-mono)',
-                                fontSize: 11,
+                                fontSize: 10,
                                 color: isMissing ? BB.gold : BB.text,
                                 borderRight: `1px solid ${BB.border}`,
                                 whiteSpace: 'nowrap',
@@ -1920,144 +2088,148 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
           )}
         </div>
 
-        {/* ─────────────────────────────────────────────────────────────
-            D5: RESIZABLE AI COPILOT PANEL (Docked Right, 320–560px)
-            ───────────────────────────────────────────────────────────── */}
-        <div
-          style={{
-            position: 'relative',
-            width: copilotWidth,
-            flexShrink: 0,
-            background: BB.surface,
-            border: `1px solid ${BB.border}`,
-            borderRadius: 12,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {/* Left Edge Resize Handle (D5) */}
-          <div
-            onMouseDown={handleMouseDownResize}
-            title="Drag to resize Copilot panel"
-            style={{
-              position: 'absolute',
-              top: 0,
-              bottom: 0,
-              left: 0,
-              width: 6,
-              cursor: 'col-resize',
-              zIndex: 10,
-              background: isDraggingCopilot ? BB.primaryLight : 'transparent',
-              transition: 'background 150ms',
-            }}
-          />
-
-          {/* Copilot Header */}
+        {/* ── A4: DEDICATED RIGHT SIDE DRAWER FOR AI COPILOT ──────── */}
+        {isCopilotOpen && (
           <div
             style={{
-              padding: '12px 16px',
-              borderBottom: `1px solid ${BB.border}`,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: BB.elevated,
-            }}
-          >
-            <div
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: '50%',
-                background: `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 11,
-              }}
-            >
-              ✦
-            </div>
-            <span style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>AI Copilot</span>
-            <span
-              style={{
-                marginLeft: 'auto',
-                fontSize: 9,
-                fontWeight: 700,
-                padding: '2px 7px',
-                borderRadius: 20,
-                background: 'rgba(75,59,124,0.25)',
-                color: BB.primaryLight,
-                border: `1px solid rgba(107,92,166,0.30)`,
-                letterSpacing: '0.04em',
-                textTransform: 'uppercase',
-              }}
-            >
-              PROFILER AGENT
-            </span>
-          </div>
-
-          {/* Copilot Feed */}
-          <div
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: '14px 14px',
+              position: 'relative',
+              width: copilotWidth,
+              flexShrink: 0,
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: '10px',
+              overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column',
-              gap: 10,
+              boxSizing: 'border-box',
+              height: '100%',
             }}
           >
-            {copilotMsgs.map((msg) => (
-              <div
-                key={msg.id}
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: '8px 8px 8px 0',
-                  background:
-                    msg.type === 'warning' ? 'rgba(245,158,11,0.08)' : 'rgba(75,59,124,0.12)',
-                  border: `1px solid ${
-                    msg.type === 'warning' ? 'rgba(245,158,11,0.22)' : 'rgba(107,92,166,0.22)'
-                  }`,
-                  fontSize: 11,
-                  color: BB.muted,
-                  lineHeight: 1.5,
-                }}
-              >
-                {msg.text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
-                  part.startsWith('**') && part.endsWith('**') ? (
-                    <strong key={i} style={{ color: BB.text }}>
-                      {part.slice(2, -2)}
-                    </strong>
-                  ) : (
-                    part
-                  ),
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Copilot Input Stub */}
-          <div style={{ padding: '10px 12px', borderTop: `1px solid ${BB.border}` }}>
-            <input
-              placeholder="Ask about this dataset…"
-              disabled
+            {/* Left Edge Drag Handle */}
+            <div
+              onMouseDown={handleCopilotResizeMouseDown}
+              title="Drag to resize AI panel width"
               style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: 6,
-                border: `1px solid ${BB.border}`,
-                background: BB.elevated,
-                color: BB.muted,
-                fontSize: 11,
-                fontFamily: 'var(--font-ui)',
-                outline: 'none',
-                boxSizing: 'border-box',
-                cursor: 'not-allowed',
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: 0,
+                width: 6,
+                cursor: 'col-resize',
+                zIndex: 10,
+                background: isDraggingCopilot ? BB.primaryLight : 'transparent',
               }}
             />
+
+            {/* AI Panel Header */}
+            <div
+              style={{
+                padding: '10px 12px',
+                borderBottom: `1px solid ${BB.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: BB.elevated,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: BB.text }}>AI Copilot</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span
+                  style={{
+                    fontSize: 8,
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: 10,
+                    background: 'rgba(75,59,124,0.25)',
+                    color: BB.primaryLight,
+                    border: `1px solid rgba(107,92,166,0.30)`,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  AGENT
+                </span>
+                <button
+                  onClick={onToggleCopilot}
+                  title="Close AI Copilot"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: BB.muted,
+                    cursor: 'pointer',
+                    padding: 2,
+                  }}
+                >
+                  <X style={{ width: 14, height: 14 }} />
+                </button>
+              </div>
+            </div>
+
+            {/* AI Insights & Message Feed */}
+            <div
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '10px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}
+            >
+              {copilotMsgs.map((msg) => (
+                <div
+                  key={msg.id}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    background:
+                      msg.type === 'warning' ? 'rgba(245,158,11,0.08)' : 'rgba(75,59,124,0.12)',
+                    border: `1px solid ${
+                      msg.type === 'warning' ? 'rgba(245,158,11,0.22)' : 'rgba(107,92,166,0.22)'
+                    }`,
+                    fontSize: 10,
+                    color: BB.muted,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {msg.text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
+                    part.startsWith('**') && part.endsWith('**') ? (
+                      <strong key={i} style={{ color: BB.text }}>
+                        {part.slice(2, -2)}
+                      </strong>
+                    ) : (
+                      part
+                    ),
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Input Stub */}
+            <div style={{ padding: '8px 10px', borderTop: `1px solid ${BB.border}` }}>
+              <input
+                placeholder="Ask about this dataset…"
+                disabled
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 5,
+                  border: `1px solid ${BB.border}`,
+                  background: BB.elevated,
+                  color: BB.muted,
+                  fontSize: 10,
+                  fontFamily: 'var(--font-ui)',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  cursor: 'not-allowed',
+                }}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
@@ -2083,20 +2255,18 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
             style={{
               background: BB.surface,
               border: `1px solid ${BB.border}`,
-              borderRadius: 14,
+              borderRadius: 12,
               width: '100%',
-              maxWidth: 520,
+              maxWidth: 480,
               boxShadow: '0 20px 48px rgba(0,0,0,0.6)',
               overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column',
-              animation: 'scaleIn 150ms ease-out',
             }}
           >
-            {/* Modal Header */}
             <div
               style={{
-                padding: '16px 20px',
+                padding: '14px 18px',
                 borderBottom: `1px solid ${BB.border}`,
                 display: 'flex',
                 alignItems: 'center',
@@ -2107,10 +2277,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <QualityScoreRing score={qualityBreakdown.score} />
                 <div>
-                  <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: BB.text }}>
+                  <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: BB.text }}>
                     Data Quality Score Audit
                   </h3>
-                  <span style={{ fontSize: 11, color: BB.muted }}>
+                  <span style={{ fontSize: 10, color: BB.muted }}>
                     Grade: <strong style={{ color: getQualityColor(qualityBreakdown.score) }}>{qualityBreakdown.grade}</strong> (
                     {qualityBreakdown.score}/100)
                   </span>
@@ -2126,34 +2296,33 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   padding: 4,
                 }}
               >
-                <X style={{ width: 16, height: 16 }} />
+                <X style={{ width: 14, height: 14 }} />
               </button>
             </div>
 
-            {/* Modal Body: Itemized Deductions (C4) */}
-            <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ fontSize: 12, color: BB.muted, lineHeight: 1.5 }}>
-                Starting from a baseline score of <strong>100 points</strong>, the Quality Engine calculates itemized deductions based on dataset health metrics:
+            <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 11, color: BB.muted, lineHeight: 1.45 }}>
+                Base score of <strong>100 points</strong> with itemized deductions computed from data profiling:
               </div>
 
               <div
                 style={{
                   background: BB.base,
                   border: `1px solid ${BB.border}`,
-                  borderRadius: 8,
-                  padding: '10px 14px',
+                  borderRadius: 7,
+                  padding: '8px 12px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 8,
+                  gap: 6,
                 }}
               >
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    fontSize: 11,
+                    fontSize: 10,
                     borderBottom: `1px solid ${BB.border}`,
-                    paddingBottom: 6,
+                    paddingBottom: 4,
                     color: BB.muted,
                   }}
                 >
@@ -2168,13 +2337,13 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       display: 'flex',
                       alignItems: 'flex-start',
                       justifyContent: 'space-between',
-                      fontSize: 11,
-                      gap: 10,
+                      fontSize: 10,
+                      gap: 8,
                     }}
                   >
                     <div>
                       <div style={{ color: BB.text, fontWeight: 600 }}>{d.reason}</div>
-                      <div style={{ fontSize: 10, color: BB.muted }}>{d.details}</div>
+                      <div style={{ fontSize: 9, color: BB.muted }}>{d.details}</div>
                     </div>
                     <span style={{ color: BB.maroonLight, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
                       −{d.points} pts
@@ -2183,9 +2352,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                 ))}
 
                 {qualityBreakdown.deductions.length === 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: BB.success }}>
-                    <CheckCircle2 style={{ width: 14, height: 14 }} />
-                    <span>No deductions applied — dataset is in pristine condition.</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: BB.success }}>
+                    <CheckCircle2 style={{ width: 12, height: 12 }} />
+                    <span>No deductions — dataset is in clean condition.</span>
                   </div>
                 )}
 
@@ -2193,10 +2362,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    fontSize: 12,
+                    fontSize: 11,
                     borderTop: `1px solid ${BB.border}`,
-                    paddingTop: 8,
-                    marginTop: 4,
+                    paddingTop: 6,
+                    marginTop: 2,
                   }}
                 >
                   <strong style={{ color: BB.text }}>Final Quality Score</strong>
@@ -2212,10 +2381,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
               </div>
             </div>
 
-            {/* Modal Footer */}
             <div
               style={{
-                padding: '12px 20px',
+                padding: '10px 18px',
                 borderTop: `1px solid ${BB.border}`,
                 display: 'flex',
                 justifyContent: 'flex-end',
@@ -2225,12 +2393,12 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
               <button
                 onClick={() => setShowScoreModal(false)}
                 style={{
-                  padding: '6px 16px',
-                  borderRadius: 6,
+                  padding: '5px 14px',
+                  borderRadius: 5,
                   border: 'none',
                   background: BB.primary,
                   color: BB.text,
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: 600,
                   cursor: 'pointer',
                 }}

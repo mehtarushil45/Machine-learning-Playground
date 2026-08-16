@@ -10,19 +10,38 @@ ALLOWED_ALGORITHMS = {
     "logistic regression",
     "random forest classifier",
     "random forest",
+    "decision tree classifier",
+    "decision tree",
     "gradient boosting classifier",
     "gradient boosting",
     "xgboost classifier",
     "xgboost",
     "lightgbm classifier",
     "lightgbm",
+    "support vector machine (svm)",
+    "svm classifier",
+    "svm",
+    "k-nearest neighbors (knn)",
+    "knn classifier",
+    "knn",
+    "multi-layer perceptron (mlp)",
+    "mlp classifier",
+    "mlp",
     "ridge classifier",
     "ridge",
+    "lasso classifier",
     "linear regression",
     "random forest regressor",
+    "decision tree regressor",
     "gradient boosting regressor",
     "xgboost regressor",
     "lightgbm regressor",
+    "support vector regression (svr)",
+    "svr regressor",
+    "k-nearest neighbors regressor (knn)",
+    "knn regressor",
+    "multi-layer perceptron regressor (mlp)",
+    "mlp regressor",
     "ridge regressor",
     "lasso",
     "lasso regressor",
@@ -53,10 +72,13 @@ class TrainingRequest(BaseModel):
     target_column: str = Field(..., description="Target column variable name")
     feature_columns: list[str] = Field(..., description="List of feature column names")
     algorithm: str = Field("Random Forest Classifier", description="ML model algorithm")
+    scaler: str | None = Field("StandardScaler", description="Feature scaling strategy")
+    imputer: str | None = Field("Median", description="Missing value imputation strategy")
     train_test_split: float = Field(0.8, description="Train / Test split ratio (0.5 to 0.95)")
     random_seed: int | None = Field(42, description="Random seed for reproducibility")
     cross_validation: int | None = Field(5, description="Cross validation folds count")
-    normalization: bool | None = Field(True, description="Apply StandardScaler normalization")
+    cv_n_splits: int | None = Field(None, description="Alias for cross validation folds count")
+    normalization: bool | None = Field(True, description="Apply StandardScaler normalization (backward-compatible)")
     feature_selection: str | None = Field("all", description="Feature selection strategy")
     class_weight: str | None = Field("balanced", description="Class weighting mode")
     notes: str | None = Field("", description="Optional user notes")

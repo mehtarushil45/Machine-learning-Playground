@@ -1,38 +1,34 @@
-"""Automatic Preprocessing Pipeline — Sprint 3 Module 3.2.
+"""Automatic Preprocessing Pipeline.
 
 Builds a fully automatic scikit-learn preprocessing pipeline from a
-DatasetContext, with no hardcoded column names.
+DatasetContext, with configurable scalers and imputation strategies.
 
 Supported column kinds:
-  - numeric   → median imputation → optional StandardScaler
-  - categorical / text / identifier → mode imputation → OneHotEncoder
-  - boolean   → mode imputation → ordinal integer mapping (0/1)
-  - datetime  → numeric timestamp extraction (Unix epoch float)
+  - numeric   → configurable numeric imputer → configurable scaler
+  - categorical / text / identifier → mode imputer → OneHotEncoder
+  - boolean   → mode imputer → ordinal integer mapping (0/1) → optional scaler
+  - datetime  → mode imputer → numeric timestamp extraction (Unix epoch float) → optional scaler
   - target    → separated before preprocessing (not transformed here)
-
-Design decisions:
-- build_preprocessor() is a pure factory function that returns a fitted-ready
-  ColumnTransformer.  It does NOT fit — fitting happens inside the training
-  pipeline so train/test leakage is impossible.
-- Boolean columns are mapped to integers via a FunctionTransformer before being
-  passed to a numeric pipeline — this avoids sparse OHE output for flags.
-- Datetime columns are converted to float Unix timestamps so the model sees
-  ordinal time information without leaking string formats.
-- The returned ColumnTransformer uses remainder="drop" to silently ignore any
-  columns not in the schema (e.g. future schema drift).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
+from sklearn.impute import KNNImputer, SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
+from sklearn.preprocessing import (
+    FunctionTransformer,
+    MaxAbsScaler,
+    MinMaxScaler,
+    OneHotEncoder,
+    RobustScaler,
+    StandardScaler,
+)
 
 from app.ml.dataset_loader import DatasetContext
 
@@ -40,7 +36,71 @@ logger = logging.getLogger("apex_ml.preprocessing")
 
 
 # ---------------------------------------------------------------------------
-# Datetime helper
+# Scaler & Imputer Registries
+# ---------------------------------------------------------------------------
+
+def _create_scaler(scaler_name: Optional[str]) -> Optional[Any]:
+    """Instantiate a scaler based on human-readable or canonical name."""
+    if not scaler_name:
+        return None
+    key = scaler_name.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+    if key in ("standardscaler", "standard", "zscore", "true"):
+        return StandardScaler()
+    if key in ("minmaxscaler", "minmax", "min_max"):
+        return MinMaxScaler()
+    if key in ("robustscaler", "robust"):
+        return RobustScaler()
+    if key in ("maxabsscaler", "maxabs"):
+        return MaxAbsScaler()
+    if key in ("none", "raw", "passthrough", "false"):
+        return None
+    logger.warning("Unrecognised scaler '%s'; defaulting to StandardScaler.", scaler_name)
+    return StandardScaler()
+
+
+def _create_numeric_imputer(imputer_name: Optional[str]) -> Any:
+    """Instantiate an imputer for numeric columns."""
+    if not imputer_name:
+        return SimpleImputer(strategy="median")
+    key = imputer_name.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+    if key in ("median",):
+        return SimpleImputer(strategy="median")
+    if key in ("mean", "average"):
+        return SimpleImputer(strategy="mean")
+    if key in ("mostfrequent", "mode"):
+        return SimpleImputer(strategy="most_frequent")
+    if key in ("constant", "constant(0)", "zero", "0", "fill0"):
+        return SimpleImputer(strategy="constant", fill_value=0.0)
+    if key in ("knnimputer", "knn"):
+        return KNNImputer(n_neighbors=5)
+    logger.warning("Unrecognised numeric imputer '%s'; defaulting to median.", imputer_name)
+    return SimpleImputer(strategy="median")
+
+
+def list_supported_scalers() -> List[Dict[str, str]]:
+    """Return list of supported scaler options with human-readable labels."""
+    return [
+        {"value": "StandardScaler", "label": "StandardScaler (Zero mean, Unit variance)"},
+        {"value": "MinMaxScaler", "label": "MinMaxScaler (0 to 1 range)"},
+        {"value": "RobustScaler", "label": "RobustScaler (IQR outlier-resistant)"},
+        {"value": "MaxAbsScaler", "label": "MaxAbsScaler (Scale by absolute maximum)"},
+        {"value": "None", "label": "None (Raw features)"},
+    ]
+
+
+def list_supported_imputers() -> List[Dict[str, str]]:
+    """Return list of supported imputer options with human-readable labels."""
+    return [
+        {"value": "Median", "label": "Median (Robust for skewed numerics)"},
+        {"value": "Mean", "label": "Mean (Standard continuous)"},
+        {"value": "Most Frequent", "label": "Most Frequent (Categorical mode)"},
+        {"value": "Constant (0)", "label": "Constant (Fill 0 / default)"},
+        {"value": "KNN Imputer", "label": "KNN Imputer (K-Nearest Neighbors)"},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Datetime & Boolean helpers
 # ---------------------------------------------------------------------------
 
 def _cast_to_object(X: np.ndarray) -> np.ndarray:
@@ -51,12 +111,7 @@ def _cast_to_object(X: np.ndarray) -> np.ndarray:
 
 
 def _to_unix_timestamp(X: np.ndarray | pd.DataFrame) -> np.ndarray:
-    """Convert a 2-D array / DataFrame of datetime strings to float Unix timestamps using vectorized pandas operations.
-
-    Handles edge cases gracefully:
-    - None, NaN, pd.NA, empty strings, and invalid datetime strings are coerced to NaT and assigned 0.0.
-    - Preserves 2-D shape and returns float64 Unix timestamps.
-    """
+    """Convert a 2-D array / DataFrame of datetime strings to float Unix timestamps using vectorized pandas operations."""
     if not isinstance(X, pd.DataFrame):
         df = pd.DataFrame(X)
     else:
@@ -68,9 +123,7 @@ def _to_unix_timestamp(X: np.ndarray | pd.DataFrame) -> np.ndarray:
     cols = []
     for col in df.columns:
         dt_series = pd.to_datetime(df[col], errors="coerce", utc=True)
-        # Convert to seconds resolution datetime64[s, UTC] then int64 for exact Unix seconds
         ts_sec = dt_series.astype("datetime64[s, UTC]").astype("int64").astype(np.float64)
-        # Coerced NaT values become negative int64 min value after cast; replace with 0.0
         ts_sec = ts_sec.where(dt_series.notna(), 0.0)
         cols.append(ts_sec.to_numpy(dtype=np.float64))
 
@@ -90,7 +143,6 @@ def _bool_to_int(X: np.ndarray) -> np.ndarray:
                 result[row_idx, col_idx] = float(bool(val))
             elif isinstance(val, str):
                 result[row_idx, col_idx] = 1.0 if val.strip().lower() in _true_set else 0.0
-            # else: stays 0.0
     return result
 
 
@@ -101,14 +153,17 @@ def _bool_to_int(X: np.ndarray) -> np.ndarray:
 def build_preprocessor(
     ctx: DatasetContext,
     use_scaling: bool = True,
+    scaler: Optional[str] = None,
+    imputer: Optional[str] = None,
 ) -> ColumnTransformer:
     """Construct an unfitted ColumnTransformer for *ctx*.
 
     Args:
         ctx: A :class:`~app.ml.dataset_loader.DatasetContext` describing the
              dataset's column schema.
-        use_scaling: If ``True``, a :class:`~sklearn.preprocessing.StandardScaler`
-             is appended to the numeric sub-pipeline.
+        use_scaling: Boolean flag for backward compatibility. If False, overrides scaler to None.
+        scaler: Human-readable or canonical scaler name (e.g. "MinMaxScaler", "RobustScaler", "StandardScaler", "None").
+        imputer: Human-readable or canonical imputer name (e.g. "Median", "Mean", "Most Frequent", "Constant (0)", "KNN Imputer").
 
     Returns:
         An unfitted :class:`~sklearn.compose.ColumnTransformer` ready to be
@@ -117,11 +172,16 @@ def build_preprocessor(
     """
     transformers: List = []
 
+    # Determine effective scaler instance
+    effective_scaler_name = scaler if use_scaling else "None"
+    scaler_instance = _create_scaler(effective_scaler_name)
+    numeric_imputer_instance = _create_numeric_imputer(imputer)
+
     # ── Numeric columns ───────────────────────────────────────────────────────
     if ctx.numeric_columns:
-        num_steps = [("imputer", SimpleImputer(strategy="median"))]
-        if use_scaling:
-            num_steps.append(("scaler", StandardScaler()))
+        num_steps = [("imputer", numeric_imputer_instance)]
+        if scaler_instance is not None:
+            num_steps.append(("scaler", scaler_instance))
         transformers.append(
             ("numeric", Pipeline(steps=num_steps), ctx.numeric_columns)
         )
@@ -140,14 +200,13 @@ def build_preprocessor(
 
     # ── Boolean columns ───────────────────────────────────────────────────────
     if ctx.boolean_columns:
-        # SimpleImputer rejects pandas bool dtype — cast to object first.
         bool_steps = [
             ("cast_obj", FunctionTransformer(_cast_to_object, validate=False)),
             ("imputer", SimpleImputer(strategy="most_frequent")),
             ("to_int", FunctionTransformer(_bool_to_int, validate=False)),
         ]
-        if use_scaling:
-            bool_steps.append(("scaler", StandardScaler()))
+        if scaler_instance is not None:
+            bool_steps.append(("scaler", scaler_instance))
         transformers.append(
             ("boolean", Pipeline(steps=bool_steps), ctx.boolean_columns)
         )
@@ -159,8 +218,8 @@ def build_preprocessor(
             ("imputer", SimpleImputer(strategy="most_frequent")),
             ("to_ts", FunctionTransformer(_to_unix_timestamp, validate=False)),
         ]
-        if use_scaling:
-            dt_steps.append(("scaler", StandardScaler()))
+        if scaler_instance is not None:
+            dt_steps.append(("scaler", scaler_instance))
         transformers.append(
             ("datetime", Pipeline(steps=dt_steps), ctx.datetime_columns)
         )
@@ -174,12 +233,14 @@ def build_preprocessor(
 
     preprocessor = ColumnTransformer(
         transformers=transformers,
-        remainder="drop",   # unknown/unexpected columns are silently ignored
+        remainder="drop",
         verbose_feature_names_out=False,
     )
 
     logger.info(
-        "Built preprocessing pipeline: %d transformer group(s) covering %d feature(s).",
+        "Built preprocessing pipeline (scaler=%s, imputer=%s): %d transformer group(s) covering %d feature(s).",
+        type(scaler_instance).__name__ if scaler_instance else "None",
+        type(numeric_imputer_instance).__name__,
         len(transformers),
         len(ctx.feature_columns),
     )

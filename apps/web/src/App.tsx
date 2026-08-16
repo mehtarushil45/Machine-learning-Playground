@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { useAuthContext, getInitials } from './providers/AuthContext';
+import { useState } from 'react';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 import {
@@ -9,15 +8,11 @@ import {
   GraduationCap,
   Rocket,
   Award,
-  ChevronLeft,
-  ChevronRight,
+  Search,
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider } from './providers/AuthContext';
 import { ProjectProvider, useProject } from './providers/ProjectContext';
-import { SidebarUserAvatar } from './components/layout/SidebarUserAvatar';
-import { LifecycleRail } from './components/layout/LifecycleRail';
-import { NotificationBell } from './components/notifications/NotificationBell';
 import { Toast } from './components/ui/Toast';
 import { useLatestModel } from './hooks/useLatestModel';
 import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
@@ -56,21 +51,17 @@ const BB = {
   text:          '#F5F1EC',
   muted:         '#9E93B8',
   disabled:      '#3D3558',
-  // Group label
-  groupLabel:    '#5E5480',
 } as const;
 
 function AppContent() {
   const latestModel = useLatestModel();
-  const { user, isAuthenticated } = useAuthContext();
-  const { lifecycleStage, setLifecycleStage } = useProject();
-  const headerInitials = isAuthenticated
-    ? getInitials(user?.full_name, user?.email)
-    : 'ML';
+  const { setLifecycleStage } = useProject();
 
-  const [activeTab, setActiveTab]           = useState<PlatformTab>('workspace');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [toasts, setToasts]                 = useState<ToastMessage[]>([]);
+  const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [hoveredNav, setHoveredNav] = useState<string | null>(null);
+  const [globalSearch, setGlobalSearch] = useState<string>('');
+  const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
 
   const showToast = (
     title: string,
@@ -79,16 +70,15 @@ function AppContent() {
   ) => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, title, description, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3500);
   };
 
-  /** Navigate to a tab — also keeps lifecycleStage in sync */
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
   const handleNavigate = (tab: PlatformTab) => {
     setActiveTab(tab);
-    // Map tab → lifecycle stage for the LifecycleRail
-    const tabToStage: Record<PlatformTab, typeof lifecycleStage> = {
+    const tabToStage: Record<PlatformTab, any> = {
       workspace:      'dataset',
       'code-studio':  'pipeline',
       explainability: 'evaluate',
@@ -96,221 +86,163 @@ function AppContent() {
       deployments:    'deploy',
       portfolios:     'certify',
     };
-    setLifecycleStage(tabToStage[tab]);
+    if (tabToStage[tab]) {
+      setLifecycleStage(tabToStage[tab]);
+    }
   };
 
-  // Keyboard shortcuts (⌘1–⌘6, ⌘B)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
-        if (e.key === '1') { e.preventDefault(); handleNavigate('workspace'); }
-        if (e.key === '2') { e.preventDefault(); handleNavigate('code-studio'); }
-        if (e.key === '3') { e.preventDefault(); handleNavigate('explainability'); }
-        if (e.key === '4') { e.preventDefault(); handleNavigate('classrooms'); }
-        if (e.key === '5') { e.preventDefault(); handleNavigate('deployments'); }
-        if (e.key === '6') { e.preventDefault(); handleNavigate('portfolios'); }
-        if (e.key === 'b') { e.preventDefault(); setIsSidebarCollapsed((prev) => !prev); }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const navItems: { id: PlatformTab; label: string; icon: React.ReactNode; group: string }[] = [
-    { id: 'workspace',      label: 'Dataset & Profiler',        icon: <Database className="w-4 h-4" />,      group: 'DATA LAB' },
-    { id: 'code-studio',    label: 'View-as-Code Studio',       icon: <Code2 className="w-4 h-4" />,          group: 'DATA LAB' },
-    { id: 'explainability', label: 'Explainability & Ethics',   icon: <Sparkles className="w-4 h-4" />,       group: 'EVALUATION' },
-    { id: 'classrooms',     label: 'Classrooms & Audit',        icon: <GraduationCap className="w-4 h-4" />,  group: 'EVALUATION' },
-    { id: 'deployments',    label: 'Deployment Studio',         icon: <Rocket className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
-    { id: 'portfolios',     label: 'Portfolios & Verification',  icon: <Award className="w-4 h-4" />,         group: 'OPS & DEPLOY' },
+  const navItems = [
+    { id: 'workspace',      label: 'Dataset & Profiler',        icon: <Database className="w-5 h-5" /> },
+    { id: 'code-studio',    label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" /> },
+    { id: 'explainability', label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" /> },
+    { id: 'classrooms',     label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" /> },
+    { id: 'deployments',    label: 'Deployment Studio',         icon: <Rocket className="w-5 h-5" /> },
+    { id: 'portfolios',     label: 'Portfolios & Verification',  icon: <Award className="w-5 h-5" /> },
   ];
-
-  const groups = Array.from(new Set(navItems.map((n) => n.group)));
-
-  const breadcrumbLabels: Record<PlatformTab, string> = {
-    workspace:      'Dataset Profiling & Model Training',
-    'code-studio':  'Bi-Directional View-as-Code Studio',
-    explainability: 'Explainability, Bias Audit & What-If',
-    classrooms:     'Classroom & Submission Reproducibility Audit',
-    deployments:    '1-Click REST Deployments & Web Widgets',
-    portfolios:     'Learner Portfolios & Cryptographic QR Verification',
-  };
 
   return (
     <div
       className="flex h-screen w-screen overflow-hidden antialiased"
       style={{
-        /* BB canvas: very faint blueberry dot grid */
         backgroundColor: BB.base,
-        backgroundImage: 'radial-gradient(rgba(107,92,166,0.07) 1px, transparent 1px)',
-        backgroundSize: '32px 32px',
-        fontFamily: 'var(--font-ui)',
         color: BB.text,
+        fontFamily: 'var(--font-ui)',
       }}
     >
-      {/* ── 1. SIDEBAR ────────────────────────────────────────────── */}
+      {/* ── 1. COMPACT ICON-ONLY SIDEBAR (A1, A3, A5) ──────────────── */}
       <aside
         style={{
-          width: isSidebarCollapsed ? 64 : 240,
+          width: 58,
           backgroundColor: BB.surface,
           borderRight: `1px solid ${BB.border}`,
           flexShrink: 0,
           display: 'flex',
           flexDirection: 'column',
-          transition: 'width 300ms cubic-bezier(0.4,0,0.2,1)',
+          alignItems: 'center',
           zIndex: 30,
         }}
       >
-        {/* Logo row */}
+        {/* Brand Mark Icon Only (A1: ML Lab text removed) */}
         <div
           style={{
-            height: 56,
+            height: 48,
+            width: '100%',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0 16px',
+            justifyContent: 'center',
             borderBottom: `1px solid ${BB.border}`,
             flexShrink: 0,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
-            {/* Thread-node brand mark */}
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 22 22"
-              fill="none"
-              style={{ flexShrink: 0 }}
-            >
-              <circle cx="11" cy="11" r="4" fill={BB.maroon} />
-              <circle cx="3"  cy="3"  r="2" fill={BB.primary} />
-              <circle cx="19" cy="3"  r="2" fill={BB.primary} />
-              <circle cx="3"  cy="19" r="2" fill={BB.primary} />
-              <line x1="5"  y1="5"  x2="8.2"  y2="8.2"  stroke={BB.border} strokeWidth="1" />
-              <line x1="17" y1="5"  x2="13.8" y2="8.2"  stroke={BB.border} strokeWidth="1" />
-              <line x1="5"  y1="17" x2="8.2"  y2="13.8" stroke={BB.border} strokeWidth="1" />
-            </svg>
-
-            {!isSidebarCollapsed && (
-              <span
-                style={{
-                  fontFamily: 'var(--font-display)',
-                  fontWeight: 700,
-                  fontSize: '1rem',
-                  letterSpacing: '-0.01em',
-                  color: BB.text,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                ML Lab
-              </span>
-            )}
-          </div>
-
-          <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="btn-icon"
-            title="Toggle Sidebar (⌘B)"
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 22 22"
+            fill="none"
             style={{ flexShrink: 0 }}
           >
-            {isSidebarCollapsed
-              ? <ChevronRight className="w-4 h-4" style={{ color: BB.muted }} />
-              : <ChevronLeft  className="w-4 h-4" style={{ color: BB.muted }} />}
-          </button>
+            <circle cx="11" cy="11" r="4" fill={BB.maroon} />
+            <circle cx="3"  cy="3"  r="2" fill={BB.primary} />
+            <circle cx="19" cy="3"  r="2" fill={BB.primary} />
+            <circle cx="3"  cy="19" r="2" fill={BB.primary} />
+            <line x1="5"  y1="5"  x2="8.2"  y2="8.2"  stroke={BB.border} strokeWidth="1" />
+            <line x1="17" y1="5"  x2="13.8" y2="8.2"  stroke={BB.border} strokeWidth="1" />
+            <line x1="5"  y1="17" x2="8.2"  y2="13.8" stroke={BB.border} strokeWidth="1" />
+          </svg>
         </div>
 
-        {/* Nav groups */}
-        <nav style={{ flex: 1, overflowY: 'auto', padding: '16px 10px' }}>
-          {groups.map((group, gi) => (
-            <div key={group} style={{ marginBottom: gi < groups.length - 1 ? 24 : 0 }}>
-              {!isSidebarCollapsed && (
-                <div
-                  style={{
-                    padding: '0 10px',
-                    marginBottom: 6,
-                    fontSize: 9,
-                    fontWeight: 700,
-                    letterSpacing: '0.14em',
-                    textTransform: 'uppercase',
-                    color: BB.groupLabel,
-                    fontFamily: 'var(--font-ui)',
-                  }}
-                >
-                  {group}
-                </div>
-              )}
-              {navItems
-                .filter((item) => item.group === group)
-                .map((item) => {
-                  const isActive = activeTab === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => handleNavigate(item.id)}
-                      title={isSidebarCollapsed ? item.label : undefined}
-                      style={{
-                        width: '100%',
-                        height: 40,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        padding: '0 10px',
-                        paddingLeft: isActive ? 8 : 10,
-                        marginBottom: 2,
-                        background: isActive ? 'rgba(107,92,166,0.09)' : 'transparent',
-                        border: 'none',
-                        // Maroon 2px left border for active state — the signature BB motif
-                        borderLeft: `2px solid ${isActive ? BB.maroon : 'transparent'}`,
-                        borderRadius: '0 6px 6px 0',
-                        color: isActive ? BB.text : BB.muted,
-                        fontFamily: 'var(--font-ui)',
-                        fontSize: 12,
-                        fontWeight: isActive ? 500 : 400,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        transition: 'all 150ms',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = 'rgba(107,92,166,0.06)'
-                          e.currentTarget.style.color = BB.text
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = 'transparent'
-                          e.currentTarget.style.color = BB.muted
-                        }
-                      }}
-                    >
-                      <span style={{ color: isActive ? BB.primaryLight : BB.disabled, flexShrink: 0 }}>
-                        {item.icon}
-                      </span>
-                      {!isSidebarCollapsed && (
-                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {item.label}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-            </div>
-          ))}
-        </nav>
-
-        {/* User avatar at bottom */}
-        <div
+        {/* Navigation Icons with Hover Tooltips (A3) */}
+        <nav
           style={{
-            padding: '12px 10px',
-            borderTop: `1px solid ${BB.border}`,
-            background: BB.surface,
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 10,
+            padding: '16px 0',
+            width: '100%',
           }}
         >
-          <SidebarUserAvatar isCollapsed={isSidebarCollapsed} />
-        </div>
+          {navItems.map((item) => {
+            const isActive = activeTab === item.id;
+            const isHovered = hoveredNav === item.id;
+
+            return (
+              <div
+                key={item.id}
+                style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}
+                onMouseEnter={() => setHoveredNav(item.id)}
+                onMouseLeave={() => setHoveredNav(null)}
+              >
+                <button
+                  onClick={() => handleNavigate(item.id as PlatformTab)}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 8,
+                    background: isActive
+                      ? 'rgba(107,92,166,0.18)'
+                      : isHovered
+                      ? 'rgba(107,92,166,0.10)'
+                      : 'transparent',
+                    border: `1px solid ${isActive ? BB.primaryLight : 'transparent'}`,
+                    color: isActive ? BB.text : isHovered ? BB.text : BB.muted,
+                    cursor: 'pointer',
+                    transition: 'all 150ms ease',
+                    position: 'relative',
+                  }}
+                >
+                  {/* Left maroon active indicator bar */}
+                  {isActive && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        left: -8,
+                        top: 8,
+                        bottom: 8,
+                        width: 3,
+                        borderRadius: '0 3px 3px 0',
+                        background: BB.maroon,
+                      }}
+                    />
+                  )}
+                  {item.icon}
+                </button>
+
+                {/* White font hover tooltip (A3) */}
+                {isHovered && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: 54,
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      backgroundColor: '#1B1530',
+                      color: '#FFFFFF',
+                      fontSize: 11,
+                      fontWeight: 500,
+                      padding: '5px 10px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(107,92,166,0.35)',
+                      boxShadow: '0 6px 16px rgba(0,0,0,0.5)',
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'none',
+                      zIndex: 9999,
+                      letterSpacing: '0.02em',
+                    }}
+                  >
+                    {item.label}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+
+        {/* A5: Account button removed from bottom left for temporary purpose */}
       </aside>
 
       {/* ── 2. MAIN CANVAS ─────────────────────────────────────────── */}
@@ -319,58 +251,93 @@ function AppContent() {
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'visible',   // ← was 'hidden': caused header popovers (NotificationBell) to be clipped
-          minWidth: 0,           // prevent flex blowout
+          minWidth: 0,
           background: 'rgba(11,9,18,0.92)',
+          height: '100vh',
         }}
       >
-        {/* Top header — 56px */}
+        {/* Top header — 48px clean bar (A1, A4, C3) */}
         <header
           style={{
-            height: 56,
+            height: 48,
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 24px',
+            padding: '0 16px',
             backgroundColor: 'rgba(11,9,18,0.88)',
             backdropFilter: 'blur(12px)',
             borderBottom: `1px solid ${BB.border}`,
+            gap: 16,
           }}
         >
-          {/* Breadcrumb + Lifecycle Rail */}
-          <div
-            style={{ display: 'flex', alignItems: 'center', gap: 16, fontFamily: 'var(--font-ui)', fontSize: 13, minWidth: 0, flex: 1 }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <span style={{ color: BB.muted }}>ML Playground</span>
-              <span style={{ color: BB.disabled }}>›</span>
-              <span
-                style={{
-                  color: BB.primaryLight,
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                {navItems.find((n) => n.id === activeTab)?.icon}
-                {breadcrumbLabels[activeTab]}
-              </span>
-            </div>
+          {/* Header left: Clean (A1: text removed) */}
+          <div style={{ width: 120, flexShrink: 0 }} />
 
-            {/* Lifecycle Rail — always visible, tracks active tab */}
-            <div style={{ flex: 1, minWidth: 0, marginLeft: 8 }}>
-              <LifecycleRail
-                currentStage={lifecycleStage}
-                onNavigate={handleNavigate}
-              />
-            </div>
+          {/* Header Center: C3 Global Search Bar */}
+          <div
+            style={{
+              flex: 1,
+              maxWidth: 440,
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <Search
+              style={{
+                position: 'absolute',
+                left: 10,
+                width: 14,
+                height: 14,
+                color: BB.muted,
+                pointerEvents: 'none',
+              }}
+            />
+            <input
+              type="text"
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              placeholder="Search datasets, models, pipelines... (Ctrl+K)"
+              style={{
+                width: '100%',
+                padding: '6px 36px 6px 32px',
+                borderRadius: 7,
+                border: `1px solid ${BB.border}`,
+                background: BB.surface,
+                color: BB.text,
+                fontSize: 11,
+                fontFamily: 'var(--font-ui)',
+                outline: 'none',
+                transition: 'border-color 150ms',
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = BB.primaryLight;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = BB.border;
+              }}
+            />
+            <span
+              style={{
+                position: 'absolute',
+                right: 8,
+                fontSize: 9,
+                color: BB.disabled,
+                padding: '1px 4px',
+                borderRadius: 3,
+                border: `1px solid ${BB.border}`,
+                background: BB.elevated,
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              ⌘K
+            </span>
           </div>
 
-          {/* Right controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            {/* Latest model pill — rendered when a real trained model exists */}
+          {/* Header Right: Active Model Pill + A4 AI Copilot Symbol */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            {/* Latest model pill */}
             {latestModel.hasModel && latestModel.displayText ? (
               <button
                 onClick={() => latestModel.refetch()}
@@ -379,10 +346,10 @@ function AppContent() {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 7,
-                  padding: '5px 12px',
+                  padding: '4px 10px',
                   background: 'transparent',
                   border: `1px solid ${BB.border}`,
-                  borderRadius: '8px 8px 0 8px',
+                  borderRadius: '6px',
                   color: BB.muted,
                   fontFamily: 'var(--font-ui)',
                   fontSize: 11,
@@ -390,15 +357,14 @@ function AppContent() {
                   transition: 'all 150ms',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = BB.primaryLight
-                  e.currentTarget.style.color = BB.text
+                  e.currentTarget.style.borderColor = BB.primaryLight;
+                  e.currentTarget.style.color = BB.text;
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = BB.border
-                  e.currentTarget.style.color = BB.muted
+                  e.currentTarget.style.borderColor = BB.border;
+                  e.currentTarget.style.color = BB.muted;
                 }}
               >
-                {/* Gold dot = healthy model */}
                 <span
                   className="w-2 h-2 rounded-full"
                   style={{ background: BB.gold, boxShadow: `0 0 6px ${BB.gold}99`, flexShrink: 0 }}
@@ -407,51 +373,61 @@ function AppContent() {
               </button>
             ) : null}
 
-            {/* Notification bell */}
-            <NotificationBell />
-
-            {/* User avatar pill */}
-            <div
+            {/* A4: AI Copilot on top of right side — Symbol only */}
+            <button
+              onClick={() => setIsCopilotOpen((prev) => !prev)}
+              title={isCopilotOpen ? 'Close AI Copilot' : 'Open AI Copilot'}
               style={{
-                width: 30,
-                height: 30,
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #4B3B7C, #6E1423)',
+                width: 32,
+                height: 32,
+                borderRadius: 7,
+                border: `1px solid ${isCopilotOpen ? BB.primaryLight : BB.border}`,
+                background: isCopilotOpen
+                  ? 'rgba(107,92,166,0.22)'
+                  : 'rgba(27,21,48,0.8)',
+                color: isCopilotOpen ? BB.text : BB.muted,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: BB.text,
-                fontSize: 11,
-                fontWeight: 700,
-                fontFamily: 'var(--font-ui)',
-                boxShadow: '0 0 0 2px rgba(107,92,166,0.30)',
-                userSelect: 'none',
-                cursor: 'default',
+                cursor: 'pointer',
+                transition: 'all 150ms',
               }}
-              title={user?.full_name || user?.email || 'User'}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = BB.primaryLight;
+                e.currentTarget.style.color = BB.text;
+              }}
+              onMouseLeave={(e) => {
+                if (!isCopilotOpen) {
+                  e.currentTarget.style.borderColor = BB.border;
+                  e.currentTarget.style.color = BB.muted;
+                }
+              }}
             >
-              {headerInitials}
-            </div>
+              <Sparkles className="w-4 h-4" style={{ color: isCopilotOpen ? BB.gold : 'inherit' }} />
+            </button>
           </div>
         </header>
 
-        {/* Main content area */}
+        {/* Main content area — Studio Canvas */}
         <main
           style={{
             flex: 1,
-            overflowY: 'auto',
-            padding: 24,
-            maxWidth: 1280,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            padding: 12,
             width: '100%',
-            margin: '0 auto',
+            height: 'calc(100vh - 48px)',
+            boxSizing: 'border-box',
           }}
-          className="space-y-8"
         >
           {activeTab === 'workspace' && (
             <ErrorBoundary key="workspace" onReset={() => handleNavigate('workspace')}>
               <DatasetProfilerPage
                 onShowToast={showToast}
                 onNavigate={handleNavigate}
+                isCopilotOpen={isCopilotOpen}
+                onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
               />
             </ErrorBoundary>
           )}
@@ -472,26 +448,38 @@ function AppContent() {
           )}
           {activeTab === 'deployments' && (
             <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
-              <DeploymentStudio onShowToast={showToast} />
+              <DeploymentStudio />
             </ErrorBoundary>
           )}
           {activeTab === 'portfolios' && (
             <ErrorBoundary key="portfolios" onReset={() => setActiveTab('workspace')}>
-              <PortfolioViewer onShowToast={showToast} />
+              <PortfolioViewer />
             </ErrorBoundary>
           )}
         </main>
       </div>
 
-      {/* ── 3. TOAST STACK ─────────────────────────────────────────── */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      {/* Global Toast notifications container */}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          zIndex: 99999,
+          maxWidth: 360,
+          pointerEvents: 'none',
+        }}
+      >
         {toasts.map((toast) => (
           <Toast
             key={toast.id}
-            variant={toast.type}
+            variant={toast.type === 'error' ? 'error' : toast.type === 'success' ? 'success' : 'info'}
             title={toast.title}
             description={toast.description}
-            onClose={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+            onClose={() => removeToast(toast.id)}
           />
         ))}
       </div>
@@ -499,9 +487,9 @@ function AppContent() {
   );
 }
 
-export default function App() {
+export function App() {
   return (
-    <ThemeProvider defaultTheme="system">
+    <ThemeProvider>
       <AuthProvider>
         <ProjectProvider>
           <AppContent />
@@ -510,3 +498,4 @@ export default function App() {
     </ThemeProvider>
   );
 }
+export default App;

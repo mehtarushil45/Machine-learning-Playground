@@ -87,7 +87,7 @@ export const TrainingJobCard = memo(function TrainingJobCard({
     if (result && onJobRetried) {
       const newJobEntity: JobEntity = {
         ...job,
-        job_id: result.new_job_id,
+        job_id: result.new_job_id || result.job_id || job.job_id,
         status: 'QUEUED',
         progress: 0,
         current_stage: 'Retrying training execution',
