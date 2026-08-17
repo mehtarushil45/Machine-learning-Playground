@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider } from './providers/AuthContext';
-import { ProjectProvider, useProject } from './providers/ProjectContext';
+import { ProjectProvider, useProject, type LifecycleStage } from './providers/ProjectContext';
 import { Toast } from './components/ui/Toast';
 import { useLatestModel } from './hooks/useLatestModel';
 import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
@@ -78,7 +78,7 @@ function AppContent() {
 
   const handleNavigate = (tab: PlatformTab) => {
     setActiveTab(tab);
-    const tabToStage: Record<PlatformTab, any> = {
+    const tabToStage: Record<PlatformTab, LifecycleStage> = {
       workspace:      'dataset',
       'code-studio':  'pipeline',
       explainability: 'evaluate',

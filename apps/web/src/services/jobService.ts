@@ -100,7 +100,7 @@ export async function deleteJob(jobId: string): Promise<boolean> {
 export interface JobProgressSSECallbacks {
   onProgress?: (progress: JobProgressInfo) => void
   onComplete?: (progress: JobProgressInfo) => void
-  onError?: (error: any) => void
+  onError?: (error: unknown) => void
 }
 
 /**
@@ -122,7 +122,7 @@ export function subscribeToJobProgressSSE(
   let eventSource: EventSource | null = null
   let reconnectAttempts = 0
   let isClosed = false
-  let reconnectTimer: any = null
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   function connect() {
     if (isClosed) return
