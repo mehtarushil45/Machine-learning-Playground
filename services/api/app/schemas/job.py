@@ -45,6 +45,14 @@ class TrainingRequest(BaseModel):
     feature_selection: str | None = Field("all", description="Feature selection strategy")
     class_weight: str | None = Field("balanced", description="Class weighting mode")
     notes: str | None = Field("", description="Optional user notes")
+    recommendation_job_id: str | None = Field(
+        None, description="Originating recommendation benchmark job ID for provenance tracking"
+    )
+    selection_source: str = Field(
+        "default",
+        pattern=r"^(recommended|manual|default)$",
+        description="Provenance of algorithm selection: 'recommended', 'manual', or 'default'",
+    )
 
     @field_validator("algorithm")
     @classmethod
@@ -67,15 +75,6 @@ class TrainingRequest(BaseModel):
             raise ValueError(f"Imputer '{imputer}' is not a published training option.")
         return imputer
 
-    @field_validator("feature_columns")
-    @classmethod
-    def validate_features(cls, features: list[str]) -> list[str]:
-        if not features or len(features) == 0:
-            raise ValueError("Feature list cannot be empty. Select at least one input feature.")
-        if len(features) != len(set(features)):
-            raise ValueError("Feature list contains duplicate column names.")
-        return features
-
     @field_validator("train_test_split")
     @classmethod
     def validate_split(cls, split: float) -> float:
@@ -84,18 +83,16 @@ class TrainingRequest(BaseModel):
         return split
 
     @model_validator(mode="after")
-    def validate_target_not_in_features(self) -> "TrainingRequest":
-        if self.target_column in self.feature_columns:
+    def validate_features_and_target(self) -> "TrainingRequest":
+        if self.feature_selection != "all" and (not self.feature_columns or len(self.feature_columns) == 0):
+            raise ValueError("Feature list cannot be empty. Select at least one input feature.")
+        if self.feature_columns and len(self.feature_columns) != len(set(self.feature_columns)):
+            raise ValueError("Feature list contains duplicate column names.")
+        if self.feature_columns and self.target_column in self.feature_columns:
             raise ValueError(
                 f"Target column '{self.target_column}' cannot be included inside feature columns."
             )
         return self
-
-    def model_post_init(self, __context: Any) -> None:
-        if self.target_column in self.feature_columns:
-            raise ValueError(
-                f"Target column '{self.target_column}' cannot be included inside feature columns."
-            )
 
 
 class JobResponse(BaseModel):

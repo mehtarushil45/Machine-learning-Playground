@@ -4,9 +4,68 @@ import type {
   DatasetRecommendations,
   TargetSuggestion,
   FeatureRecommendation,
+  SupportedAlgorithm,
+  SupportedAlgorithmsResponse,
+  RecommendationRequest,
+  RecommendationJobCreateResponse,
+  RecommendationJobDetail,
 } from '../types/dataset'
 
 import { apiClient } from './apiClient'
+
+/**
+ * Fetch supported algorithms catalog from the backend API.
+ */
+export async function fetchSupportedAlgorithms(
+  signal?: AbortSignal,
+): Promise<SupportedAlgorithm[]> {
+  const resp = await apiClient.get<SupportedAlgorithmsResponse>('/algorithms/supported', { signal })
+  return resp?.algorithms || []
+}
+
+/**
+ * Start or deduplicate an evidence-based algorithm recommendation benchmark job.
+ */
+export async function startRecommendation(
+  datasetId: string,
+  payload: RecommendationRequest,
+  signal?: AbortSignal,
+): Promise<RecommendationJobCreateResponse> {
+  return await apiClient.post<RecommendationJobCreateResponse>(
+    `/datasets/${datasetId}/recommendations`,
+    payload,
+    { signal },
+  )
+}
+
+/**
+ * Poll or fetch the status and candidate benchmarks of a recommendation job.
+ */
+export async function getRecommendationJob(
+  datasetId: string,
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<RecommendationJobDetail> {
+  return await apiClient.get<RecommendationJobDetail>(
+    `/datasets/${datasetId}/recommendations/${jobId}`,
+    { signal },
+  )
+}
+
+/**
+ * Cancel an in-flight recommendation job.
+ */
+export async function cancelRecommendation(
+  datasetId: string,
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<RecommendationJobDetail> {
+  return await apiClient.post<RecommendationJobDetail>(
+    `/datasets/${datasetId}/recommendations/${jobId}/cancel`,
+    {},
+    { signal },
+  )
+}
 
 export async function fetchDatasetRecommendations(
   datasetId: string,
@@ -96,7 +155,7 @@ export function computeClientRecommendations(
   let problem_type_reasoning = 'No explicit target variable specified; unsupervised feature clustering recommended.'
   // Training choices come from the API-backed registry. This offline analyzer
   // identifies the task only; it never owns a duplicate algorithm list.
-  let recommended_models: string[] = []
+  const recommended_models: string[] = []
 
   if (primaryTarget && primaryTarget.suggested_task === 'Classification') {
     recommended_problem_type = 'Classification'

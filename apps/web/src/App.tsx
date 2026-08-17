@@ -433,7 +433,7 @@ function AppContent() {
           )}
           {activeTab === 'code-studio' && (
             <ErrorBoundary key="code-studio" onReset={() => setActiveTab('workspace')}>
-              <ViewAsCodeStudio onShowToast={showToast} />
+              <ViewAsCodeStudio onShowToast={showToast} onNavigate={(tab) => setActiveTab(tab as PlatformTab)} />
             </ErrorBoundary>
           )}
           {activeTab === 'explainability' && (

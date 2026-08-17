@@ -28,9 +28,14 @@ from app.ml.algorithm_factory import (
     AlgorithmTaskMismatchError,
     get_algorithm,
 )
-from app.ml.dataset_loader import DatasetValidationError, load_dataset_context
+from app.ml.dataset_loader import (
+    DatasetValidationError,
+    find_dataset_path,
+    read_dataset_header,
+)
 from app.ml.problem_detector import ProblemType, detect_problem_type
 from app.models.job import Job
+from app.models.recommendation import RecommendationJob, RecommendationJobStatus
 from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
@@ -47,26 +52,89 @@ logger = logging.getLogger("apex_job_service")
 _JOBS_STORE: Dict[str, JobResponse] = {}
 
 
-def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
-    """Verify the selected algorithm matches the uploaded target before queuing work."""
+def _validate_dataset_schema_and_features(request: TrainingRequest) -> List[str]:
+    """Validate target and feature columns using only the CSV header (nrows=0) without loading full data."""
     try:
-        context = load_dataset_context(
-            dataset_id=request.dataset_id,
-            target_column=request.target_column,
-            feature_columns=request.feature_columns,
-        )
-    except (DatasetValidationError, FileNotFoundError) as exc:
+        header = read_dataset_header(request.dataset_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset '{request.dataset_id}' not found.",
+        ) from exc
+    except DatasetValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Training request cannot be validated: {exc}",
+            detail=str(exc),
         ) from exc
 
-    problem_type = detect_problem_type(context)
-    task_type = (
-        "classification"
-        if problem_type in (ProblemType.BINARY_CLASSIFICATION, ProblemType.MULTI_CLASSIFICATION)
-        else "regression"
-    )
+    if request.target_column not in header:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Target column '{request.target_column}' does not exist in dataset '{request.dataset_id}'. Available columns: {header}",
+        )
+
+    # Strategy: 'all' -> resolve all non-target columns server-side
+    if request.feature_selection == "all" and (not request.feature_columns or request.feature_columns == []):
+        resolved_features = [c for c in header if c != request.target_column]
+        if not resolved_features:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Dataset '{request.dataset_id}' has no usable feature columns after removing target '{request.target_column}'.",
+            )
+        request.feature_columns = resolved_features
+    else:
+        if not request.feature_columns or len(request.feature_columns) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Feature columns list cannot be empty.",
+            )
+
+        if request.target_column in request.feature_columns:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Target column '{request.target_column}' cannot be included inside feature columns.",
+            )
+
+        if len(request.feature_columns) != len(set(request.feature_columns)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Feature columns list contains duplicate names.",
+            )
+
+        missing_features = [c for c in request.feature_columns if c not in header]
+        if missing_features:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Requested feature column(s) not found in dataset '{request.dataset_id}': {missing_features}. Available columns: {header}",
+            )
+
+    return request.feature_columns
+
+
+def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
+    """Verify algorithm compatibility by inspecting target column sample (≤50 rows) without full data load."""
+    _validate_dataset_schema_and_features(request)
+
+    # Read lightweight sample of target column only
+    try:
+        file_path = find_dataset_path(request.dataset_id)
+        import pandas as pd
+        sample_df = pd.read_csv(file_path, usecols=[request.target_column], nrows=50)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unable to read dataset sample for validation: {exc}",
+        ) from exc
+
+    target_series = sample_df[request.target_column]
+    dtype_str = str(target_series.dtype)
+    n_unique = int(target_series.nunique(dropna=True))
+
+    if dtype_str in ("object", "category", "bool") or dtype_str.startswith("str") or n_unique <= 20:
+        task_type = "classification"
+    else:
+        task_type = "regression"
+
     try:
         get_algorithm(request.algorithm, task_type=task_type, random_state=request.random_seed or 42)
     except AlgorithmTaskMismatchError as exc:
@@ -78,11 +146,121 @@ def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
     return ALGORITHM_REGISTRY[request.algorithm].display_name
 
 
-def is_redis_available(host: str = "localhost", port: int = 6379, timeout: float = 0.5) -> bool:
+async def _validate_recommendation_provenance(
+    request: TrainingRequest,
+    *,
+    organisation_id: str | None,
+    db: AsyncSession | None,
+) -> None:
+    """Verify recommendation_job_id and selection_source provenance."""
+    if not request.recommendation_job_id:
+        if request.selection_source == "recommended":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="selection_source='recommended' requires a valid recommendation_job_id.",
+            )
+        return
+
+    # recommendation_job_id is provided
+    try:
+        rec_uuid = uuid.UUID(request.recommendation_job_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid recommendation_job_id '{request.recommendation_job_id}' format (must be UUID).",
+        )
+
+    if db is None:
+        return
+
+    stmt = select(RecommendationJob).where(RecommendationJob.id == rec_uuid)
+    if organisation_id:
+        try:
+            org_uuid = uuid.UUID(organisation_id)
+            stmt = stmt.where(RecommendationJob.organisation_id == org_uuid)
+        except ValueError:
+            pass
+
+    result = await db.execute(stmt)
+    rec_job = result.scalar_one_or_none()
+
+    if not rec_job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Recommendation job '{request.recommendation_job_id}' not found in organisation scope.",
+        )
+
+    # Verify dataset match
+    if str(rec_job.dataset_id) != request.dataset_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Recommendation job '{request.recommendation_job_id}' was generated for dataset '{rec_job.dataset_id}', not '{request.dataset_id}'.",
+        )
+
+    # Provenance check for 'recommended'
+    if request.selection_source == "recommended":
+        status_val = rec_job.status.value if hasattr(rec_job.status, "value") else str(rec_job.status)
+        if status_val != "COMPLETED":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Cannot claim selection_source='recommended': recommendation job status is '{status_val}', not 'COMPLETED'.",
+            )
+
+        rec_algo_id = (
+            rec_job.recommendation.get("algorithm_id")
+            if isinstance(rec_job.recommendation, dict)
+            else None
+        )
+        if not rec_algo_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Recommendation job completed without a clear winning algorithm. Set selection_source='manual' to proceed with training.",
+            )
+
+        if request.algorithm != rec_algo_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"Algorithm '{request.algorithm}' does not match recommended algorithm '{rec_algo_id}'. "
+                    "Set selection_source='manual' for user overrides."
+                ),
+            )
+
+        snapshot_target = (
+            rec_job.request_config.get("target_column")
+            if isinstance(rec_job.request_config, dict)
+            else None
+        )
+        if snapshot_target and request.target_column != snapshot_target:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Target column '{request.target_column}' does not match recommendation snapshot '{snapshot_target}' (stale recommendation).",
+            )
+
+        # Verify feature columns match snapshot
+        snapshot_features = (
+            rec_job.request_config.get("feature_columns")
+            if isinstance(rec_job.request_config, dict)
+            else None
+        )
+        if snapshot_features and set(request.feature_columns) != set(snapshot_features):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Feature columns list does not match recommendation snapshot (stale recommendation). Re-run benchmark or use selection_source='manual'.",
+            )
+
+
+def is_redis_available(host: str | None = None, port: int | None = None, timeout: float = 0.5) -> bool:
     """Quick socket check to verify if Redis broker is active."""
     if os.environ.get("USE_CELERY", "").lower() in ("false", "0", "no"):
         return False
     try:
+        if host is None or port is None:
+            from urllib.parse import urlparse
+            from app.config import settings
+            parsed = urlparse(settings.redis_url)
+            host = host or parsed.hostname or "localhost"
+            port = port or parsed.port or 6379
         with socket.create_connection((host, port), timeout=timeout):
             return True
     except Exception:
@@ -93,7 +271,7 @@ def job_to_response(job: Job) -> JobResponse:
     """Map ORM Job instance to Pydantic JobResponse schema."""
     return JobResponse(
         job_id=str(job.id),
-        dataset_id=job.dataset_id or "",
+        dataset_id=str(job.dataset_id) if job.dataset_id is not None else "",
         status=job.status,
         created_at=job.created_at,
         updated_at=job.updated_at,
@@ -235,10 +413,11 @@ class JobService:
         request: TrainingRequest,
         *,
         user_id: str,
+        organisation_id: str | None = None,
         db: AsyncSession | None = None,
     ) -> JobResponse:
         """Create and queue a new Machine Learning training job."""
-        return await self._create_job_impl(db, request, user_id=user_id)
+        return await self._create_job_impl(db, request, user_id=user_id, organisation_id=organisation_id)
 
     async def _create_job_impl(
         self,
@@ -246,8 +425,18 @@ class JobService:
         request: TrainingRequest,
         *,
         user_id: str,
+        organisation_id: str | None = None,
     ) -> JobResponse:
+        # Validate schema and algorithm target compatibility
         algorithm_display_name = _validate_algorithm_target_compatibility(request)
+
+        # Validate recommendation provenance if provided
+        await _validate_recommendation_provenance(
+            request,
+            organisation_id=organisation_id,
+            db=db,
+        )
+
         job_uuid = uuid.uuid4()
         job_id = str(job_uuid)
         now = datetime.now(timezone.utc)
@@ -267,6 +456,8 @@ class JobService:
             "feature_selection": getattr(request, "feature_selection", "all"),
             "class_weight": getattr(request, "class_weight", "balanced"),
             "notes": getattr(request, "notes", ""),
+            "recommendation_job_id": getattr(request, "recommendation_job_id", None),
+            "selection_source": getattr(request, "selection_source", "default"),
             "created_at": now.isoformat(),
         }
 

@@ -96,6 +96,8 @@ export interface TrainingRequestPayload {
   feature_selection?: string
   class_weight?: string
   notes?: string
+  recommendation_job_id?: string | null
+  selection_source?: 'recommended' | 'manual' | 'default'
 }
 
 export interface JobEntity {
@@ -122,13 +124,14 @@ export interface JobEntity {
   metadata?: {
     scaler?: string
     imputer?: string
-    train_test_split?: number
     random_seed?: number | null
     cross_validation?: number | null
     normalization?: boolean
     feature_selection?: string
     class_weight?: string
-    [key: string]: any
+    recommendation_job_id?: string | null
+    selection_source?: string
+    [key: string]: unknown
   }
 }
 

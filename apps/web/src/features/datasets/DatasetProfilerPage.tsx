@@ -27,8 +27,9 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { useProject } from '../../providers/ProjectContext';
+import { useProject, type ActiveTrainingConfiguration } from '../../providers/ProjectContext';
 import { DataUpload } from './DataUpload';
+import { AlgorithmRecommendationPanel } from './AlgorithmRecommendationPanel';
 import { Select } from '../../components/ui/Select';
 import type {
   ColumnProfile,
@@ -418,6 +419,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     selectedTarget,
     setSelectedFeatures,
     setSelectedTarget,
+    setTrainingConfig,
     loadDataset,
     resetProject,
     setActiveJob,
@@ -426,6 +428,17 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
   /* ── View Toggle State (Workspace vs Preview data) ─────────────── */
   const [activeView, setActiveView] = useState<'workspace' | 'preview'>('workspace');
+
+  /* ── Recommendation Provenance State ────────────────────────────── */
+  const [recommendationProvenance, setRecommendationProvenance] = useState<{
+    recommendationJobId: string | null;
+    isRecommended: boolean;
+    recommendedAlgorithmId: string | null;
+  }>({
+    recommendationJobId: null,
+    isRecommended: false,
+    recommendedAlgorithmId: null,
+  });
 
   /* ── Manual 4-Panel Grid Resizing State (C1) ──────────────────── */
   const [splitCol, setSplitCol] = useState<number>(50);
@@ -778,6 +791,38 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
     setIsLaunching(true);
     try {
+      let selectionSource: 'recommended' | 'manual' | 'default' = 'default';
+      let recommendationJobId: string | null = null;
+
+      if (recommendationProvenance.recommendationJobId) {
+        recommendationJobId = recommendationProvenance.recommendationJobId;
+        if (
+          recommendationProvenance.isRecommended &&
+          launchAlgo === recommendationProvenance.recommendedAlgorithmId
+        ) {
+          selectionSource = 'recommended';
+        } else {
+          selectionSource = 'manual';
+        }
+      }
+
+      const activeConfig: ActiveTrainingConfiguration = {
+        dataset_id: dataset.datasetId || `client-${dataset.fileName}`,
+        dataset_name: dataset.fileName,
+        target_column: selectedTarget,
+        feature_columns: selectedFeatures,
+        algorithm: launchAlgo,
+        scaler: launchScaler,
+        imputer: launchImputer,
+        train_test_split: trainTestSplit,
+        cv_folds: cvFolds,
+        random_seed: 42,
+        recommendation_job_id: recommendationJobId,
+        selection_source: selectionSource,
+      };
+
+      setTrainingConfig(activeConfig);
+
       const payload: TrainingRequestPayload = {
         dataset_id: dataset.datasetId || `client-${dataset.fileName}`,
         target_column: selectedTarget,
@@ -791,6 +836,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         normalization: true,
         feature_selection: 'all',
         notes: `Trained on ${dataset.fileName} with ${selectedFeatures.length} features`,
+        recommendation_job_id: recommendationJobId,
+        selection_source: selectionSource,
       };
 
       const createdJob = await createTrainingJob(payload);
@@ -820,6 +867,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     effectiveImputer,
     trainTestSplit,
     cvFolds,
+    recommendationProvenance,
+    setTrainingConfig,
     setActiveJob,
     setLifecycleStage,
     onShowToast,
@@ -1674,6 +1723,19 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   </span>
 
                   <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* Evidence-Based Algorithm Recommendation Sub-Panel */}
+                    <AlgorithmRecommendationPanel
+                      dataset={dataset}
+                      selectedTarget={selectedTarget}
+                      selectedFeatures={selectedFeatures}
+                      selectedAlgorithm={effectiveAlgorithm}
+                      onSelectAlgorithm={setAlgorithm}
+                      cvFolds={cvFolds}
+                      trainTestSplit={trainTestSplit}
+                      onShowToast={onShowToast}
+                      onRecommendationChange={setRecommendationProvenance}
+                    />
+
                     {/* Algorithm Select */}
                     <div>
                       <label

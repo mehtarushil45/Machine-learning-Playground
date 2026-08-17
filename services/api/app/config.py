@@ -139,6 +139,19 @@ class Settings(BaseSettings):
     max_upload_size_bytes: int = 50 * 1024 * 1024  # 50 MB
     upload_dir: str = _DEFAULT_UPLOAD_DIR
 
+    # ── Recommendation Engine & Benchmark Settings ───────────────────────────
+    recommendation_max_screening_rows: int = 25_000
+    recommendation_max_verification_rows: int = 50_000
+    recommendation_max_transformed_features: int = 2_000
+    recommendation_max_rows_distance_kernel: int = 5_000
+    recommendation_max_cells_limit: int = 20_000_000
+    recommendation_per_candidate_timeout_seconds: int = 30
+    recommendation_total_job_timeout_seconds: int = 180
+    allow_sync_recommendation_fallback: bool = False
+    recommendation_engine_version: str = "2.0.0"
+    algorithm_registry_version: str = "1.1.0"
+    preprocessor_version: str = "1.0.0"
+
     # ── Storage Backend Selector ──────────────────────────────────────────────
     # Allowed values: "local" | "minio"
     storage_backend: str = "local"

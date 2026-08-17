@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field
 
 
 class DeploymentCreate(BaseModel):
-    model_id: str = Field(..., description="Model ID from registry to deploy", example="model-89316c9a")
-    deployment_name: str = Field("Production Model Endpoint", description="Display name for deployment", example="Churn Predictor API")
+    model_id: str = Field(..., description="Model ID from registry to deploy", examples=["model-89316c9a"])
+    deployment_name: str = Field("Production Model Endpoint", description="Display name for deployment", examples=["Churn Predictor API"])
     rate_limit_rpm: int = Field(60, ge=1, le=1000, description="Rate limit in requests per minute")
     allowed_origins: List[str] = Field(default_factory=lambda: ["*"], description="CORS allowed origin domains")
     require_api_key: bool = Field(True, description="If True, requests require X-API-Key header authentication")
@@ -39,7 +39,7 @@ class IntegrationSnippets(BaseModel):
 
 
 class DeploymentPredictRequest(BaseModel):
-    features: Dict[str, Any] = Field(..., description="Input feature dictionary for prediction", example={"age": 30, "income": 50000})
+    features: Dict[str, Any] = Field(..., description="Input feature dictionary for prediction", examples=[{"age": 30, "income": 50000}])
 
 
 class DeploymentPredictResponse(BaseModel):

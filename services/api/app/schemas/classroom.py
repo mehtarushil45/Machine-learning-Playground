@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.classroom import ClassroomRole, SubmissionStatus
 
@@ -17,12 +17,14 @@ from app.models.classroom import ClassroomRole, SubmissionStatus
 # ── Course Schemas ────────────────────────────────────────────────────────────
 
 class CourseCreate(BaseModel):
-    code: str = Field(..., example="CS401", description="Course code identifier")
-    title: str = Field(..., example="Applied Machine Learning", description="Course title")
+    code: str = Field(..., examples=["CS401"], description="Course code identifier")
+    title: str = Field(..., examples=["Applied Machine Learning"], description="Course title")
     description: Optional[str] = Field(None, description="Detailed course abstract")
 
 
 class CourseResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     organisation_id: UUID
     code: str
@@ -30,16 +32,13 @@ class CourseResponse(BaseModel):
     description: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 # ── Classroom Schemas ─────────────────────────────────────────────────────────
 
 class ClassroomCreate(BaseModel):
     course_id: UUID = Field(..., description="Target Course UUID")
-    name: str = Field(..., example="Fall 2026 Batch A", description="Classroom batch name")
-    code: str = Field(..., example="ML-2026-A", description="Unique classroom access code")
+    name: str = Field(..., examples=["Fall 2026 Batch A"], description="Classroom batch name")
+    code: str = Field(..., examples=["ML-2026-A"], description="Unique classroom access code")
     term: str = Field("Fall 2026", description="Academic term or semester")
 
 
@@ -49,6 +48,8 @@ class ClassroomMemberAdd(BaseModel):
 
 
 class ClassroomResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     organisation_id: UUID
     course_id: UUID
@@ -59,15 +60,12 @@ class ClassroomResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 # ── Assignment Schemas ────────────────────────────────────────────────────────
 
 class AssignmentCreate(BaseModel):
     classroom_id: UUID = Field(..., description="Target Classroom UUID")
-    title: str = Field(..., example="Lab 3: Binary Classification", description="Assignment title")
+    title: str = Field(..., examples=["Lab 3: Binary Classification"], description="Assignment title")
     description: str = Field(..., description="Assignment instructions & criteria")
     dataset_id: Optional[str] = Field(None, description="Attached dataset ID")
     due_date: Optional[datetime] = Field(None, description="Submission deadline")
@@ -76,6 +74,8 @@ class AssignmentCreate(BaseModel):
 
 
 class AssignmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     organisation_id: UUID
     classroom_id: UUID
@@ -87,9 +87,6 @@ class AssignmentResponse(BaseModel):
     max_score: float
     created_by_id: UUID
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # ── Submission & Review Schemas ───────────────────────────────────────────────
@@ -107,6 +104,8 @@ class FeedbackCreate(BaseModel):
 
 
 class SubmissionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     organisation_id: UUID
     assignment_id: UUID
@@ -119,15 +118,12 @@ class SubmissionResponse(BaseModel):
     reproducibility_verified: bool
     metrics_summary: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
-
 
 # ── Portfolio Schemas ─────────────────────────────────────────────────────────
 
 class PortfolioProjectCreate(BaseModel):
     submission_id: Optional[UUID] = Field(None, description="Approved submission UUID")
-    title: str = Field(..., example="Customer Churn Predictor", description="Portfolio project title")
+    title: str = Field(..., examples=["Customer Churn Predictor"], description="Portfolio project title")
     description: str = Field(..., description="Project abstract and findings")
     model_id: Optional[str] = Field(None, description="Model ID")
     experiment_id: Optional[str] = Field(None, description="Experiment ID")
@@ -135,6 +131,8 @@ class PortfolioProjectCreate(BaseModel):
 
 
 class PortfolioProjectResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     organisation_id: UUID
     user_id: UUID
@@ -146,9 +144,6 @@ class PortfolioProjectResponse(BaseModel):
     is_public: bool
     certificate_qr_code: Optional[str] = None
     published_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # ── Reproducibility Audit Schemas ─────────────────────────────────────────────

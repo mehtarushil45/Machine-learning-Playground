@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # ── System dependencies ──────────────────────────────────────────────────────
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Non-root user ────────────────────────────────────────────────────────────
@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir --no-build-isolation -e .
 
 WORKDIR /app/services/api
 
+RUN mkdir -p /app/services/api/uploads /app/uploads && chown -R appuser:appgroup /app
 
 USER appuser
 

@@ -1,20 +1,24 @@
-"""Automatic Preprocessing Pipeline.
+"""Automatic Preprocessing Pipeline & Leakage-Safe Specification.
 
-Builds a fully automatic scikit-learn preprocessing pipeline from a
-DatasetContext, with configurable scalers and imputation strategies.
+Builds a fully automatic, unfitted scikit-learn preprocessing pipeline from a
+DatasetContext, with configurable scalers, imputation strategies, and conservative
+multi-signal identifier and leakage filtering.
 
 Supported column kinds:
   - numeric   → configurable numeric imputer → configurable scaler
-  - categorical / text / identifier → mode imputer → OneHotEncoder
+  - categorical / text → mode imputer → OneHotEncoder(handle_unknown="ignore")
   - boolean   → mode imputer → ordinal integer mapping (0/1) → optional scaler
   - datetime  → mode imputer → numeric timestamp extraction (Unix epoch float) → optional scaler
-  - target    → separated before preprocessing (not transformed here)
+  - target    → separated before preprocessing (never transformed inside feature pipeline)
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
-from typing import Any, List, Optional
+import math
+import re
+from typing import Any, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -30,6 +34,200 @@ from app.ml.imputer_factory import get_imputer
 from app.ml.scaler_factory import get_scaler
 
 logger = logging.getLogger("apex_ml.preprocessing")
+
+# Regex for UUID / Hex Hash / Key patterns
+UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{32,64}$")
+ID_NAME_PATTERN = re.compile(r"^(id|.*_id|id_.*|uuid|pk|guid|row_id|index|record_id|key|hash)$", re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# Multi-Signal Identifier Detection
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class IdentifierDetectionResult:
+    """Detailed verdict for a column's identifier status."""
+
+    is_identifier: bool
+    confidence: str  # "high", "medium", "low", "none"
+    reasons: list[str]
+    is_target_column: bool = False
+
+
+def detect_identifier_signals(
+    column_name: str,
+    values: Sequence[Any] | pd.Series,
+    total_rows: int,
+    is_target: bool = False,
+) -> IdentifierDetectionResult:
+    """Evaluate multi-signal criteria for identifier detection.
+
+    Signals evaluated:
+      1. Name patterns (e.g. id, uuid, pk, record_id).
+      2. Value shape patterns (UUID, MD5/SHA hex strings).
+      3. Cardinality / Near-uniqueness ratio (unique / non-null count >= 0.99 with N >= 20).
+      4. Strictly monotonic sequential integers (e.g. 1, 2, 3, ...).
+
+    Target Safety Rule:
+      The selected target column is NEVER auto-excluded. If the target column
+      looks identifier-like, it is flagged with a warning requiring confirmation.
+    """
+    reasons: list[str] = []
+    if isinstance(values, pd.Series):
+        clean_series = values.dropna()
+        sample_vals = clean_series.head(100).tolist()
+        non_null_count = int(clean_series.count())
+        unique_count = int(clean_series.nunique())
+    else:
+        sample_vals = [v for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
+        non_null_count = len(sample_vals)
+        unique_count = len(set(sample_vals))
+
+    if non_null_count == 0:
+        return IdentifierDetectionResult(
+            is_identifier=False,
+            confidence="none",
+            reasons=["Column is empty."],
+            is_target_column=is_target,
+        )
+
+    # Signal 1: Name match
+    name_matched = bool(ID_NAME_PATTERN.match(column_name.strip()))
+    if name_matched:
+        reasons.append(f"Column name '{column_name}' matches identifier naming convention.")
+
+    # Signal 2: Value shape pattern
+    str_samples = [str(v).strip() for v in sample_vals[:50] if v is not None]
+    uuid_matches = sum(1 for v in str_samples if UUID_PATTERN.match(v))
+    hash_matches = sum(1 for v in str_samples if HASH_PATTERN.match(v))
+    shape_matched = False
+    if str_samples and (uuid_matches / len(str_samples) >= 0.8 or hash_matches / len(str_samples) >= 0.8):
+        shape_matched = True
+        reasons.append("Values match UUID or cryptographic hash format.")
+
+    # Signal 3: Near-uniqueness
+    uniqueness_ratio = unique_count / non_null_count if non_null_count > 0 else 0.0
+    near_unique = non_null_count >= 20 and uniqueness_ratio >= 0.99
+    if near_unique:
+        reasons.append(f"High uniqueness ratio ({uniqueness_ratio:.1%}) indicates key-like column.")
+
+    # Signal 4: Monotonic sequential check
+    sequential_matched = False
+    if isinstance(values, pd.Series) and pd.api.types.is_numeric_dtype(values) and non_null_count >= 10:
+        numeric_series = clean_series.astype(float)
+        diffs = numeric_series.diff().dropna()
+        if (diffs == 1.0).all():
+            sequential_matched = True
+            reasons.append("Values form a strictly sequential integer index.")
+
+    # Composite verdict
+    score = 0
+    if shape_matched:
+        score += 3
+    if name_matched and near_unique:
+        score += 3
+    elif name_matched:
+        score += 1
+    elif near_unique and total_rows > 30:
+        score += 2
+    if sequential_matched:
+        score += 3
+
+    if score >= 3:
+        return IdentifierDetectionResult(
+            is_identifier=True,
+            confidence="high" if score >= 4 else "medium",
+            reasons=reasons,
+            is_target_column=is_target,
+        )
+    elif score >= 1:
+        return IdentifierDetectionResult(
+            is_identifier=False,
+            confidence="low",
+            reasons=reasons,
+            is_target_column=is_target,
+        )
+
+    return IdentifierDetectionResult(
+        is_identifier=False,
+        confidence="none",
+        reasons=[],
+        is_target_column=is_target,
+    )
+
+
+@dataclass(frozen=True)
+class FeatureExclusion:
+    """Declared reason for excluding a feature from benchmark preprocessing."""
+
+    column_name: str
+    reason: str
+    category: str  # "identifier", "empty", "zero_variance", "unsupported_text"
+
+
+def sanitize_feature_columns(
+    dataframe: pd.DataFrame,
+    target_column: str,
+    explicit_features: Optional[list[str]] = None,
+) -> tuple[list[str], list[FeatureExclusion]]:
+    """Filter and sanitize feature columns, recording explicit exclusion reasons.
+
+    Rules:
+      1. Target column is NEVER included in feature list.
+      2. 100% missing columns are excluded.
+      3. Zero-variance constant columns are excluded.
+      4. Conservative multi-signal identifiers are excluded.
+    """
+    candidates = explicit_features if explicit_features is not None else [
+        c for c in dataframe.columns if c != target_column
+    ]
+
+    clean_features: list[str] = []
+    exclusions: list[FeatureExclusion] = []
+    total_rows = len(dataframe)
+
+    for col in candidates:
+        if col == target_column:
+            continue
+
+        if col not in dataframe.columns:
+            exclusions.append(
+                FeatureExclusion(col, f"Column '{col}' not found in dataset.", "missing")
+            )
+            continue
+
+        series = dataframe[col]
+        non_null_count = int(series.count())
+
+        # 100% missing check
+        if non_null_count == 0:
+            exclusions.append(
+                FeatureExclusion(col, "Column is 100% empty.", "empty")
+            )
+            continue
+
+        # Zero-variance check
+        if series.nunique(dropna=True) <= 1:
+            exclusions.append(
+                FeatureExclusion(col, "Zero-variance constant feature.", "zero_variance")
+            )
+            continue
+
+        # Identifier check
+        id_check = detect_identifier_signals(col, series, total_rows, is_target=False)
+        if id_check.is_identifier:
+            reason_str = " | ".join(id_check.reasons)
+            exclusions.append(
+                FeatureExclusion(col, f"Identifier detected: {reason_str}", "identifier")
+            )
+            continue
+
+        clean_features.append(col)
+
+    return clean_features, exclusions
 
 
 # ---------------------------------------------------------------------------
@@ -101,8 +299,8 @@ def build_preprocessor(
 
     Returns:
         An unfitted :class:`~sklearn.compose.ColumnTransformer` ready to be
-        embedded into a :class:`~sklearn.pipeline.Pipeline` and fitted on
-        training data.
+        embedded into a :class:`~sklearn.pipeline.Pipeline` and fitted strictly
+        on training data per cross-validation fold.
     """
     transformers: List = []
 

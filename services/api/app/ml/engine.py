@@ -238,6 +238,8 @@ def execute_ml_training_pipeline_sync(
             target_column=target_col,
             feature_columns=feature_cols,
         )
+        if not ctx.feature_columns or len(ctx.feature_columns) == 0:
+            raise DatasetValidationError(f"Cannot train model: zero feature columns selected for dataset '{dataset_id}'.")
         dataset_version = build_dataset_version(ctx)
 
         # ── Stage 2: Problem Detection ────────────────────────────────────────

@@ -231,34 +231,58 @@ class MinIOStorageBackend:
     def download_to_temp(
         self,
         dataset_id: str,
-        filename: str,
+        filename: str | None = None,
         organisation_id: str | None = None,
     ) -> str:
         """Download an object from MinIO to a local temporary file."""
-        object_key = self._build_key(dataset_id, filename, organisation_id)
-        suffix = os.path.splitext(filename)[1] or ".csv"
+        client = self._make_client()
+        object_key = None
+        body = None
 
-        try:
-            client = self._make_client()
-            response = client.get_object(Bucket=self._bucket, Key=object_key)
-            body = response["Body"].read()
-        except Exception as exc:
+        # 1. Try exact key if filename provided
+        if filename:
+            candidate_key = self._build_key(dataset_id, filename, organisation_id)
+            try:
+                response = client.get_object(Bucket=self._bucket, Key=candidate_key)
+                body = response["Body"].read()
+                object_key = candidate_key
+            except Exception:
+                if organisation_id:
+                    legacy_key = self._build_key(dataset_id, filename, None)
+                    try:
+                        response = client.get_object(Bucket=self._bucket, Key=legacy_key)
+                        body = response["Body"].read()
+                        object_key = legacy_key
+                    except Exception:
+                        pass
+
+        # 2. If not found by candidate key, search by dataset_id prefix
+        if body is None:
+            prefixes_to_try = []
             if organisation_id:
-                legacy_key = self._build_key(dataset_id, filename, None)
+                prefixes_to_try.append(f"{organisation_id}/{dataset_id}")
+            prefixes_to_try.append(dataset_id)
+
+            for prefix in prefixes_to_try:
                 try:
-                    client = self._make_client()
-                    response = client.get_object(Bucket=self._bucket, Key=legacy_key)
-                    body = response["Body"].read()
+                    resp = client.list_objects_v2(Bucket=self._bucket, Prefix=prefix, MaxKeys=5)
+                    contents = resp.get("Contents", [])
+                    if contents:
+                        found_key = contents[0]["Key"]
+                        response = client.get_object(Bucket=self._bucket, Key=found_key)
+                        body = response["Body"].read()
+                        object_key = found_key
+                        break
                 except Exception:
-                    raise StorageError(
-                        f"MinIOStorageBackend: failed downloading '{object_key}' "
-                        f"from bucket '{self._bucket}': {exc}"
-                    ) from exc
-            else:
-                raise StorageError(
-                    f"MinIOStorageBackend: failed downloading '{object_key}' "
-                    f"from bucket '{self._bucket}': {exc}"
-                ) from exc
+                    pass
+
+        if body is None:
+            raise StorageError(
+                f"MinIOStorageBackend: failed downloading object for dataset_id '{dataset_id}' "
+                f"from bucket '{self._bucket}'"
+            )
+
+        suffix = os.path.splitext(object_key or "dataset.csv")[1] or ".csv"
 
         # Write to a named temp file — delete=False so the caller can open it
         with tempfile.NamedTemporaryFile(

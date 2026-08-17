@@ -14,13 +14,13 @@ from pydantic import BaseModel, Field
 class PipelineNodeConfig(BaseModel):
     """Configuration for a single block/node in a visual ML pipeline."""
 
-    node_id: str = Field(..., description="Unique node identifier in canvas", example="node-1")
+    node_id: str = Field(..., description="Unique node identifier in canvas", examples=["node-1"])
     type: str = Field(
         ...,
         description="Node type category",
-        example="missing_value_handler",
+        examples=["missing_value_handler"],
     )
-    name: str = Field(..., description="Display label for the node", example="Impute Missing Values")
+    name: str = Field(..., description="Display label for the node", examples=["Impute Missing Values"])
     params: Dict[str, Any] = Field(
         default_factory=dict,
         description="Parameters for this node (e.g. strategy='median', scaler_type='standard')",
@@ -38,11 +38,11 @@ class PipelineDAG(BaseModel):
     """Complete visual pipeline Directed Acyclic Graph payload."""
 
     dataset_name: str = Field("dataset.csv", description="CSV file path or dataset name")
-    target_column: str = Field(..., description="Target column name to predict", example="target")
+    target_column: str = Field(..., description="Target column name to predict", examples=["target"])
     feature_columns: List[str] = Field(
         ...,
         description="List of feature columns to include",
-        example=["age", "income", "credit_score"],
+        examples=[["age", "income", "credit_score"]],
     )
     nodes: List[PipelineNodeConfig] = Field(..., description="Ordered or linked pipeline nodes")
     connections: List[PipelineConnection] = Field(

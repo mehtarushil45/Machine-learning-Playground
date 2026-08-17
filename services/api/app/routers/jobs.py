@@ -40,6 +40,12 @@ router = APIRouter(prefix="/jobs", tags=["Jobs"])
     status_code=status.HTTP_201_CREATED,
     summary="Create and queue a new ML training job",
 )
+@router.post(
+    "",
+    response_model=JobResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create and queue a new ML training job (alias)",
+)
 @limiter.limit("10/minute")
 async def create_training_job(
     request: Request,
@@ -52,7 +58,13 @@ async def create_training_job(
     The calling user's ID is stamped as owner_id on the created job in PostgreSQL.
     Only the owner can later cancel, retry, or delete the job.
     """
-    return await job_service.create_job(payload, user_id=str(current_user.id), db=db)
+    org_id_str = str(current_user.organisation_id) if getattr(current_user, "organisation_id", None) else None
+    return await job_service.create_job(
+        payload,
+        user_id=str(current_user.id),
+        organisation_id=org_id_str,
+        db=db,
+    )
 
 
 @router.get(

@@ -76,6 +76,8 @@ services:
       - S3_ENDPOINT_URL=http://minio:9000
     ports:
       - "8000:8000"
+    volumes:
+      - uploads_data:/app/services/api/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -110,6 +112,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - S3_ENDPOINT_URL=http://minio:9000
+    volumes:
+      - uploads_data:/app/services/api/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -150,4 +154,6 @@ volumes:
   postgres_data:
     driver: local
   minio_data:
+    driver: local
+  uploads_data:
     driver: local

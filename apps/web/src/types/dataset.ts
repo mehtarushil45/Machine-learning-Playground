@@ -86,6 +86,8 @@ export interface FeatureRecommendation {
   reasoning: string
 }
 
+import type { LatestBenchmarkSummary } from './recommendation'
+
 export interface DatasetRecommendations {
   dataset_id: string
   filename: string
@@ -99,4 +101,7 @@ export interface DatasetRecommendations {
   target_suggestions: TargetSuggestion[]
   feature_recommendations: FeatureRecommendation[]
   warnings: string[]
+  latest_benchmark?: LatestBenchmarkSummary | null
 }
+
+export * from './recommendation'

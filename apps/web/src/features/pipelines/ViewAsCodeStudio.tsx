@@ -19,19 +19,73 @@ import { PipelineService, PipelineDAG, CodeGenerationResponse } from '../../serv
 import { Select } from '../../components/ui/Select';
 import { fetchTrainingOptions } from '../../services/jobService';
 import { CANONICAL_TRAINING_OPTIONS, type TrainingOptions } from '../../types/job';
+import { useProject } from '../../providers/ProjectContext';
 
 interface ViewAsCodeStudioProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
+  onNavigate?: (tab: string) => void;
 }
 
-export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast }) => {
-  const [targetColumn, setTargetColumn] = useState('target');
-  const [featureColumns, setFeatureColumns] = useState('feat_0, feat_1, feat_2, feat_3');
-  const [imputerStrategy, setImputerStrategy] = useState('median');
-  const [scalerType, setScalerType] = useState('standard_scaler');
-  const [algorithm, setAlgorithm] = useState('random_forest_classifier');
+export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast, onNavigate }) => {
+  const { dataset, selectedFeatures, selectedTarget, trainingConfig, activeJob } = useProject();
+
+  const hasActiveConfig = Boolean(
+    activeJob?.target_column ||
+      trainingConfig?.target_column ||
+      (dataset && selectedTarget),
+  );
+
+  const initialDatasetName =
+    trainingConfig?.dataset_name ||
+    dataset?.fileName ||
+    (activeJob?.metadata?.dataset_id as string) ||
+    '';
+
+  const initialTarget =
+    activeJob?.target_column ||
+    trainingConfig?.target_column ||
+    selectedTarget ||
+    '';
+
+  const initialFeatures =
+    activeJob?.feature_columns && activeJob.feature_columns.length > 0
+      ? activeJob.feature_columns.join(', ')
+      : trainingConfig?.feature_columns && trainingConfig.feature_columns.length > 0
+        ? trainingConfig.feature_columns.join(', ')
+        : selectedFeatures && selectedFeatures.length > 0
+          ? selectedFeatures.join(', ')
+          : '';
+
+  const initialAlgorithm =
+    (activeJob?.metadata?.algorithm as string) ||
+    trainingConfig?.algorithm ||
+    'random_forest_classifier';
+
+  const initialScaler =
+    (activeJob?.metadata?.scaler as string) ||
+    trainingConfig?.scaler ||
+    'standard_scaler';
+
+  const initialImputer =
+    (activeJob?.metadata?.imputer as string) ||
+    trainingConfig?.imputer ||
+    'median';
+
+  const initialTestSize =
+    typeof activeJob?.metadata?.train_test_split === 'number'
+      ? Math.round((1 - activeJob.metadata.train_test_split) * 100) / 100
+      : trainingConfig?.train_test_split
+        ? Math.round((1 - trainingConfig.train_test_split) * 100) / 100
+        : 0.2;
+
+  const [targetColumn, setTargetColumn] = useState(initialTarget);
+  const [featureColumns, setFeatureColumns] = useState(initialFeatures);
+  const [imputerStrategy, setImputerStrategy] = useState(initialImputer);
+  const [scalerType, setScalerType] = useState(initialScaler);
+  const [algorithm, setAlgorithm] = useState(initialAlgorithm);
   const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>(CANONICAL_TRAINING_OPTIONS);
-  const [testSize, setTestSize] = useState(0.2);
+  const [testSize, setTestSize] = useState(initialTestSize);
+  const [datasetName, setDatasetName] = useState(initialDatasetName);
 
   const [generatedCode, setGeneratedCode] = useState<CodeGenerationResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -39,15 +93,62 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
   const [copied, setCopied] = useState(false);
   const [activeStep, setActiveStep] = useState<number | null>(1);
 
+  /* ── Sync State when ProjectContext Updates ─────────────────────── */
+  useEffect(() => {
+    if (activeJob) {
+      if (activeJob.target_column) setTargetColumn(activeJob.target_column);
+      if (activeJob.feature_columns && activeJob.feature_columns.length > 0) {
+        setFeatureColumns(activeJob.feature_columns.join(', '));
+      }
+      if (activeJob.metadata?.algorithm) setAlgorithm(activeJob.metadata.algorithm as string);
+      if (activeJob.metadata?.scaler) setScalerType(activeJob.metadata.scaler as string);
+      if (activeJob.metadata?.imputer) setImputerStrategy(activeJob.metadata.imputer as string);
+      if (typeof activeJob.metadata?.train_test_split === 'number') {
+        setTestSize(Math.round((1 - activeJob.metadata.train_test_split) * 100) / 100);
+      }
+      if (dataset?.fileName) setDatasetName(dataset.fileName);
+    } else if (trainingConfig) {
+      if (trainingConfig.target_column) setTargetColumn(trainingConfig.target_column);
+      if (trainingConfig.feature_columns && trainingConfig.feature_columns.length > 0) {
+        setFeatureColumns(trainingConfig.feature_columns.join(', '));
+      }
+      if (trainingConfig.algorithm) setAlgorithm(trainingConfig.algorithm);
+      if (trainingConfig.scaler) setScalerType(trainingConfig.scaler);
+      if (trainingConfig.imputer) setImputerStrategy(trainingConfig.imputer);
+      if (trainingConfig.train_test_split) {
+        setTestSize(Math.round((1 - trainingConfig.train_test_split) * 100) / 100);
+      }
+      if (trainingConfig.dataset_name) setDatasetName(trainingConfig.dataset_name);
+    } else if (dataset) {
+      if (dataset.fileName) setDatasetName(dataset.fileName);
+      if (selectedTarget) setTargetColumn(selectedTarget);
+      if (selectedFeatures && selectedFeatures.length > 0) {
+        setFeatureColumns(selectedFeatures.join(', '));
+      }
+    }
+  }, [activeJob, trainingConfig, dataset, selectedTarget, selectedFeatures]);
+
   useEffect(() => {
     const controller = new AbortController();
     fetchTrainingOptions(controller.signal)
       .then((options) => {
         if (options && options.algorithms?.length > 0) {
           setTrainingOptions(options);
-          setAlgorithm((current) => options.algorithms.some((option) => option.key === current) ? current : options.algorithms[0]?.key || 'random_forest_classifier');
-          setScalerType((current) => options.scalers.some((option) => option.key === current) ? current : options.scalers[0]?.key || 'standard_scaler');
-          setImputerStrategy((current) => options.imputers.some((option) => option.key === current) ? current : options.imputers[0]?.key || 'median');
+          setAlgorithm((current) =>
+            options.algorithms.some((option) => option.key === current)
+              ? current
+              : options.algorithms[0]?.key || 'random_forest_classifier',
+          );
+          setScalerType((current) =>
+            options.scalers.some((option) => option.key === current)
+              ? current
+              : options.scalers[0]?.key || 'standard_scaler',
+          );
+          setImputerStrategy((current) =>
+            options.imputers.some((option) => option.key === current)
+              ? current
+              : options.imputers[0]?.key || 'median',
+          );
         }
       })
       .catch((err) => {
@@ -60,11 +161,14 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
   }, []);
 
   const handleGenerateCode = useCallback(async () => {
+    if (!targetColumn || !featureColumns.trim()) {
+      return;
+    }
     setLoading(true);
     setError(null);
     const featureList = featureColumns.split(',').map((s) => s.trim()).filter(Boolean);
     const dag: PipelineDAG = {
-      dataset_name: 'dataset.csv',
+      dataset_name: datasetName || 'dataset.csv',
       target_column: targetColumn,
       feature_columns: featureList,
       nodes: [
@@ -82,15 +186,15 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
     } finally {
       setLoading(false);
     }
-  }, [algorithm, featureColumns, imputerStrategy, scalerType, targetColumn, testSize]);
+  }, [algorithm, datasetName, featureColumns, imputerStrategy, scalerType, targetColumn, testSize]);
 
   useEffect(() => {
     let active = true;
-    if (imputerStrategy && scalerType && algorithm) {
+    const featureList = featureColumns.split(',').map((s) => s.trim()).filter(Boolean);
+    if (imputerStrategy && scalerType && algorithm && targetColumn && featureList.length > 0) {
       (async () => {
-        const featureList = featureColumns.split(',').map((s) => s.trim()).filter(Boolean);
         const dag: PipelineDAG = {
-          dataset_name: 'dataset.csv',
+          dataset_name: datasetName || 'dataset.csv',
           target_column: targetColumn,
           feature_columns: featureList,
           nodes: [
@@ -117,7 +221,7 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
     return () => {
       active = false;
     };
-  }, [imputerStrategy, scalerType, algorithm, testSize, targetColumn, featureColumns]);
+  }, [imputerStrategy, scalerType, algorithm, testSize, targetColumn, featureColumns, datasetName]);
 
   const copyCode = async () => {
     if (generatedCode?.python_code) {
@@ -148,6 +252,71 @@ export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast 
     { id: 4, title: 'Train/Test Split', desc: `ratio: ${(testSize * 100).toFixed(0)}% test`, icon: <Zap className="w-4 h-4 text-[#F5A623]" />, badge: 'Split' },
     { id: 5, title: trainingOptions.algorithms.find((option) => option.key === algorithm)?.display_name || 'Model', desc: 'Model Trainer', icon: <Sparkles className="w-4 h-4 text-[#00F5A0]" />, badge: 'Model' },
   ];
+
+  if (!hasActiveConfig && !dataset && !trainingConfig && !activeJob) {
+    return (
+      <div
+        role="region"
+        aria-label="Empty Pipeline Studio"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '64px 24px',
+          textAlign: 'center',
+          gap: 16,
+          background: '#1B1530',
+          border: '1px solid rgba(107, 92, 166, 0.2)',
+          borderRadius: 12,
+          maxWidth: 600,
+          margin: '48px auto',
+        }}
+      >
+        <div
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            background: 'rgba(107, 92, 166, 0.15)',
+            border: '1px solid rgba(107, 92, 166, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#C9A24B',
+          }}
+        >
+          <Database style={{ width: 24, height: 24 }} />
+        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#F5F1EC', margin: 0 }}>
+          No Active Dataset or Training Configuration
+        </h2>
+        <p style={{ fontSize: 13, color: '#9E93B8', margin: 0, maxWidth: 440, lineHeight: 1.5 }}>
+          Pipeline Studio requires an active dataset and feature selection. Upload a dataset, select your target column and features, or benchmark algorithms in the Dataset & Profiler workspace first.
+        </p>
+        <button
+          onClick={() => onNavigate?.('workspace')}
+          style={{
+            marginTop: 8,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '8px 16px',
+            borderRadius: 6,
+            background: 'linear-gradient(135deg, #4B3B7C, #6E1423)',
+            border: '1px solid #6C5CA6',
+            color: '#F5F1EC',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+          aria-label="Go to Dataset and Profiler"
+        >
+          Go to Dataset & Profiler →
+        </button>
+      </div>
+    );
+  }
 
   return (
     <motion.div

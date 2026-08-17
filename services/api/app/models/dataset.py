@@ -53,6 +53,7 @@ class Dataset(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
 
     # ── Relationships ─────────────────────────────────────────────────────────
     organisation: Mapped["Organisation"] = relationship(back_populates="datasets")  # type: ignore[name-defined]  # noqa: F821
+    created_by: Mapped["User"] = relationship("User", back_populates="datasets")  # type: ignore[name-defined]  # noqa: F821
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="dataset")  # type: ignore[name-defined]  # noqa: F821
 
     def __repr__(self) -> str:

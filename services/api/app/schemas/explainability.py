@@ -42,7 +42,7 @@ class GlobalExplainabilityResponse(BaseModel):
 
 class LocalExplainabilityRequest(BaseModel):
 
-    sample: Dict[str, Any] = Field(..., description="Single sample record feature values", example={"age": 45, "income": 65000})
+    sample: Dict[str, Any] = Field(..., description="Single sample record feature values", examples=[{"age": 45, "income": 65000}])
     model_id: Optional[str] = Field(None, description="Target model ID")
     target_class: Optional[str] = Field(None, description="Specific target class label for classification")
 

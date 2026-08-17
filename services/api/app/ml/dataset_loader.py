@@ -75,12 +75,43 @@ class DatasetContext:
         return self is other
 
 
-# ---------------------------------------------------------------------------
-# Public loader function
-# ---------------------------------------------------------------------------
-
 class DatasetValidationError(ValueError):
     """Raised when the dataset fails structural validation."""
+
+
+def read_dataset_header(dataset_id: str) -> List[str]:
+    """Read only the column header row from the dataset CSV without loading data into memory when possible.
+
+    Args:
+        dataset_id: Identifier used to locate the CSV on disk or storage.
+
+    Returns:
+        List of column name strings from the header.
+
+    Raises:
+        FileNotFoundError: If the CSV file cannot be located.
+        DatasetValidationError: If the header cannot be parsed.
+    """
+    try:
+        file_path = find_dataset_path(dataset_id)
+        header_df = pd.read_csv(file_path, nrows=0)
+        return header_df.columns.tolist()
+    except Exception:
+        pass
+
+    try:
+        from services.worker.core.dataset_loader import load_dataset_dataframe
+        df = load_dataset_dataframe(dataset_id)
+        return df.columns.tolist()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"No CSV file found for dataset_id='{dataset_id}'. "
+            "Ensure the file was uploaded successfully."
+        ) from exc
+    except Exception as exc:
+        raise DatasetValidationError(
+            f"Failed to read header from CSV for dataset '{dataset_id}': {exc}"
+        ) from exc
 
 
 def load_dataset_context(
@@ -93,14 +124,14 @@ def load_dataset_context(
     Args:
         dataset_id:      Identifier used to locate the CSV on disk.
         target_column:   Name of the label / target column.
-        feature_columns: Requested feature columns (may be a subset of all columns).
+        feature_columns: Requested feature columns (must be explicit, non-empty, and valid).
 
     Returns:
         Populated :class:`DatasetContext`.
 
     Raises:
         DatasetValidationError: If the file cannot be loaded or required columns
-            are absent.
+            are absent / invalid.
         FileNotFoundError: If no CSV can be found for *dataset_id*.
     """
     logger.info("Loading dataset '%s'", dataset_id)
@@ -110,22 +141,26 @@ def load_dataset_context(
     # The profiler remains the one source of truth for column inference.
     from app.services.profiler import infer_column_type
 
-    # ── 1. Resolve file path ─────────────────────────────────────────────────
+    # ── 1. Resolve file and Parse CSV ────────────────────────────────────────
+    file_path = ""
+    df = None
     try:
         file_path = find_dataset_path(dataset_id)
-    except FileNotFoundError as exc:
-        raise FileNotFoundError(
-            f"No CSV file found for dataset_id='{dataset_id}'. "
-            "Ensure the file was uploaded successfully."
-        ) from exc
-
-    # ── 2. Parse CSV ─────────────────────────────────────────────────────────
-    try:
         df = pd.read_csv(file_path)
-    except Exception as exc:
-        raise DatasetValidationError(
-            f"Failed to parse CSV for dataset '{dataset_id}': {exc}"
-        ) from exc
+    except Exception:
+        try:
+            from services.worker.core.dataset_loader import load_dataset_dataframe
+            df = load_dataset_dataframe(dataset_id)
+            file_path = f"storage://{dataset_id}"
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"No CSV file found for dataset_id='{dataset_id}'. "
+                "Ensure the file was uploaded successfully."
+            ) from exc
+        except Exception as exc:
+            raise DatasetValidationError(
+                f"Failed to parse CSV for dataset '{dataset_id}': {exc}"
+            ) from exc
 
     logger.info(
         "Loaded CSV '%s' — %d rows × %d columns",
@@ -134,33 +169,35 @@ def load_dataset_context(
         len(df.columns),
     )
 
-    # ── 3. Resolve target column ──────────────────────────────────────────────
+    # ── 3. Validate target column (Strict: no silent fallback) ────────────────
     if target_column not in df.columns:
-        # Graceful fallback: use last column (mirrors worker behaviour)
-        fallback = df.columns[-1]
-        logger.warning(
-            "Target column '%s' not found; falling back to '%s'",
-            target_column,
-            fallback,
-        )
-        target_column = fallback
-
-    # ── 4. Resolve feature columns ────────────────────────────────────────────
-    available = [c for c in feature_columns if c in df.columns and c != target_column]
-    if not available:
-        # Use all non-target columns as features
-        available = [c for c in df.columns if c != target_column]
-        logger.warning(
-            "None of the requested feature columns exist; defaulting to all "
-            "non-target columns: %s",
-            available,
-        )
-
-    if not available:
         raise DatasetValidationError(
-            f"Dataset '{dataset_id}' has no usable feature columns after "
-            f"removing target column '{target_column}'."
+            f"Target column '{target_column}' does not exist in dataset '{dataset_id}'. "
+            f"Available columns: {list(df.columns)}"
         )
+
+    # ── 4. Validate feature columns (Strict: no silent fallback) ──────────────
+    if not feature_columns or len(feature_columns) == 0:
+        raise DatasetValidationError(
+            f"Feature columns list cannot be empty for dataset '{dataset_id}'."
+        )
+
+    if target_column in feature_columns:
+        raise DatasetValidationError(
+            f"Target column '{target_column}' cannot be included inside feature columns."
+        )
+
+    if len(feature_columns) != len(set(feature_columns)):
+        raise DatasetValidationError("Feature column list contains duplicate names.")
+
+    missing_features = [c for c in feature_columns if c not in df.columns]
+    if missing_features:
+        raise DatasetValidationError(
+            f"Requested feature column(s) not found in dataset '{dataset_id}': {missing_features}. "
+            f"Available columns: {list(df.columns)}"
+        )
+
+    available = list(feature_columns)
 
     # ── 5. Validate minimum row count ─────────────────────────────────────────
     if len(df) < 2:

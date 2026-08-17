@@ -25,7 +25,9 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from typing import Annotated
@@ -34,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import CurrentUser, get_db
 from app.models.dataset import Dataset, DatasetStatus
+from app.rate_limiter import limiter
 from app.schemas.dataset import (
     DatasetHealthResponse,
     DatasetListResponse,
@@ -43,11 +46,18 @@ from app.schemas.dataset import (
     DatasetUploadResponse,
     DatasetUploadV2Response,
 )
+from app.schemas.recommendation import (
+    LatestBenchmarkSummary,
+    RecommendationJobCreateRequest,
+    RecommendationJobCreateResponse,
+    RecommendationJobResponse,
+)
 from app.ingestion.storage_backend import StorageError, get_configured_backend
 from app.services.health import health_service
 from app.services.ingestion_service import ingestion_service
 from app.services.profiler import TabularDataContainer, profiler_service
 from app.services.recommendation import recommendation_service
+from app.services.recommendation_job_service import recommendation_job_service
 
 
 def sanitize_filename(filename: str) -> str:
@@ -202,6 +212,7 @@ async def get_dataset_by_id(
 )
 async def upload_dataset(
     current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
     file: UploadFile = File(...),
 ) -> DatasetUploadResponse:
     """Validate, parse metadata from, and securely store an uploaded CSV dataset.
@@ -366,6 +377,27 @@ async def upload_dataset(
 
     uploaded_at = datetime.now(timezone.utc)
 
+    # 6. Persist Dataset record to PostgreSQL
+    if db is not None:
+        try:
+            db_dataset = Dataset(
+                id=dataset_id,
+                name=safe_filename,
+                description=f"Uploaded CSV {safe_filename}",
+                file_path=location.path,
+                file_size_bytes=size_bytes,
+                original_filename=file.filename,
+                row_count=row_count,
+                column_count=len(columns),
+                status=DatasetStatus.ready,
+                organisation_id=current_user.organisation_id,
+                user_id=current_user.id,
+            )
+            db.add(db_dataset)
+            await db.commit()
+        except Exception as exc:
+            logger.warning("Failed to persist Dataset to DB (non-fatal for upload): %s", exc)
+
     return DatasetUploadResponse(
         dataset_id=dataset_id,
         filename=safe_filename,
@@ -469,14 +501,116 @@ async def get_dataset_health(
 async def get_dataset_recommendations(
     dataset_id: str,
     current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> DatasetRecommendationResponse:
     """Produce ML task recommendations, candidate targets, feature actions, and model choices.
 
     Consumes DatasetProfileResponse and DatasetHealthResponse (sources of truth).
+    Optionally attaches latest completed evidence-based benchmark if available.
     """
     profile = await get_dataset_profile(dataset_id, current_user)
     health = health_service.evaluate_health(profile)
-    return recommendation_service.generate_recommendations(profile, health)
+    resp = recommendation_service.generate_recommendations(profile, health)
+
+    if db is not None:
+        try:
+            latest_bench = await recommendation_job_service.get_latest_completed_job(
+                dataset_id=dataset_id,
+                organisation_id=current_user.organisation_id,
+                db=db,
+            )
+            if latest_bench:
+                rec = latest_bench.recommendation
+                resp.latest_benchmark = LatestBenchmarkSummary(
+                    job_id=latest_bench.job_id,
+                    status=latest_bench.status,
+                    algorithm_id=rec.algorithm_id if rec else None,
+                    algorithm_name=rec.display_name if rec else None,
+                    score=rec.score if rec else None,
+                    metric=(latest_bench.reproducibility or {}).get("metric"),
+                    completed_at=latest_bench.completed_at,
+                )
+        except Exception as exc:
+            logger.debug("Failed to query latest recommendation benchmark for dataset %s: %s", dataset_id, exc)
+
+    return resp
+
+
+@router.post(
+    "/{dataset_id}/recommendations",
+    response_model=RecommendationJobCreateResponse,
+    summary="Create or deduplicate an automatic algorithm recommendation benchmark job",
+)
+@limiter.limit("10/minute")
+async def create_dataset_recommendation_job(
+    request: Request,
+    dataset_id: str,
+    body: RecommendationJobCreateRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Submit an automatic algorithm recommendation job for this dataset.
+
+    Returns:
+    - HTTP 202 Accepted (deduplicated=false) for newly queued jobs.
+    - HTTP 202 Accepted (deduplicated=true) when joining an existing active job.
+    - HTTP 200 OK (cached=true) when served from a previously completed benchmark cache.
+    """
+    job_resp, http_status, is_cached, is_dedup = await recommendation_job_service.create_or_deduplicate_job(
+        dataset_id=dataset_id,
+        request=body,
+        current_user=current_user,
+        db=db,
+    )
+    result_obj = RecommendationJobCreateResponse(
+        job=job_resp,
+        cached=is_cached,
+        deduplicated=is_dedup,
+    )
+    return JSONResponse(
+        status_code=http_status,
+        content=jsonable_encoder(result_obj),
+    )
+
+
+@router.get(
+    "/{dataset_id}/recommendations/{recommendation_job_id}",
+    response_model=RecommendationJobResponse,
+    summary="Get status and results of a specific recommendation benchmark job",
+)
+async def get_dataset_recommendation_job(
+    dataset_id: str,
+    recommendation_job_id: str,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RecommendationJobResponse:
+    """Retrieve typed state and benchmark results of a recommendation job."""
+    return await recommendation_job_service.get_recommendation_job(
+        dataset_id=dataset_id,
+        job_id=recommendation_job_id,
+        current_user=current_user,
+        db=db,
+    )
+
+
+@router.post(
+    "/{dataset_id}/recommendations/{recommendation_job_id}/cancel",
+    response_model=RecommendationJobResponse,
+    summary="Cancel an active recommendation benchmark job",
+)
+async def cancel_dataset_recommendation_job(
+    dataset_id: str,
+    recommendation_job_id: str,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RecommendationJobResponse:
+    """Cancel an active recommendation job cooperatively."""
+    return await recommendation_job_service.cancel_recommendation_job(
+        dataset_id=dataset_id,
+        job_id=recommendation_job_id,
+        current_user=current_user,
+        db=db,
+    )
 
 
 # ---------------------------------------------------------------------------

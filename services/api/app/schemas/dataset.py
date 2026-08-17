@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.recommendation import LatestBenchmarkSummary
+
 
 class DatasetResponse(BaseModel):
     """Schema representing an uploaded/registered Dataset."""
@@ -157,6 +159,7 @@ class DatasetRecommendationResponse(BaseModel):
     target_suggestions: list[TargetSuggestion] = Field(default_factory=list)
     feature_recommendations: list[FeatureRecommendation] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    latest_benchmark: LatestBenchmarkSummary | None = Field(default=None, description="Latest completed evidence-based recommendation benchmark summary if available")
 
     model_config = {"from_attributes": True}
 

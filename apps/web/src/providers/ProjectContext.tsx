@@ -12,6 +12,21 @@ import type { JobEntity } from '../types/job';
 
 const STORAGE_KEY = 'ml_playground_project_state_v2';
 
+export interface ActiveTrainingConfiguration {
+  dataset_id: string;
+  dataset_name: string;
+  target_column: string;
+  feature_columns: string[];
+  algorithm: string;
+  scaler: string;
+  imputer: string;
+  train_test_split: number;
+  cv_folds: number;
+  random_seed: number;
+  recommendation_job_id?: string | null;
+  selection_source: 'recommended' | 'manual' | 'default';
+}
+
 /* ── Shape ────────────────────────────────────────────────────────────── */
 export interface ProjectState {
   /** Active dataset loaded in Dataset & Profiler */
@@ -20,6 +35,8 @@ export interface ProjectState {
   selectedFeatures: string[];
   /** Column chosen as target */
   selectedTarget:   string | null;
+  /** Active / persisted training configuration */
+  trainingConfig:   ActiveTrainingConfiguration | null;
   /** Most recently completed / active training job */
   activeJob:        JobEntity | null;
   /** Which lifecycle stage is "current" for the rail */
@@ -38,6 +55,7 @@ interface ProjectContextValue extends ProjectState {
   setDataset:            (d: Dataset | null)  => void;
   setSelectedFeatures:   (f: string[])         => void;
   setSelectedTarget:     (t: string | null)    => void;
+  setTrainingConfig:     (c: ActiveTrainingConfiguration | null) => void;
   setActiveJob:          (j: JobEntity | null) => void;
   setLifecycleStage:     (s: LifecycleStage)   => void;
   /** Convenience: load a new dataset and reset selection */
@@ -68,6 +86,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [dataset,          setDataset]          = useState<Dataset | null>(initial.dataset ?? null);
   const [selectedFeatures, setSelectedFeatures] = useState<string[]>(initial.selectedFeatures ?? []);
   const [selectedTarget,   setSelectedTarget]   = useState<string | null>(initial.selectedTarget ?? null);
+  const [trainingConfig,   setTrainingConfig]   = useState<ActiveTrainingConfiguration | null>(initial.trainingConfig ?? null);
   const [activeJob,        setActiveJob]        = useState<JobEntity | null>(initial.activeJob ?? null);
   const [lifecycleStage,   setLifecycleStage]   = useState<LifecycleStage>(initial.lifecycleStage ?? 'dataset');
 
@@ -78,6 +97,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         dataset,
         selectedFeatures,
         selectedTarget,
+        trainingConfig,
         activeJob,
         lifecycleStage,
       };
@@ -85,12 +105,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('Failed to save project state to localStorage:', err);
     }
-  }, [dataset, selectedFeatures, selectedTarget, activeJob, lifecycleStage]);
+  }, [dataset, selectedFeatures, selectedTarget, trainingConfig, activeJob, lifecycleStage]);
 
   const loadDataset = useCallback((d: Dataset) => {
     setDataset(d);
     setSelectedFeatures([]);
     setSelectedTarget(null);
+    setTrainingConfig(null);
     setActiveJob(null);
     setLifecycleStage('dataset');
   }, []);
@@ -99,6 +120,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setDataset(null);
     setSelectedFeatures([]);
     setSelectedTarget(null);
+    setTrainingConfig(null);
     setActiveJob(null);
     setLifecycleStage('dataset');
     try {
@@ -114,11 +136,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         dataset,
         selectedFeatures,
         selectedTarget,
+        trainingConfig,
         activeJob,
         lifecycleStage,
         setDataset,
         setSelectedFeatures,
         setSelectedTarget,
+        setTrainingConfig,
         setActiveJob,
         setLifecycleStage,
         loadDataset,
@@ -131,6 +155,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 }
 
 /* ── Hook ─────────────────────────────────────────────────────────────── */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useProject(): ProjectContextValue {
   const ctx = useContext(ProjectContext);
   if (!ctx) {

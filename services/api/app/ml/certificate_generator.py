@@ -34,7 +34,7 @@ _SECRET_KEY = _raw_cert_secret or "mlplayground-cert-key-local-dev-only"
 class CertificatePayload(BaseModel):
     """Cryptographic certificate data payload."""
 
-    certificate_id: str = Field(..., description="Unique certificate identifier", example="CERT-89316C9A")
+    certificate_id: str = Field(..., description="Unique certificate identifier", examples=["CERT-89316C9A"])
     user_id: str = Field(..., description="Learner UUID")
     user_name: str = Field("Student Learner", description="Learner full name")
     project_id: str = Field(..., description="Portfolio project UUID")
