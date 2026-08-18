@@ -75,32 +75,6 @@ export interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 // ---------------------------------------------------------------------------
-// Initials Helper Function
-// ---------------------------------------------------------------------------
-
-/**
- * Compute dynamic user initials from user full_name or email.
- * - "Rushil Mehta" -> "RM"
- * - "Rushil" -> "RU"
- * - "rushil@example.com" -> "RU"
- * - Fallback -> "U"
- */
-export function getInitials(name?: string | null, email?: string | null): string {
-  if (name && name.trim().length > 0) {
-    const parts = name.trim().split(/\s+/)
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-    }
-    return parts[0].slice(0, 2).toUpperCase()
-  }
-  if (email && email.trim().length > 0) {
-    const username = email.split('@')[0]
-    return username.slice(0, 2).toUpperCase()
-  }
-  return 'U'
-}
-
-// ---------------------------------------------------------------------------
 // API helpers (cookie-aware)
 // ---------------------------------------------------------------------------
 
@@ -183,6 +157,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (loginData.access_token) {
           localStorage.setItem('access_token', loginData.access_token)
         }
+        if (loginData.refresh_token) {
+          localStorage.setItem('refresh_token', loginData.refresh_token)
+        }
 
         const profileRes = await authFetch('/auth/me')
         if (profileRes.ok) {
@@ -229,6 +206,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data.access_token) {
       localStorage.setItem('access_token', data.access_token)
     }
+    if (data.refresh_token) {
+      localStorage.setItem('refresh_token', data.refresh_token)
+    }
 
     // Fetch updated profile after login
     const profileRes = await authFetch('/auth/me')
@@ -245,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Server unavailable — still clear local state
     } finally {
       localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
       setUser(null)
     }
   }, [])
@@ -257,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Server unavailable — still clear local state
     } finally {
       localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
       setUser(null)
     }
   }, [])
@@ -292,6 +274,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 // Hooks
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuthContext(): AuthContextValue {
   const ctx = useContext(AuthContext)
   if (!ctx) {
@@ -300,4 +283,7 @@ export function useAuthContext(): AuthContextValue {
   return ctx
 }
 
-export const useAuth = useAuthContext
+// eslint-disable-next-line react-refresh/only-export-components
+export function useAuth(): AuthContextValue {
+  return useAuthContext()
+}

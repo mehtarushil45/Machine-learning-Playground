@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
-import { useAuthContext, getInitials } from '../../providers/AuthContext'
+import { useAuthContext } from '../../providers/AuthContext'
+import { getInitials } from '../../utils/avatar'
 import { LogOut, User as UserIcon, Shield } from 'lucide-react'
 
 export interface SidebarUserAvatarProps {

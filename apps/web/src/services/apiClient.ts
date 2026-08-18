@@ -170,7 +170,9 @@ export class ApiClient {
         try {
           const errData = await response.json()
           detail = errData.detail ?? detail
-        } catch (_) {}
+        } catch {
+          // ignore body parsing error on non-JSON 401 responses
+        }
 
         const authErr = new AuthExpiredError(detail)
         this.onAuthError?.(authErr)
@@ -183,7 +185,9 @@ export class ApiClient {
         try {
           errData = await response.json()
           errorDetail = (errData as { detail?: string })?.detail || JSON.stringify(errData)
-        } catch (_) {}
+        } catch {
+          // ignore body parsing error on non-JSON error responses
+        }
         throw new ApiError(response.status, errorDetail, errData)
       }
 
@@ -231,10 +235,16 @@ export class ApiClient {
 
     try {
       const refreshUrl = this.buildUrl(this.refreshTokenEndpoint)
+      const storedRefreshToken =
+        typeof localStorage !== 'undefined' ? localStorage.getItem('refresh_token') : null
+
       const res = await fetch(refreshUrl, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
+        body: storedRefreshToken
+          ? JSON.stringify({ refresh_token: storedRefreshToken })
+          : undefined,
       })
 
       if (!res.ok) {
@@ -245,6 +255,9 @@ export class ApiClient {
       const newToken = data.access_token || null
       if (newToken && this.setAuthToken) {
         this.setAuthToken(newToken)
+      }
+      if (data.refresh_token && typeof localStorage !== 'undefined') {
+        localStorage.setItem('refresh_token', data.refresh_token)
       }
 
       this.notifyRefreshSubscribers(newToken)

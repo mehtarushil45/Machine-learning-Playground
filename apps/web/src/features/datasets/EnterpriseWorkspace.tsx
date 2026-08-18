@@ -155,7 +155,7 @@ export const EnterpriseWorkspace = memo(function EnterpriseWorkspace({
     return () => {
       controller.abort()
     }
-  }, [dataset, onSelectedTargetChange])
+  }, [dataset, onSelectedTargetChange, selectedTarget])
 
   const scrollToSection = useCallback((sectionId: string) => {
     const elem = document.getElementById(sectionId)

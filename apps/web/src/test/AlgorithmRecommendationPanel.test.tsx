@@ -102,6 +102,7 @@ describe('AlgorithmRecommendationPanel Component', () => {
 
     const btn = screen.getByRole('button', { name: /Analyze & Recommend Algorithms/i });
     expect(btn).toBeDisabled();
+    expect(screen.getByTestId('recommendation-eligibility-reason')).toHaveTextContent('Select at least one feature column.');
 
     // Re-render with target included in features (invalid)
     rerender(
@@ -118,6 +119,7 @@ describe('AlgorithmRecommendationPanel Component', () => {
     );
 
     expect(screen.getByRole('button', { name: /Analyze & Recommend Algorithms/i })).toBeDisabled();
+    expect(screen.getByTestId('recommendation-eligibility-reason')).toHaveTextContent('Remove "target" from features because it is the target.');
 
     // Re-render with valid target and separate features
     rerender(
@@ -134,6 +136,7 @@ describe('AlgorithmRecommendationPanel Component', () => {
     );
 
     expect(screen.getByRole('button', { name: /Analyze & Recommend Algorithms/i })).toBeEnabled();
+    expect(screen.queryByTestId('recommendation-eligibility-reason')).not.toBeInTheDocument();
   });
 
   it('submits recommendation job and handles immediate cache hit', async () => {

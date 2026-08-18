@@ -40,11 +40,11 @@ services:
       retries: 10
       start_period: 5s
 
-  # ── Database Migration (one-shot) ───────────────────────────────────────────
-  # Runs `alembic upgrade head` once, then exits with code 0.
-  # Both api and worker depend on this via service_completed_successfully so
-  # they never start against an un-migrated schema.
+  # ── Database Migration Tool (manual/CI profile) ───────────────────────────
+  # Migrations are executed automatically on API container startup via entrypoint.
+  # This service is preserved under the 'tools' profile for manual invocation if needed.
   migrate:
+    profiles: ["tools"]
     build:
       context: ..
       dockerfile: services/api/Dockerfile
@@ -70,6 +70,7 @@ services:
       - ../.env
     environment:
       - PYTHONPATH=/app:/app/services/api
+      - RUN_MIGRATIONS=true
       # Docker networking overrides (overrides ../.env local settings)
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/mlplatform
       - REDIS_URL=redis://redis:6379/0
@@ -85,8 +86,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ready || python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')\""]
       interval: 10s
@@ -106,6 +105,7 @@ services:
       - ../.env
     environment:
       - PYTHONPATH=/app:/app/services/api
+      - RUN_MIGRATIONS=false
       # Docker networking overrides (overrides ../.env local settings)
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/mlplatform
       - REDIS_URL=redis://redis:6379/0
@@ -121,8 +121,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "celery -A services.worker.celery_app inspect ping || exit 1"]
       interval: 10s

@@ -21,7 +21,9 @@ RUN pip install --no-cache-dir --no-build-isolation -e .
 
 WORKDIR /app/services/api
 
-RUN mkdir -p /app/services/api/uploads /app/uploads && chown -R appuser:appgroup /app
+RUN mkdir -p /app/services/api/uploads /app/uploads \
+    && chmod +x /app/services/api/docker-entrypoint.sh \
+    && chown -R appuser:appgroup /app
 
 USER appuser
 
@@ -31,4 +33,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
+ENTRYPOINT ["/app/services/api/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

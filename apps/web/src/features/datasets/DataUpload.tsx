@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { parseCsvFile } from '../../services/csvService'
 import { validateCsvFile, formatBytes } from '../../utils/validation'
-import { apiClient, ApiError } from '../../services/apiClient'
+import { apiClient } from '../../services/apiClient'
 import type { Dataset } from '../../types/dataset'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -40,10 +40,7 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
       const data = await apiClient.upload<ApiUploadResponse>('/datasets/upload', formData)
       return data
     } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw new Error(err.detail || err.message)
-      }
-      if (err instanceof Error && err.message) {
+      if (err instanceof Error) {
         throw err
       }
       return null
@@ -98,7 +95,12 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
       }
 
       setUploadedFileMeta(finalMeta)
-      onDataLoaded(dataset)
+      const enrichedDataset: Dataset = {
+        ...dataset,
+        datasetId: finalMeta.dataset_id,
+        rowCount: finalMeta.row_count ?? dataset.rows.length,
+      }
+      onDataLoaded(enrichedDataset)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown parsing error.')
     } finally {

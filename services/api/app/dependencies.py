@@ -43,11 +43,8 @@ from app.models.user import User
 
 async def get_db() -> AsyncSession:  # type: ignore[return]
     """Yield an async database session per request."""
-    try:
-        async with AsyncSessionLocal() as session:
-            yield session
-    except Exception:
-        yield None
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]

@@ -96,11 +96,13 @@ export function AlgorithmRecommendationPanel({
   const [showEvidenceModal, setShowEvidenceModal] = useState(false);
 
   /* ── Fingerprint for Stale Detection ─────────────────────────────── */
+  const effectiveDatasetId = dataset?.datasetId || (dataset ? `ds-${dataset.fileName || 'local'}` : undefined);
+
   const currentFingerprint = useMemo(() => {
-    if (!dataset?.datasetId || !selectedTarget || selectedFeatures.length === 0) return null;
+    if (!effectiveDatasetId || !selectedTarget || selectedFeatures.length === 0) return null;
     const sortedFeats = [...selectedFeatures].sort().join(',');
-    return `${dataset.datasetId}:${selectedTarget}:${sortedFeats}:${cvFolds}:${trainTestSplit}`;
-  }, [dataset?.datasetId, selectedTarget, selectedFeatures, cvFolds, trainTestSplit]);
+    return `${effectiveDatasetId}:${selectedTarget}:${sortedFeats}:${cvFolds}:${trainTestSplit}`;
+  }, [effectiveDatasetId, selectedTarget, selectedFeatures, cvFolds, trainTestSplit]);
 
   /* ── Derived Manual Override Flag ────────────────────────────────── */
   const isManualOverride = Boolean(
@@ -182,14 +184,33 @@ export function AlgorithmRecommendationPanel({
   const abortCtrlRef = useRef<AbortController | null>(null);
   const pollJobRef = useRef<((datasetId: string, jobId: string) => Promise<void>) | null>(null);
 
-  const isEligibleToAnalyze = Boolean(
-    dataset?.datasetId &&
-      selectedTarget &&
-      selectedFeatures.length > 0 &&
-      !selectedFeatures.includes(selectedTarget) &&
-      !isSubmitting &&
-      uiState !== 'BENCHMARKING',
-  );
+  const eligibilityReason = useMemo<string | null>(() => {
+    if (!dataset) {
+      return 'Upload a dataset to begin.';
+    }
+    if (!selectedTarget) {
+      return 'Select a target column.';
+    }
+    if (selectedFeatures.length === 0) {
+      return 'Select at least one feature column.';
+    }
+    if (selectedFeatures.includes(selectedTarget)) {
+      return `Remove "${selectedTarget}" from features because it is the target.`;
+    }
+    const usableFeatures = selectedFeatures.filter((f) => f !== selectedTarget);
+    if (usableFeatures.length === 0) {
+      return 'Select at least one non-target feature column.';
+    }
+    if (isSubmitting) {
+      return 'Submitting recommendation benchmark...';
+    }
+    if (uiState === 'BENCHMARKING') {
+      return 'Benchmarking algorithms in progress...';
+    }
+    return null;
+  }, [dataset, selectedTarget, selectedFeatures, isSubmitting, uiState]);
+
+  const isEligibleToAnalyze = eligibilityReason === null;
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -269,16 +290,16 @@ export function AlgorithmRecommendationPanel({
         document.visibilityState === 'visible' &&
         activeJob &&
         ['PENDING', 'QUEUED', 'PROFILING', 'SCREENING', 'VERIFYING'].includes(activeJob.status) &&
-        dataset?.datasetId
+        effectiveDatasetId
       ) {
-        pollJob(dataset.datasetId, activeJob.job_id);
+        pollJob(effectiveDatasetId, activeJob.job_id);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [activeJob, dataset?.datasetId, pollJob]);
+  }, [activeJob, effectiveDatasetId, pollJob]);
 
   /* ── Clean Up on Unmount ─────────────────────────────────────────── */
   useEffect(() => {
@@ -289,14 +310,14 @@ export function AlgorithmRecommendationPanel({
 
   /* ── Submit Benchmark Request ────────────────────────────────────── */
   const handleStartAnalysis = async () => {
-    if (!dataset?.datasetId || !selectedTarget) return;
+    if (!effectiveDatasetId || !selectedTarget) return;
 
     setIsSubmitting(true);
     setErrorMessage(null);
 
     const payload: RecommendationRequest = {
       target_column: selectedTarget,
-      feature_columns: selectedFeatures,
+      feature_columns: selectedFeatures.filter((f) => f !== selectedTarget),
       cv_folds: cvFolds,
       train_test_split: trainTestSplit,
       random_seed: 42,
@@ -305,7 +326,7 @@ export function AlgorithmRecommendationPanel({
     };
 
     try {
-      const res = await startRecommendation(dataset.datasetId, payload);
+      const res = await startRecommendation(effectiveDatasetId, payload);
       setActiveJob(res.job);
       setLastAnalyzedFingerprint(currentFingerprint);
 
@@ -322,7 +343,7 @@ export function AlgorithmRecommendationPanel({
         );
       } else {
         // Start polling
-        pollJob(dataset.datasetId, res.job.job_id);
+        pollJob(effectiveDatasetId, res.job.job_id);
         if (res.deduplicated) {
           onShowToast?.(
             'Joined Benchmark',
@@ -344,10 +365,10 @@ export function AlgorithmRecommendationPanel({
 
   /* ── Cancel Benchmark Request ────────────────────────────────────── */
   const handleCancelAnalysis = async () => {
-    if (!dataset?.datasetId || !activeJob?.job_id) return;
+    if (!effectiveDatasetId || !activeJob?.job_id) return;
     setIsCancelling(true);
     try {
-      const updated = await cancelRecommendation(dataset.datasetId, activeJob.job_id);
+      const updated = await cancelRecommendation(effectiveDatasetId, activeJob.job_id);
       setActiveJob(updated);
       stopPolling();
       onShowToast?.('Benchmark Cancelled', 'Algorithm recommendation was cancelled.', 'info');
@@ -505,10 +526,31 @@ export function AlgorithmRecommendationPanel({
               <span>{errorMessage}</span>
             </div>
           )}
+          {!isEligibleToAnalyze && eligibilityReason && (
+            <div
+              data-testid="recommendation-eligibility-reason"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 8px',
+                borderRadius: 4,
+                background: 'rgba(201,162,75,0.08)',
+                border: `1px solid rgba(201,162,75,0.25)`,
+                color: BB.gold,
+                fontSize: 9,
+                lineHeight: 1.3,
+              }}
+            >
+              <Info style={{ width: 11, height: 11, flexShrink: 0 }} />
+              <span>{eligibilityReason}</span>
+            </div>
+          )}
           <button
             onClick={handleStartAnalysis}
             disabled={!isEligibleToAnalyze}
             aria-label="Analyze & Recommend Algorithms"
+            title={!isEligibleToAnalyze && eligibilityReason ? eligibilityReason : 'Analyze & Recommend Algorithms'}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -782,9 +824,31 @@ export function AlgorithmRecommendationPanel({
             </span>
           </div>
 
+          {!isEligibleToAnalyze && eligibilityReason && (
+            <div
+              data-testid="recommendation-stale-eligibility-reason"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 8px',
+                borderRadius: 4,
+                background: 'rgba(201,162,75,0.08)',
+                border: `1px solid rgba(201,162,75,0.25)`,
+                color: BB.gold,
+                fontSize: 9,
+                lineHeight: 1.3,
+              }}
+            >
+              <Info style={{ width: 11, height: 11, flexShrink: 0 }} />
+              <span>{eligibilityReason}</span>
+            </div>
+          )}
+
           <button
             onClick={handleStartAnalysis}
             disabled={!isEligibleToAnalyze}
+            title={!isEligibleToAnalyze && eligibilityReason ? eligibilityReason : 'Re-analyze with New Settings'}
             style={{
               width: '100%',
               display: 'inline-flex',
@@ -793,8 +857,8 @@ export function AlgorithmRecommendationPanel({
               gap: 5,
               padding: '4px 8px',
               borderRadius: 5,
-              background: `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})`,
-              border: `1px solid ${BB.primaryLight}`,
+              background: isEligibleToAnalyze ? `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})` : BB.disabled,
+              border: `1px solid ${isEligibleToAnalyze ? BB.primaryLight : 'transparent'}`,
               color: BB.text,
               fontSize: 9,
               fontWeight: 700,
