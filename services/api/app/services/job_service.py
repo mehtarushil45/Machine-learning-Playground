@@ -117,9 +117,14 @@ def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
 
     # Read lightweight sample of target column only
     try:
-        file_path = find_dataset_path(request.dataset_id)
-        import pandas as pd
-        sample_df = pd.read_csv(file_path, usecols=[request.target_column], nrows=50)
+        try:
+            file_path = find_dataset_path(request.dataset_id)
+            import pandas as pd
+            sample_df = pd.read_csv(file_path, usecols=[request.target_column], nrows=50)
+        except Exception:
+            from services.worker.core.dataset_loader import load_dataset_dataframe
+            full_df = load_dataset_dataframe(request.dataset_id)
+            sample_df = full_df[[request.target_column]].head(50)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

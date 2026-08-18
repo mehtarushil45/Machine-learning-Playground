@@ -276,10 +276,26 @@ class MinIOStorageBackend:
                 except Exception:
                     pass
 
+            # 3. If still not found (e.g. organisation_id was not provided), search across the bucket
+            if body is None:
+                try:
+                    paginator = client.get_paginator("list_objects_v2")
+                    for page in paginator.paginate(Bucket=self._bucket):
+                        for obj in page.get("Contents", []):
+                            if dataset_id in obj["Key"]:
+                                found_key = obj["Key"]
+                                response = client.get_object(Bucket=self._bucket, Key=found_key)
+                                body = response["Body"].read()
+                                object_key = found_key
+                                break
+                        if body is not None:
+                            break
+                except Exception:
+                    pass
+
         if body is None:
             raise StorageError(
-                f"MinIOStorageBackend: failed downloading object for dataset_id '{dataset_id}' "
-                f"from bucket '{self._bucket}'"
+                f"MinIOStorageBackend: failed downloading object for dataset_id '{dataset_id}' from bucket '{self._bucket}'."
             )
 
         suffix = os.path.splitext(object_key or "dataset.csv")[1] or ".csv"

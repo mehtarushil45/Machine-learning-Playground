@@ -38,12 +38,12 @@ from app.schemas.prediction import (
     ValidationErrorResponse,
 )
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/predict",
     tags=["Prediction & Inference"],
-    dependencies=[Depends(CurrentUser)],  # ← all inference endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all inference endpoints require auth
 )
 
 

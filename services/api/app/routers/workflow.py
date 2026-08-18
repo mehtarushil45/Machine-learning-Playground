@@ -15,12 +15,12 @@ from app.ml.workflow_integration import (
     get_workflow_status,
 )
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/workflow",
     tags=["Enterprise Workflow Integration"],
-    dependencies=[Depends(CurrentUser)],  # ← all workflow endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all workflow endpoints require auth
 )
 
 

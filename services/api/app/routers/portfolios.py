@@ -32,7 +32,7 @@ from app.schemas.classroom import PortfolioProjectCreate, PortfolioProjectRespon
 router = APIRouter(
     prefix="/portfolios",
     tags=["Student Portfolio & Cryptographic Certificates"],
-    dependencies=[Depends(CurrentUser)],  # ← all portfolio endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all portfolio endpoints require auth
 )
 
 

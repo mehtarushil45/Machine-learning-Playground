@@ -24,12 +24,12 @@ from app.schemas.pipeline import (
     PipelineValidationResponse,
 )
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/pipelines",
     tags=["Visual Pipelines & Code Studio"],
-    dependencies=[Depends(CurrentUser)],  # ← all pipeline endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all pipeline endpoints require auth
 )
 
 

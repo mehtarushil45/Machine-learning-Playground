@@ -61,9 +61,9 @@ from app.ml.model_registry import (
     demote_model,
 )
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
-router = APIRouter(tags=["Experiments & Models"], dependencies=[Depends(CurrentUser)])
+router = APIRouter(tags=["Experiments & Models"], dependencies=[Depends(get_current_user)])
 
 
 # ===========================================================================

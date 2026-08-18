@@ -30,22 +30,22 @@ router = APIRouter(tags=["Health"])
 
 
 async def _check_database_ping(db: AsyncSession | None) -> ReadinessDependencyStatus:
-    """Perform PostgreSQL connectivity check with a SELECT 1 query and 100ms timeout."""
+    """Perform PostgreSQL connectivity check with a SELECT 1 query."""
     start_time = time.perf_counter()
     try:
         if db is not None:
-            await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=0.10)
+            await asyncio.wait_for(db.execute(text("SELECT 1")), timeout=2.0)
         else:
             from app.database import AsyncSessionLocal
             async with AsyncSessionLocal() as session:
-                await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=0.10)
+                await asyncio.wait_for(session.execute(text("SELECT 1")), timeout=2.0)
 
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
         return ReadinessDependencyStatus(status="ok", latency_ms=latency_ms)
 
     except asyncio.TimeoutError:
         return ReadinessDependencyStatus(
-            status="unhealthy", error="Database ping timed out (100ms limit)"
+            status="unhealthy", error="Database ping timed out (2.0s limit)"
         )
     except Exception as exc:
         return ReadinessDependencyStatus(status="unhealthy", error=str(exc))
@@ -57,9 +57,9 @@ async def _check_redis_ping() -> ReadinessDependencyStatus:
     try:
         import redis.asyncio as aioredis
         client = aioredis.from_url(
-            settings.redis_url, socket_connect_timeout=0.20, socket_timeout=0.20
+            settings.redis_url, socket_connect_timeout=2.0, socket_timeout=2.0
         )
-        pong = await asyncio.wait_for(client.ping(), timeout=0.20)
+        pong = await asyncio.wait_for(client.ping(), timeout=2.0)
         await client.aclose()
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
         if pong:

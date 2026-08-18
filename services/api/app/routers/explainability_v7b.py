@@ -18,12 +18,12 @@ from app.ml.ethics_engine import (
     generate_trust_report,
 )
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/explainability",
     tags=["Explainability & Ethics (V7B)"],
-    dependencies=[Depends(CurrentUser)],  # ← all ethics/trust endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all ethics/trust endpoints require auth
 )
 
 

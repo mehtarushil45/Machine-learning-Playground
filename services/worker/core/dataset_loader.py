@@ -44,6 +44,17 @@ def find_dataset_path(dataset_id: str) -> str:
                     if dataset_id in sub_fname and sub_fname.endswith(".csv"):
                         return os.path.join(fpath, sub_fname)
 
+    # 3. Check MinIO / S3 Object Storage backend
+    try:
+        from app.ingestion.storage_backend import get_configured_backend
+        backend = get_configured_backend()
+        if backend is not None and hasattr(backend, "download_to_temp"):
+            temp_path = backend.download_to_temp(dataset_id=dataset_id)
+            if temp_path and os.path.exists(temp_path):
+                return temp_path
+    except Exception as exc:
+        logger.debug("MinIO temp lookup in find_dataset_path: %s", exc)
+
     raise FileNotFoundError(
         f"No dataset file found for dataset_id='{dataset_id}'. "
         "Please upload a valid CSV dataset before training."

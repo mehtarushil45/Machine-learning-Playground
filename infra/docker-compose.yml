@@ -134,8 +134,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-mlplayground_minio_admin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-mlplayground_minio_supersecret_2026}
     ports:
       - "9000:9000"   # S3-compatible API
       - "9001:9001"   # MinIO web console

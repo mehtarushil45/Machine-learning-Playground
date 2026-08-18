@@ -41,12 +41,12 @@ from app.schemas.studio import (
     DSLVersionEntry,
 )
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/studio",
     tags=["View-as-Code Studio"],
-    dependencies=[Depends(CurrentUser)],  # ← all studio endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all studio endpoints require auth
 )
 
 

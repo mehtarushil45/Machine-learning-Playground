@@ -66,14 +66,14 @@ from app.ml.model_governance import (
 
 from app.ml.algorithm_factory import ALGORITHM_REGISTRY
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 logger = logging.getLogger("apex_ml.router.models")
 
 router = APIRouter(
     prefix="/models",
     tags=["Models"],
-    dependencies=[Depends(CurrentUser)],  # ← all model endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all model endpoints require auth
 )
 
 

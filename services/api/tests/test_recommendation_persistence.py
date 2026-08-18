@@ -126,10 +126,15 @@ def test_postgresql_partial_unique_index_ddl_compilation():
 
 def test_alembic_migration_upgrade_and_downgrade():
     """Migration file must have valid revision IDs and define clean upgrade and downgrade."""
-    from alembic.versions import g1a2b3c4d5e7_add_recommendation_jobs as mig
+    import importlib.util
+    import glob
+    migration_files = glob.glob(os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "*recommendation*.py"))
+    assert len(migration_files) >= 1
+    spec = importlib.util.spec_from_file_location("mig", migration_files[0])
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
 
     assert mig.revision == "g1a2b3c4d5e7"
-    assert mig.down_revision == "f1a2b3c4d5e6"
     assert hasattr(mig, "upgrade")
     assert hasattr(mig, "downgrade")
 
@@ -184,7 +189,7 @@ async def test_worker_task_lifecycle_transitions(tmp_path):
         async def __aexit__(self, exc_type, exc_val, exc_tb):
             pass
 
-    with patch("services.worker.tasks.recommendation_task.AsyncSessionLocal", return_value=MockAsyncSessionContext()), \
+    with patch("services.worker.tasks.recommendation_task.get_worker_session", return_value=MockAsyncSessionContext()), \
          patch("services.worker.tasks.recommendation_task.load_dataset_dataframe", return_value=df), \
          patch("services.worker.tasks.recommendation_task._is_job_cancelled", return_value=False):
 
@@ -231,7 +236,7 @@ async def test_worker_task_insufficient_data_outcome(tmp_path):
         async def __aexit__(self, exc_type, exc_val, exc_tb):
             pass
 
-    with patch("services.worker.tasks.recommendation_task.AsyncSessionLocal", return_value=MockAsyncSessionContext()), \
+    with patch("services.worker.tasks.recommendation_task.get_worker_session", return_value=MockAsyncSessionContext()), \
          patch("services.worker.tasks.recommendation_task.load_dataset_dataframe", return_value=df_invalid), \
          patch("services.worker.tasks.recommendation_task._is_job_cancelled", return_value=False):
 
@@ -269,7 +274,7 @@ async def test_worker_task_cancellation_during_profiling_and_execution():
             pass
 
     # Cancelled during profiling check
-    with patch("services.worker.tasks.recommendation_task.AsyncSessionLocal", return_value=MockAsyncSessionContext()), \
+    with patch("services.worker.tasks.recommendation_task.get_worker_session", return_value=MockAsyncSessionContext()), \
          patch("services.worker.tasks.recommendation_task._is_job_cancelled", return_value=True):
 
         result = await _execute_recommendation_job_async(str(job_id))

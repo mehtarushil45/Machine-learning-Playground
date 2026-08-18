@@ -24,12 +24,12 @@ from app.ml.classroom_analytics import (
     generate_experiment_grade,
 )
 from app.ml.experiment_tracker import get_experiment
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/classrooms",
     tags=["Classrooms & Analytics (V7B)"],
-    dependencies=[Depends(CurrentUser)],  # ← all V7B classroom endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all V7B classroom endpoints require auth
 )
 
 

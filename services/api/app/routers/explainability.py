@@ -32,12 +32,12 @@ from app.schemas.explainability import (
     WhatIfResponse,
 )
 
-from app.dependencies import CurrentUser
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/explainability",
     tags=["Explainability & Fairness (V5B)"],
-    dependencies=[Depends(CurrentUser)],  # ← all explainability endpoints require auth
+    dependencies=[Depends(get_current_user)],  # ← all explainability endpoints require auth
 )
 
 
