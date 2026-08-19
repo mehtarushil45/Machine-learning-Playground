@@ -150,8 +150,17 @@ class CandidateBenchmarkResult:
     score: Optional[float] = None  # Canonical higher-is-better score
     score_std: Optional[float] = None
     raw_metric_value: Optional[float] = None  # Human readable (e.g. positive RMSE)
+    validation_score: Optional[float] = None
+    ci_lower: Optional[float] = None
+    ci_upper: Optional[float] = None
+    metric_used: Optional[str] = None
     fold_scores: List[float] = field(default_factory=list)
     training_seconds: float = 0.0
+    training_time_seconds: Optional[float] = None
+    interpretability_score: Optional[int] = None
+    interpretability_label: Optional[str] = None
+    why_recommended: Optional[str] = None
+    risk_flags: List[str] = field(default_factory=list)
     reason_codes: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     skip_reason: Optional[str] = None
@@ -747,6 +756,40 @@ def run_recommendation_benchmark(
             exclusions=exclusion_dicts,
             reproducibility=reproducibility,
         )
+
+    # ── Enrich candidates with UI display fields ───────────────────────────
+    category_interpretability = {
+        "baseline": (5, "High"),
+        "linear": (5, "High"),
+        "tree": (4, "Moderate"),
+        "naive_bayes": (3, "Moderate"),
+        "distance": (2, "Low"),
+        "boosting": (2, "Low"),
+        "kernel": (1, "Very Low"),
+    }
+    
+    for cand in completed_candidates:
+        cand.validation_score = cand.score
+        cand.metric_used = chosen_metric
+        cand.training_time_seconds = cand.training_seconds
+        
+        if cand.score is not None and cand.score_std is not None and effective_folds > 0:
+            margin = 1.96 * (cand.score_std / math.sqrt(effective_folds))
+            cand.ci_lower = round(cand.score - margin, 4)
+            cand.ci_upper = round(cand.score + margin, 4)
+            
+        interp = category_interpretability.get(cand.category, (3, "Moderate"))
+        cand.interpretability_score = interp[0]
+        cand.interpretability_label = interp[1]
+        
+        if cand.training_time_seconds and cand.training_time_seconds > 5.0:
+            cand.risk_flags.append("High training latency")
+        if cand.category == "tree" and train_rows < 100:
+            cand.risk_flags.append("Prone to overfitting on small data")
+        if cand.category in ("distance", "kernel") and train_rows > 10000:
+            cand.risk_flags.append("Scalability concerns on large data")
+            
+        cand.why_recommended = f"Achieved a validated {chosen_metric.upper()} of {cand.validation_score} with {cand.interpretability_label.lower()} interpretability. Best suited for this dataset profile."
 
     # Assign ranks
     for rank_idx, cand in enumerate(completed_candidates, start=1):

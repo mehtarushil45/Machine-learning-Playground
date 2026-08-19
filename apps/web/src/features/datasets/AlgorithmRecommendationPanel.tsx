@@ -666,33 +666,75 @@ export function AlgorithmRecommendationPanel({
 
       {/* 5. COMPLETED (RECOMMENDED OR TIE-BREAK) */}
       {(uiState === 'COMPLETED_RECOMMENDED' || uiState === 'COMPLETED_NO_CLEAR_WINNER') && activeJob?.recommendation && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div
             style={{
-              padding: '6px 8px',
-              borderRadius: 6,
-              background: 'rgba(201,162,75,0.08)',
-              border: `1px solid rgba(201,162,75,0.22)`,
+              padding: '10px 12px',
+              borderRadius: 8,
+              background: 'linear-gradient(145deg, rgba(201,162,75,0.08), rgba(201,162,75,0.02))',
+              border: `1px solid rgba(201,162,75,0.3)`,
+              position: 'relative',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: BB.text }}>
-                {activeJob.recommendation.display_name}
-              </span>
-              {activeJob.recommendation.score !== null && activeJob.recommendation.score !== undefined && (
-                <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', color: BB.gold }}>
-                  {activeJob.recommendation.score.toFixed(3)}
-                  {activeJob.recommendation.score_std ? ` ± ${activeJob.recommendation.score_std.toFixed(3)}` : ''}
+            <div style={{ position: 'absolute', top: -8, right: 10, background: BB.surface, padding: '0 6px', border: `1px solid ${BB.gold}`, borderRadius: 12, fontSize: 8, fontWeight: 700, color: BB.gold }}>
+              #1 RECOMMENDATION
+            </div>
+            
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: BB.text, display: 'block' }}>
+                  {activeJob.recommendation.display_name}
                 </span>
-              )}
+                <span style={{ fontSize: 9, color: BB.muted, textTransform: 'capitalize' }}>
+                  {activeJob.recommendation.category}
+                </span>
+              </div>
+              
+              <div style={{ textAlign: 'right' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: BB.success }}>
+                  {activeJob.recommendation.validation_score?.toFixed(3) || activeJob.recommendation.score?.toFixed(3)}
+                </span>
+                {activeJob.recommendation.ci_lower !== null && activeJob.recommendation.ci_lower !== undefined && (
+                  <div style={{ fontSize: 8, color: BB.muted, fontFamily: 'var(--font-mono)' }}>
+                    95% CI: [{activeJob.recommendation.ci_lower.toFixed(3)}, {activeJob.recommendation.ci_upper?.toFixed(3)}]
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Evidence Subtext */}
-            <p style={{ margin: '4px 0 0', fontSize: 9, color: BB.muted, lineHeight: 1.3 }}>
-              {activeJob.reproducibility?.metric ? `${String(activeJob.reproducibility.metric).toUpperCase()} · ` : ''}
-              {activeJob.reproducibility?.cv_folds ? `${activeJob.reproducibility.cv_folds}-Fold CV · ` : ''}
-              {activeJob.candidates?.length || 0} estimators evaluated
-            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, marginBottom: 8 }}>
+              {activeJob.recommendation.interpretability_score && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Interpretability Rating">
+                  <div style={{ display: 'flex' }}>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <Sparkles key={i} style={{ width: 10, height: 10, color: i < (activeJob.recommendation!.interpretability_score || 0) ? BB.gold : BB.disabled }} />
+                    ))}
+                  </div>
+                  <span style={{ fontSize: 9, color: BB.text }}>{activeJob.recommendation.interpretability_label} Int.</span>
+                </div>
+              )}
+              {activeJob.recommendation.training_time_seconds !== undefined && (
+                <div style={{ fontSize: 9, color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span>⚡</span> {(activeJob.recommendation.training_time_seconds || 0).toFixed(2)}s
+                </div>
+              )}
+            </div>
+            
+            {activeJob.recommendation.why_recommended && (
+              <div style={{ fontSize: 10, color: BB.muted, lineHeight: 1.4, padding: '6px 8px', background: 'rgba(0,0,0,0.2)', borderRadius: 4, marginTop: 6, borderLeft: `2px solid ${BB.gold}` }}>
+                {activeJob.recommendation.why_recommended}
+              </div>
+            )}
+            
+            {activeJob.recommendation.risk_flags && activeJob.recommendation.risk_flags.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                {activeJob.recommendation.risk_flags.map((flag, idx) => (
+                  <span key={idx} style={{ fontSize: 8, padding: '2px 6px', background: 'rgba(245,158,11,0.1)', color: BB.warning, borderRadius: 4, border: `1px solid rgba(245,158,11,0.2)` }}>
+                    ⚠️ {flag}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -705,18 +747,18 @@ export function AlgorithmRecommendationPanel({
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 5,
-                padding: '4px 8px',
+                padding: '6px 8px',
                 borderRadius: 5,
                 background: 'transparent',
                 border: `1px solid ${BB.primaryLight}`,
                 color: BB.text,
-                fontSize: 9,
+                fontSize: 10,
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
-              <HelpCircle style={{ width: 11, height: 11, color: BB.gold }} />
-              Why this model?
+              <HelpCircle style={{ width: 12, height: 12, color: BB.gold }} />
+              Compare Top {activeJob.candidates?.length || 5} Models
             </button>
 
             <button
@@ -728,7 +770,7 @@ export function AlgorithmRecommendationPanel({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '4px 6px',
+                padding: '6px 10px',
                 borderRadius: 5,
                 background: 'transparent',
                 border: `1px solid ${BB.border}`,
@@ -736,7 +778,7 @@ export function AlgorithmRecommendationPanel({
                 cursor: isEligibleToAnalyze ? 'pointer' : 'not-allowed',
               }}
             >
-              <RotateCcw style={{ width: 11, height: 11 }} />
+              <RotateCcw style={{ width: 12, height: 12 }} />
             </button>
           </div>
         </div>
@@ -1128,74 +1170,104 @@ export function AlgorithmRecommendationPanel({
                   Evaluated Candidate Contenders ({activeJob.candidates?.length || 0})
                 </span>
 
-                <div style={{ border: `1px solid ${BB.border}`, borderRadius: 6, overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
-                    <thead>
-                      <tr style={{ background: BB.elevated, borderBottom: `1px solid ${BB.border}`, color: BB.muted }}>
-                        <th style={{ padding: '6px 10px', textAlign: 'left' }}>Rank</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'left' }}>Algorithm</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'left' }}>Category</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'right' }}>Score</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'right' }}>Time</th>
-                        <th style={{ padding: '6px 10px', textAlign: 'center' }}>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(activeJob.candidates || []).map((c: CandidateBenchmarkResult, idx: number) => {
-                        const isWinner = activeJob.recommendation?.algorithm_id === c.algorithm_id;
-                        return (
-                          <tr
-                            key={c.algorithm_id || idx}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {(activeJob.candidates || []).map((c: CandidateBenchmarkResult, idx: number) => {
+                    const isWinner = activeJob.recommendation?.algorithm_id === c.algorithm_id;
+                    return (
+                      <div
+                        key={c.algorithm_id || idx}
+                        style={{
+                          border: `1px solid ${isWinner ? BB.gold : BB.border}`,
+                          background: isWinner ? 'rgba(201,162,75,0.04)' : 'rgba(0,0,0,0.2)',
+                          borderRadius: 8,
+                          padding: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                          position: 'relative'
+                        }}
+                      >
+                        {isWinner && (
+                          <div style={{ position: 'absolute', top: -8, right: 12, background: BB.surface, padding: '0 6px', border: `1px solid ${BB.gold}`, borderRadius: 12, fontSize: 8, fontWeight: 700, color: BB.gold }}>
+                            #1 RECOMMENDED
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: BB.text }}>{c.rank ? `#${c.rank} ` : ''}{c.display_name}</span>
+                              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: 'rgba(107,92,166,0.15)', color: BB.primaryLight, textTransform: 'capitalize' }}>
+                                {c.category}
+                              </span>
+                            </div>
+                            {c.why_recommended && (
+                              <div style={{ fontSize: 10, color: BB.muted, marginTop: 4, lineHeight: 1.4 }}>
+                                {c.why_recommended}
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: isWinner ? BB.gold : BB.success }}>
+                              {c.validation_score?.toFixed(3) || c.score?.toFixed(3) || '-'}
+                            </div>
+                            {c.ci_lower !== null && c.ci_lower !== undefined && (
+                              <div style={{ fontSize: 8, color: BB.muted, fontFamily: 'var(--font-mono)' }}>
+                                95% CI: [{c.ci_lower.toFixed(3)}, {c.ci_upper?.toFixed(3)}]
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4 }}>
+                          {c.interpretability_score && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <div style={{ display: 'flex' }}>
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                  <Sparkles key={i} style={{ width: 10, height: 10, color: i < (c.interpretability_score || 0) ? BB.gold : BB.disabled }} />
+                                ))}
+                              </div>
+                              <span style={{ fontSize: 9, color: BB.muted }}>{c.interpretability_label} Int.</span>
+                            </div>
+                          )}
+                          <div style={{ fontSize: 9, color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span>⚡</span> {(c.training_time_seconds || c.training_seconds || 0).toFixed(2)}s train time
+                          </div>
+                        </div>
+
+                        {c.risk_flags && c.risk_flags.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                            {c.risk_flags.map((flag, i) => (
+                              <span key={i} style={{ fontSize: 8, padding: '2px 6px', background: 'rgba(245,158,11,0.1)', color: BB.warning, borderRadius: 4, border: `1px solid rgba(245,158,11,0.2)` }}>
+                                ⚠️ {flag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        
+                        <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                          <button
+                            onClick={() => {
+                              onSelectAlgorithm(c.algorithm_id);
+                              setShowEvidenceModal(false);
+                            }}
                             style={{
-                              borderBottom: `1px solid ${BB.border}`,
-                              background: isWinner ? 'rgba(201,162,75,0.06)' : 'transparent',
+                              padding: '4px 12px',
+                              borderRadius: 4,
+                              background: isWinner ? `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})` : 'transparent',
+                              border: `1px solid ${isWinner ? 'transparent' : BB.primaryLight}`,
+                              color: BB.text,
+                              fontSize: 10,
+                              fontWeight: 600,
+                              cursor: 'pointer',
                             }}
                           >
-                            <td style={{ padding: '6px 10px', fontFamily: 'var(--font-mono)', color: isWinner ? BB.gold : BB.muted }}>
-                              {c.rank ? `#${c.rank}` : '-'}
-                            </td>
-                            <td style={{ padding: '6px 10px', fontWeight: isWinner ? 700 : 500, color: BB.text }}>
-                              {c.display_name}
-                            </td>
-                            <td style={{ padding: '6px 10px', color: BB.muted, textTransform: 'capitalize' }}>
-                              {c.category}
-                            </td>
-                            <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: isWinner ? BB.gold : BB.text }}>
-                              {c.score !== null && c.score !== undefined ? c.score.toFixed(3) : '-'}
-                              {c.score_std ? <span style={{ color: BB.muted, fontSize: 8 }}> ±{c.score_std.toFixed(3)}</span> : ''}
-                            </td>
-                            <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: BB.muted }}>
-                              {c.training_seconds ? `${c.training_seconds.toFixed(2)}s` : '-'}
-                            </td>
-                            <td style={{ padding: '6px 10px', textAlign: 'center' }}>
-                              <span
-                                style={{
-                                  fontSize: 8,
-                                  fontWeight: 700,
-                                  padding: '1px 5px',
-                                  borderRadius: 3,
-                                  background:
-                                    c.status === 'completed'
-                                      ? 'rgba(34,197,94,0.15)'
-                                      : c.status === 'skipped'
-                                      ? 'rgba(158,147,184,0.15)'
-                                      : 'rgba(178,58,78,0.15)',
-                                  color:
-                                    c.status === 'completed'
-                                      ? BB.success
-                                      : c.status === 'skipped'
-                                      ? BB.muted
-                                      : BB.maroonLight,
-                                }}
-                              >
-                                {c.status.toUpperCase()}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            {isWinner ? 'Use Recommended Model' : 'Override & Use Model'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

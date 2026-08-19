@@ -411,7 +411,7 @@ describe('AlgorithmRecommendationPanel Component', () => {
     // Modal dialog rendered
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('Algorithm Recommendation Evidence')).toBeInTheDocument();
-    expect(screen.getByText('Logistic Regression')).toBeInTheDocument();
+    expect(screen.getByText(/Logistic Regression/)).toBeInTheDocument();
     expect(screen.getByText(/High cardinality identifier/)).toBeInTheDocument();
 
     // Close via ESC

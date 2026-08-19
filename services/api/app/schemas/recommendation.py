@@ -46,8 +46,17 @@ class RecommendationCandidateItem(BaseModel):
     score: Optional[float] = None
     score_std: Optional[float] = None
     raw_metric_value: Optional[float] = None
+    validation_score: Optional[float] = None
+    ci_lower: Optional[float] = None
+    ci_upper: Optional[float] = None
+    metric_used: Optional[str] = None
     fold_scores: List[float] = Field(default_factory=list)
     training_seconds: float = 0.0
+    training_time_seconds: Optional[float] = None
+    interpretability_score: Optional[int] = None
+    interpretability_label: Optional[str] = None
+    why_recommended: Optional[str] = None
+    risk_flags: List[str] = Field(default_factory=list)
     reason_codes: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     skip_reason: Optional[str] = None

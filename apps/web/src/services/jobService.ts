@@ -60,6 +60,42 @@ export async function fetchJobDetails(jobId: string): Promise<JobEntity | null> 
   }
 }
 
+export async function pollJobUntilDone(
+  jobId: string,
+  onUpdate: (job: JobEntity) => void,
+  signal?: AbortSignal
+): Promise<JobEntity | null> {
+  let attempt = 0
+  let delay = 1000
+  
+  while (!signal?.aborted) {
+    const job = await fetchJobDetails(jobId)
+    if (!job) return null
+    
+    onUpdate(job)
+    
+    if (job.status === 'COMPLETED' || job.status === 'FAILED' || job.status === 'CANCELLED') {
+      return job
+    }
+    
+    await new Promise((resolve) => {
+      const timeoutId = setTimeout(resolve, delay)
+      if (signal) {
+        signal.addEventListener('abort', () => {
+          clearTimeout(timeoutId)
+          resolve(undefined)
+        })
+      }
+    })
+    
+    attempt++
+    if (attempt > 2) delay = 2000
+    if (attempt > 5) delay = 3000
+    if (attempt > 10) delay = 5000
+  }
+  return null
+}
+
 export async function fetchJobProgress(jobId: string): Promise<JobProgressInfo | null> {
   try {
     return await apiClient.get<JobProgressInfo>(`/jobs/${jobId}/progress`)

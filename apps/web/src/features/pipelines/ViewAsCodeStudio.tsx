@@ -1,562 +1,268 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import {
-  Code2,
-  Copy,
-  Check,
-  Zap,
-  Sliders,
-  Database,
-  Layers,
-  Sparkles,
-  ChevronDown,
-  ChevronRight,
-  CheckCircle2,
-  HelpCircle,
-  FileCode
-} from 'lucide-react';
-import { PipelineService, PipelineDAG, CodeGenerationResponse } from '../../services/api';
+import { Code2, CheckCircle2, Copy, Check, Sliders, ChevronDown, ChevronRight } from 'lucide-react';
 import { Select } from '../../components/ui/Select';
-import { fetchTrainingOptions } from '../../services/jobService';
-import { CANONICAL_TRAINING_OPTIONS, type TrainingOptions } from '../../types/job';
 import { useProject } from '../../providers/ProjectContext';
+import { PipelineService } from '../../services/api';
+import { createTrainingJob, fetchTrainingOptions } from '../../services/jobService';
+import { CANONICAL_TRAINING_OPTIONS, type TrainingOptions } from '../../types/job';
+import { TrainingTimeTravelPanel } from './TrainingTimeTravelPanel';
 
-interface ViewAsCodeStudioProps {
-  onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
-  onNavigate?: (tab: string) => void;
-}
+export function ViewAsCodeStudio({ onNavigate, onShowToast: _onShowToast }: { onNavigate?: (tab: any) => void; onShowToast?: (title: string, desc?: string, type?: "error" | "info" | "success") => void }) {
+  const { dataset, selectedFeatures, selectedTarget, trainingConfig, setTrainingConfig, activeJob, setActiveJob, setLifecycleStage } = useProject();
 
-export const ViewAsCodeStudio: React.FC<ViewAsCodeStudioProps> = ({ onShowToast, onNavigate }) => {
-  const { dataset, selectedFeatures, selectedTarget, trainingConfig, activeJob } = useProject();
-
-  const hasActiveConfig = Boolean(
-    activeJob?.target_column ||
-      trainingConfig?.target_column ||
-      (dataset && selectedTarget),
-  );
-
-  const initialDatasetName =
-    trainingConfig?.dataset_name ||
-    dataset?.fileName ||
-    (activeJob?.metadata?.dataset_id as string) ||
-    '';
-
-  const initialTarget =
-    activeJob?.target_column ||
-    trainingConfig?.target_column ||
-    selectedTarget ||
-    '';
-
-  const initialFeatures =
-    activeJob?.feature_columns && activeJob.feature_columns.length > 0
-      ? activeJob.feature_columns.join(', ')
-      : trainingConfig?.feature_columns && trainingConfig.feature_columns.length > 0
-        ? trainingConfig.feature_columns.join(', ')
-        : selectedFeatures && selectedFeatures.length > 0
-          ? selectedFeatures.join(', ')
-          : '';
-
-  const initialAlgorithm =
-    (activeJob?.metadata?.algorithm as string) ||
-    trainingConfig?.algorithm ||
-    'random_forest_classifier';
-
-  const initialScaler =
-    (activeJob?.metadata?.scaler as string) ||
-    trainingConfig?.scaler ||
-    'standard_scaler';
-
-  const initialImputer =
-    (activeJob?.metadata?.imputer as string) ||
-    trainingConfig?.imputer ||
-    'median';
-
-  const initialTestSize =
-    typeof activeJob?.metadata?.train_test_split === 'number'
-      ? Math.round((1 - activeJob.metadata.train_test_split) * 100) / 100
-      : trainingConfig?.train_test_split
-        ? Math.round((1 - trainingConfig.train_test_split) * 100) / 100
-        : 0.2;
-
-  const [targetColumn, setTargetColumn] = useState(initialTarget);
-  const [featureColumns, setFeatureColumns] = useState(initialFeatures);
-  const [imputerStrategy, setImputerStrategy] = useState(initialImputer);
-  const [scalerType, setScalerType] = useState(initialScaler);
-  const [algorithm, setAlgorithm] = useState(initialAlgorithm);
-  const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>(CANONICAL_TRAINING_OPTIONS);
-  const [testSize, setTestSize] = useState(initialTestSize);
-  const [datasetName, setDatasetName] = useState(initialDatasetName);
-
-  const [generatedCode, setGeneratedCode] = useState<CodeGenerationResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [activeStep, setActiveStep] = useState<number | null>(1);
+  const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>(CANONICAL_TRAINING_OPTIONS);
 
-  /* ── Sync State when ProjectContext Updates ─────────────────────── */
+  // Bind to config OR default to context
+  const [targetColumn, setTargetColumn] = useState('');
+  const [featureColumns, setFeatureColumns] = useState('');
+  const [imputerStrategy, setImputerStrategy] = useState('median');
+  const [scalerType, setScalerType] = useState('standard_scaler');
+  const [algorithm, setAlgorithm] = useState('random_forest_classifier');
+  const [testSize, setTestSize] = useState(0.2);
+
+  // Initialize from project context
   useEffect(() => {
-    if (activeJob) {
-      if (activeJob.target_column) setTargetColumn(activeJob.target_column);
-      if (activeJob.feature_columns && activeJob.feature_columns.length > 0) {
-        setFeatureColumns(activeJob.feature_columns.join(', '));
-      }
-      if (activeJob.metadata?.algorithm) setAlgorithm(activeJob.metadata.algorithm as string);
-      if (activeJob.metadata?.scaler) setScalerType(activeJob.metadata.scaler as string);
-      if (activeJob.metadata?.imputer) setImputerStrategy(activeJob.metadata.imputer as string);
-      if (typeof activeJob.metadata?.train_test_split === 'number') {
-        setTestSize(Math.round((1 - activeJob.metadata.train_test_split) * 100) / 100);
-      }
-      if (dataset?.fileName) setDatasetName(dataset.fileName);
-    } else if (trainingConfig) {
-      if (trainingConfig.target_column) setTargetColumn(trainingConfig.target_column);
-      if (trainingConfig.feature_columns && trainingConfig.feature_columns.length > 0) {
-        setFeatureColumns(trainingConfig.feature_columns.join(', '));
-      }
-      if (trainingConfig.algorithm) setAlgorithm(trainingConfig.algorithm);
-      if (trainingConfig.scaler) setScalerType(trainingConfig.scaler);
-      if (trainingConfig.imputer) setImputerStrategy(trainingConfig.imputer);
-      if (trainingConfig.train_test_split) {
-        setTestSize(Math.round((1 - trainingConfig.train_test_split) * 100) / 100);
-      }
-      if (trainingConfig.dataset_name) setDatasetName(trainingConfig.dataset_name);
-    } else if (dataset) {
-      if (dataset.fileName) setDatasetName(dataset.fileName);
-      if (selectedTarget) setTargetColumn(selectedTarget);
-      if (selectedFeatures && selectedFeatures.length > 0) {
-        setFeatureColumns(selectedFeatures.join(', '));
-      }
+    if (trainingConfig) {
+      setTargetColumn(trainingConfig.target_column);
+      setFeatureColumns(trainingConfig.feature_columns.join(', '));
+      setImputerStrategy(trainingConfig.imputer);
+      setScalerType(trainingConfig.scaler);
+      setAlgorithm(trainingConfig.algorithm);
+      setTestSize(trainingConfig.train_test_split);
+    } else if (selectedTarget || selectedFeatures.length > 0) {
+      setTargetColumn(selectedTarget || '');
+      setFeatureColumns(selectedFeatures.join(', '));
     }
-  }, [activeJob, trainingConfig, dataset, selectedTarget, selectedFeatures]);
+  }, [trainingConfig, selectedTarget, selectedFeatures]);
+
+  const [generatedCode, setGeneratedCode] = useState<string>('# Loading generated code...');
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetchTrainingOptions(controller.signal)
-      .then((options) => {
-        if (options && options.algorithms?.length > 0) {
-          setTrainingOptions(options);
-          setAlgorithm((current) =>
-            options.algorithms.some((option) => option.key === current)
-              ? current
-              : options.algorithms[0]?.key || 'random_forest_classifier',
-          );
-          setScalerType((current) =>
-            options.scalers.some((option) => option.key === current)
-              ? current
-              : options.scalers[0]?.key || 'standard_scaler',
-          );
-          setImputerStrategy((current) =>
-            options.imputers.some((option) => option.key === current)
-              ? current
-              : options.imputers[0]?.key || 'median',
-          );
-        }
-      })
-      .catch((err) => {
-        if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
-          return;
-        }
-        setError(err instanceof Error ? err.message : 'Unable to load training options.');
-      });
-    return () => controller.abort();
-  }, []);
+    fetchTrainingOptions().then(setTrainingOptions).catch(console.error);
+    setLifecycleStage('pipeline');
+  }, [setLifecycleStage]);
 
-  const handleGenerateCode = useCallback(async () => {
-    if (!targetColumn || !featureColumns.trim()) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    const featureList = featureColumns.split(',').map((s) => s.trim()).filter(Boolean);
-    const dag: PipelineDAG = {
-      dataset_name: datasetName || 'dataset.csv',
-      target_column: targetColumn,
-      feature_columns: featureList,
-      nodes: [
-        { node_id: 'n1', type: 'missing_value_handler', name: 'Imputer',          params: { strategy: imputerStrategy } },
-        { node_id: 'n2', type: 'scaler',                name: 'Scaler',           params: { scaler_type: scalerType }   },
-        { node_id: 'n3', type: 'train_test_split',       name: 'Train-Test Split', params: { test_size: testSize }       },
-        { node_id: 'n4', type: 'algorithm',              name: algorithm,          params: { algorithm }                 },
-      ],
+  // Derived code block via API
+  useEffect(() => {
+    let active = true;
+    const generate = async () => {
+      try {
+        const feats = featureColumns.split(',').map(f => f.trim()).filter(Boolean);
+        const dag = {
+          dataset_name: dataset?.fileName || trainingConfig?.dataset_name || 'dataset.csv',
+          target_column: targetColumn || 'target',
+          feature_columns: feats,
+          nodes: [
+            { node_id: 'n1', type: 'imputer', name: 'Simple Imputer', params: { strategy: imputerStrategy } },
+            { node_id: 'n2', type: 'scaler', name: 'Feature Scaler', params: { type: scalerType } },
+            { node_id: 'n3', type: 'estimator', name: 'ML Algorithm', params: { type: algorithm } }
+          ]
+        };
+        const resp = await PipelineService.generateCode(dag, true, true);
+        if (active) {
+          setGeneratedCode(resp.python_code);
+        }
+      } catch (err) {
+        if (active) {
+          setGeneratedCode('# Error generating code\n' + String(err));
+        }
+      }
     };
+    generate();
+    return () => { active = false; };
+  }, [dataset, featureColumns, targetColumn, imputerStrategy, scalerType, algorithm, testSize]);
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(generatedCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleRunPipeline = async () => {
+    if (!dataset || !dataset.datasetId) return;
     try {
-      const res = await PipelineService.generateCode(dag, true, true);
-      setGeneratedCode(res);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to generate code');
+      setLoading(true);
+      setError(null);
+      const feats = featureColumns.split(',').map(f => f.trim()).filter(Boolean);
+      
+      const payload = {
+        dataset_id: dataset.datasetId,
+        target_column: targetColumn,
+        feature_columns: feats,
+        algorithm: algorithm,
+        scaler: scalerType,
+        imputer: imputerStrategy,
+        train_test_split: testSize,
+        cv_folds: 5,
+        random_seed: 42,
+      };
+
+      const job = await createTrainingJob(payload);
+      setActiveJob(job);
+      
+      setTrainingConfig({
+        dataset_id: dataset.datasetId,
+        dataset_name: dataset.fileName,
+        target_column: targetColumn,
+        feature_columns: feats,
+        algorithm: algorithm,
+        scaler: scalerType,
+        imputer: imputerStrategy,
+        train_test_split: testSize,
+        cv_folds: 5,
+        random_seed: 42,
+        selection_source: 'manual'
+      });
+      
+      // We do not navigate automatically here, the user can watch it or navigate
+      // but let's notify the system
+    } catch (err: any) {
+      setError(err.message || 'Failed to submit training job');
     } finally {
       setLoading(false);
     }
-  }, [algorithm, datasetName, featureColumns, imputerStrategy, scalerType, targetColumn, testSize]);
-
-  useEffect(() => {
-    let active = true;
-    const featureList = featureColumns.split(',').map((s) => s.trim()).filter(Boolean);
-    if (imputerStrategy && scalerType && algorithm && targetColumn && featureList.length > 0) {
-      (async () => {
-        const dag: PipelineDAG = {
-          dataset_name: datasetName || 'dataset.csv',
-          target_column: targetColumn,
-          feature_columns: featureList,
-          nodes: [
-            { node_id: 'n1', type: 'missing_value_handler', name: 'Imputer',          params: { strategy: imputerStrategy } },
-            { node_id: 'n2', type: 'scaler',                name: 'Scaler',           params: { scaler_type: scalerType }   },
-            { node_id: 'n3', type: 'train_test_split',       name: 'Train-Test Split', params: { test_size: testSize }       },
-            { node_id: 'n4', type: 'algorithm',              name: algorithm,          params: { algorithm }                 },
-          ],
-        };
-        try {
-          if (active) {
-            setLoading(true);
-            setError(null);
-          }
-          const res = await PipelineService.generateCode(dag, true, true);
-          if (active) setGeneratedCode(res);
-        } catch (err: unknown) {
-          if (active) setError(err instanceof Error ? err.message : 'Failed to generate code');
-        } finally {
-          if (active) setLoading(false);
-        }
-      })();
-    }
-    return () => {
-      active = false;
-    };
-  }, [imputerStrategy, scalerType, algorithm, testSize, targetColumn, featureColumns, datasetName]);
-
-  const copyCode = async () => {
-    if (generatedCode?.python_code) {
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(generatedCode.python_code);
-        } else {
-          const textarea = document.createElement('textarea');
-          textarea.value = generatedCode.python_code;
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand('copy');
-          document.body.removeChild(textarea);
-        }
-        setCopied(true);
-        if (onShowToast) onShowToast('Code Copied!', 'Python scikit-learn script copied to clipboard.');
-        setTimeout(() => setCopied(false), 2000);
-      } catch {
-        if (onShowToast) onShowToast('Copy Failed', 'Could not copy code to clipboard.', 'error');
-      }
-    }
   };
 
-  const nodeChain = [
-    { id: 1, title: 'Dataset Input', desc: `y: ${targetColumn}`, icon: <Database className="w-4 h-4 text-[#00D4FF]" />, badge: 'Input' },
-    { id: 2, title: 'Missing Value Imputer', desc: `strategy: ${imputerStrategy}`, icon: <Layers className="w-4 h-4 text-[#7B5CF5]" />, badge: 'Preprocess' },
-    { id: 3, title: 'Feature Scaler', desc: `scaler: ${scalerType}`, icon: <Sliders className="w-4 h-4 text-[#7B5CF5]" />, badge: 'Preprocess' },
-    { id: 4, title: 'Train/Test Split', desc: `ratio: ${(testSize * 100).toFixed(0)}% test`, icon: <Zap className="w-4 h-4 text-[#F5A623]" />, badge: 'Split' },
-    { id: 5, title: trainingOptions.algorithms.find((option) => option.key === algorithm)?.display_name || 'Model', desc: 'Model Trainer', icon: <Sparkles className="w-4 h-4 text-[#00F5A0]" />, badge: 'Model' },
-  ];
-
-  if (!hasActiveConfig && !dataset && !trainingConfig && !activeJob) {
+  if (!dataset && !trainingConfig) {
     return (
-      <div
-        role="region"
-        aria-label="Empty Pipeline Studio"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '64px 24px',
-          textAlign: 'center',
-          gap: 16,
-          background: '#1B1530',
-          border: '1px solid rgba(107, 92, 166, 0.2)',
-          borderRadius: 12,
-          maxWidth: 600,
-          margin: '48px auto',
-        }}
-      >
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: '50%',
-            background: 'rgba(107, 92, 166, 0.15)',
-            border: '1px solid rgba(107, 92, 166, 0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#C9A24B',
-          }}
-        >
-          <Database style={{ width: 24, height: 24 }} />
-        </div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#F5F1EC', margin: 0 }}>
-          No Active Dataset or Training Configuration
-        </h2>
-        <p style={{ fontSize: 13, color: '#9E93B8', margin: 0, maxWidth: 440, lineHeight: 1.5 }}>
-          Pipeline Studio requires an active dataset and feature selection. Upload a dataset, select your target column and features, or benchmark algorithms in the Dataset & Profiler workspace first.
-        </p>
-        <button
-          onClick={() => onNavigate?.('workspace')}
-          style={{
-            marginTop: 8,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '8px 16px',
-            borderRadius: 6,
-            background: 'linear-gradient(135deg, #4B3B7C, #6E1423)',
-            border: '1px solid #6C5CA6',
-            color: '#F5F1EC',
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-          aria-label="Go to Dataset and Profiler"
-        >
-          Go to Dataset & Profiler →
-        </button>
+      <div role="region" aria-label="Empty Pipeline Studio" style={{ textAlign: 'center', padding: '64px 24px', background: '#1B1530', borderRadius: 12, border: '1px solid rgba(107, 92, 166, 0.2)', maxWidth: 600, margin: '48px auto' }}>
+        <h2 style={{ color: '#F5F1EC', marginBottom: 8 }}>No Active Dataset or Training Configuration</h2>
+        <p style={{ color: '#9E93B8', fontSize: 13, marginBottom: 16 }}>Pipeline Studio requires an active dataset. Please upload one in the Dataset & Profiler workspace.</p>
+        <button onClick={() => onNavigate?.('workspace')} style={{ padding: '8px 16px', background: '#4B3B7C', color: '#FFF', borderRadius: 6, border: 'none', cursor: 'pointer' }}>Go to Dataset and Profiler</button>
       </div>
     );
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className="space-y-8"
-    >
-      {/* Studio Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[rgba(0,212,255,0.08)] pb-6">
+    <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-6" style={{ paddingBottom: activeJob ? 80 : 0 }}>
+      {/* HEADER BAR */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,212,255,0.08)', paddingBottom: 16 }}>
         <div>
-          <h1 className="heading-display text-2xl flex items-center gap-2.5">
-            <Code2 className="w-6 h-6 text-[#00D4FF]" /> Bi-Directional View-as-Code Studio
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#F5F1EC', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Code2 size={24} color="#00D4FF" /> View-as-Code Studio
           </h1>
-          <p className="text-sm text-[#94A3B8] mt-1">
-            Build machine learning DAG pipelines visually. Adjust node parameters to watch production-ready Python scikit-learn code compile in real-time.
-          </p>
+          <p style={{ fontSize: 13, color: '#94A3B8', margin: '4px 0 0 0' }}>Build pipelines visually. Watch production-ready scikit-learn code compile in real-time.</p>
         </div>
-
-        <div className="flex items-center gap-3">
-          {generatedCode?.is_valid_syntax && (
-            <span className="badge-running flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5" /> AST Syntax Validated
-            </span>
-          )}
-          <button onClick={copyCode} className="btn-secondary">
-            {copied ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
-            {copied ? 'Copied to Clipboard' : 'Copy Python Code'}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, padding: '4px 8px', background: 'rgba(34,197,94,0.1)', color: '#22C55E', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CheckCircle2 size={12} /> AST Validated
+          </span>
+          <button onClick={copyCode} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#E2E8F0', padding: '6px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+            {copied ? <Check size={14} color="#00F5A0" /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy Code'}
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="badge-failed p-4 border rounded-xl text-xs font-medium">
-          {error}
-        </div>
-      )}
+      {error && <div style={{ padding: 12, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444', borderRadius: 6, fontSize: 12 }}>{error}</div>}
 
-      {/* Split-View Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* Left 5 Cols: Visual Workflow Canvas & Controls */}
-        <div className="lg:col-span-5 space-y-6">
-          
-          {/* Controls Card */}
-          <div className="quantum-card space-y-5">
-            <div className="flex items-center justify-between">
-              <h3 className="micro-label flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-[#00D4FF]" /> Pipeline Controls
-              </h3>
-              <button onClick={handleGenerateCode} disabled={loading} className="btn-primary !py-1.5 !px-3 !text-xs">
-                {loading ? 'Compiling...' : 'Run Pipeline →'}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, minmax(0, 1fr))', gap: 24, alignItems: 'start' }}>
+        {/* ZONE A: Controls (Col 1-4) */}
+        <div style={{ gridColumn: 'span 4 / span 4', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: '#1B1530', border: '1px solid rgba(107,92,166,0.18)', borderRadius: 12, padding: 20 }}>
+            <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#00D4FF', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Sliders size={14} /> Pipeline Controls
+            </h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <label style={{ fontSize: 10, color: '#9E93B8', marginBottom: 4, display: 'block' }}>Target Column (y)</label>
+                <input value={targetColumn} onChange={e => setTargetColumn(e.target.value)} style={{ width: '100%', background: '#0B0912', border: '1px solid rgba(107,92,166,0.3)', color: '#FFF', padding: '8px 12px', borderRadius: 6, fontSize: 12 }} />
+              </div>
+              
+              <div>
+                <label style={{ fontSize: 10, color: '#9E93B8', marginBottom: 4, display: 'block' }}>Feature Columns (X)</label>
+                <input value={featureColumns} onChange={e => setFeatureColumns(e.target.value)} style={{ width: '100%', background: '#0B0912', border: '1px solid rgba(107,92,166,0.3)', color: '#FFF', padding: '8px 12px', borderRadius: 6, fontSize: 12 }} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 10, color: '#9E93B8', marginBottom: 4, display: 'block' }}>Missing Imputer</label>
+                <Select value={imputerStrategy} onChange={setImputerStrategy} options={trainingOptions.imputers.map(o => ({ value: o.key, label: o.display_name }))} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 10, color: '#9E93B8', marginBottom: 4, display: 'block' }}>Feature Scaler</label>
+                <Select value={scalerType} onChange={setScalerType} options={trainingOptions.scalers.map(o => ({ value: o.key, label: o.display_name }))} />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 10, color: '#9E93B8', marginBottom: 4, display: 'block' }}>Algorithm</label>
+                <Select value={algorithm} onChange={setAlgorithm} options={trainingOptions.algorithms.map(o => ({ value: o.key, label: o.display_name }))} />
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#9E93B8', marginBottom: 4 }}>
+                  <span>Test Split Ratio</span>
+                  <span style={{ color: '#00D4FF', fontFamily: 'monospace' }}>{(testSize * 100).toFixed(0)}% Test</span>
+                </div>
+                <input type="range" min="0.1" max="0.5" step="0.05" value={testSize} onChange={e => setTestSize(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#00D4FF' }} />
+              </div>
+
+              <button onClick={handleRunPipeline} disabled={loading} style={{ width: '100%', background: 'linear-gradient(135deg, #4B3B7C, #6E1423)', color: '#FFF', border: 'none', padding: '10px 16px', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', marginTop: 8 }}>
+                {loading ? 'Compiling...' : 'Run Pipeline 🚀'}
               </button>
             </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="micro-label block mb-1.5">Target Column (y)</label>
-                <input
-                  type="text"
-                  value={targetColumn}
-                  onChange={(e) => setTargetColumn(e.target.value)}
-                  className="quantum-input"
-                />
-              </div>
-
-              <div>
-                <label className="micro-label block mb-1.5">Feature Columns (X)</label>
-                <input
-                  type="text"
-                  value={featureColumns}
-                  onChange={(e) => setFeatureColumns(e.target.value)}
-                  className="quantum-input"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="micro-label block mb-1.5">Missing Imputer</label>
-                <Select
-                  value={imputerStrategy}
-                  onChange={setImputerStrategy}
-                  options={trainingOptions.imputers.map((option) => ({ value: option.key, label: option.display_name }))}
-                  placeholder="Select imputer..."
-                />
-              </div>
-
-              <div>
-                <label className="micro-label block mb-1.5">Feature Scaler</label>
-                <Select
-                  value={scalerType}
-                  onChange={setScalerType}
-                  options={trainingOptions.scalers.map((option) => ({ value: option.key, label: option.display_name }))}
-                  placeholder="Select scaler..."
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="micro-label block mb-1.5">Algorithm</label>
-              <Select
-                value={algorithm}
-                onChange={setAlgorithm}
-                options={[
-                  {
-                    label: 'Classification',
-                    options: trainingOptions.algorithms
-                      .filter((option) => option.task_type === 'classification')
-                      .map((option) => ({ value: option.key, label: option.display_name })),
-                  },
-                  {
-                    label: 'Regression',
-                    options: trainingOptions.algorithms
-                      .filter((option) => option.task_type === 'regression')
-                      .map((option) => ({ value: option.key, label: option.display_name })),
-                  },
-                ]}
-                placeholder="Select algorithm..."
-              />
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-semibold mb-1.5">
-                <span className="text-[#94A3B8]">Test Split Ratio</span>
-                <span className="text-[#00D4FF] font-mono">{(testSize * 100).toFixed(0)}% Test / {((1 - testSize) * 100).toFixed(0)}% Train</span>
-              </div>
-              <input
-                type="range"
-                min="0.1"
-                max="0.5"
-                step="0.05"
-                value={testSize}
-                onChange={(e) => setTestSize(parseFloat(e.target.value))}
-                className="w-full accent-[#00D4FF]"
-              />
-            </div>
-          </div>
-
-          {/* Visual DAG Node Chain */}
-          <div className="quantum-card space-y-4">
-            <h3 className="micro-label flex items-center gap-2">
-              <Layers className="w-4 h-4 text-[#00D4FF]" /> Visual Pipeline Graph
-            </h3>
-
-            <div className="space-y-3">
-              {nodeChain.map((node, idx) => (
-                <React.Fragment key={node.id}>
-                  <div className="p-3.5 rounded-xl bg-[#040912] border border-[rgba(255,255,255,0.06)] flex items-center justify-between hover:border-[#00D4FF]/30 transition-all">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-lg bg-[#101E36] border border-[#152540] shrink-0">
-                        {node.icon}
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-slate-100">{node.title}</div>
-                        <div className="text-[11px] text-[#64748B] font-mono mt-0.5">{node.desc}</div>
-                      </div>
-                    </div>
-                    <span className="badge-idle !text-[10px]">
-                      {node.badge}
-                    </span>
-                  </div>
-                  {idx < nodeChain.length - 1 && (
-                    <div className="flex justify-center py-0.5">
-                      <ChevronDown className="w-4 h-4 text-[#334155]" />
-                    </div>
-                  )}
-                </React.Fragment>
-              ))}
-            </div>
           </div>
         </div>
 
-        {/* Right 7 Cols: Synchronized Terminal Code Editor & Learning Mode */}
-        <div className="lg:col-span-7 space-y-6">
-          
-          {/* Synchronized Terminal Window */}
-          <div className="quantum-terminal rounded-xl overflow-hidden shadow-2xl">
-            {/* Top window bar: 3 dots (red/yellow/green) + tab name in mono */}
-            <div className="px-4 py-3 bg-[#0C1A30] border-b border-[rgba(0,212,255,0.1)] flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-[#FF4D6D]" />
-                <div className="w-3 h-3 rounded-full bg-[#F5A623]" />
-                <div className="w-3 h-3 rounded-full bg-[#00F5A0]" />
-                <span className="ml-2 text-xs font-mono text-[#00D4FF] flex items-center gap-1.5">
-                  <FileCode className="w-3.5 h-3.5" /> pipeline_generated.py
-                </span>
+        {/* ZONE B: Code Studio (Col 5-12) */}
+        <div style={{ gridColumn: 'span 8 / span 8', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: '#0B0912', border: '1px solid rgba(107,92,166,0.3)', borderRadius: 12, overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+            <div style={{ background: '#101E36', padding: '10px 16px', borderBottom: '1px solid rgba(0,212,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#EF4444' }} />
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F5A623' }} />
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#10B981' }} />
+                </div>
+                <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#00D4FF', marginLeft: 8 }}>pipeline_generated.py</span>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[11px] font-mono text-[#475569]">Python 3.10 / scikit-learn</span>
-                <button onClick={copyCode} className="btn-icon" title="Copy code">
-                  {copied ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
-                </button>
-              </div>
+              <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#64748B' }}>Python 3.10 / scikit-learn</span>
             </div>
-
-            {/* Code Viewport */}
-            <pre className="p-6 text-xs leading-relaxed text-[#E2E8F0] overflow-x-auto max-h-[460px] font-mono">
-              <code>{generatedCode?.python_code || '# Compiling scikit-learn pipeline code...'}</code>
+            <pre style={{ padding: 20, margin: 0, fontSize: 12, color: '#E2E8F0', overflowX: 'auto', maxHeight: 460, fontFamily: 'monospace', lineHeight: 1.5 }}>
+              <code>{generatedCode}</code>
             </pre>
           </div>
 
-          {/* Learning Mode Step Breakdown */}
-          <div className="quantum-card space-y-4">
-            <h3 className="micro-label flex items-center gap-2">
-              <HelpCircle className="w-4 h-4 text-[#7B5CF5]" /> Learning Mode — Step Breakdown
-            </h3>
-
-            <div className="space-y-2">
-              {(generatedCode?.steps_explanation ?? []).map((step) => {
-                const isOpen = activeStep === step.step_number;
-                return (
-                  <div
-                    key={step.step_number}
-                    className="border border-[#152540] rounded-xl overflow-hidden transition-all bg-[#040912]"
-                  >
-                    <button
-                      onClick={() => setActiveStep(isOpen ? null : step.step_number)}
-                      className="w-full px-4 py-3 hover:bg-[#101E36] flex items-center justify-between text-left cursor-pointer"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="w-5 h-5 rounded-full bg-[#7B5CF5]/20 text-[#7B5CF5] text-xs font-bold flex items-center justify-center border border-[#7B5CF5]/30 shrink-0">
-                          {step.step_number}
-                        </span>
-                        <span className="text-xs font-bold text-slate-200">{step.title}</span>
+          <div style={{ background: '#1B1530', border: '1px solid rgba(107,92,166,0.18)', borderRadius: 12, padding: 20 }}>
+             <h3 style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: '#7B5CF5', marginBottom: 12 }}>Learning Mode — Step Breakdown</h3>
+             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {[
+                  { step: 1, title: 'Data Loading & Setup', desc: 'The CSV is read into a pandas DataFrame. We separate the target variable (y) from the inputs (X).' },
+                  { step: 2, title: 'Preprocessing Definition', desc: `We assemble an automated strategy to handle missing values using '${imputerStrategy}' and scale numerical data via '${scalerType}'.` },
+                  { step: 3, title: 'Pipeline Construction', desc: 'The preprocessing steps and the ML algorithm are bundled together. This prevents data leakage during training.' },
+                  { step: 4, title: 'Model Training', desc: `The dataset is randomly split: ${(1-testSize)*100}% for training and ${testSize*100}% for testing.` },
+                  { step: 5, title: 'Evaluation', desc: 'The trained model predicts outcomes for the unseen test data. Metrics evaluate its generalization performance.' }
+                ].map(s => (
+                  <div key={s.step} style={{ border: '1px solid rgba(107,92,166,0.3)', borderRadius: 8, background: '#0B0912', overflow: 'hidden' }}>
+                    <button onClick={() => setActiveStep(activeStep === s.step ? null : s.step)} style={{ width: '100%', padding: '12px 16px', background: 'transparent', border: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', color: '#F5F1EC' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(123,92,245,0.2)', color: '#7B5CF5', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{s.step}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700 }}>{s.title}</span>
                       </div>
-                      {isOpen ? <ChevronDown className="w-4 h-4 text-[#64748B]" /> : <ChevronRight className="w-4 h-4 text-[#64748B]" />}
+                      {activeStep === s.step ? <ChevronDown size={14} color="#64748B" /> : <ChevronRight size={14} color="#64748B" />}
                     </button>
-                    {isOpen && (
-                      <div className="p-4 text-xs text-[#94A3B8] leading-relaxed border-t border-[#152540]">
-                        {step.explanation}
-                      </div>
+                    {activeStep === s.step && (
+                      <div style={{ padding: '0 16px 12px 48px', fontSize: 11, color: '#94A3B8', lineHeight: 1.4 }}>{s.desc}</div>
                     )}
                   </div>
-                );
-              })}
-            </div>
+                ))}
+             </div>
           </div>
         </div>
       </div>
+
+      {/* ZONE C: Training Time Travel Panel */}
+      {activeJob && (
+        <TrainingTimeTravelPanel 
+          jobId={activeJob.job_id} 
+          metrics={(activeJob.metadata?.epochs as any) || []} 
+        />
+      )}
     </motion.div>
   );
-};
+}

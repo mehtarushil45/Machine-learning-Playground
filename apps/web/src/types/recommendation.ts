@@ -55,8 +55,17 @@ export interface CandidateBenchmarkResult {
   score?: number | null;
   score_std?: number | null;
   raw_metric_value?: number | null;
+  validation_score?: number | null;
+  ci_lower?: number | null;
+  ci_upper?: number | null;
+  metric_used?: string | null;
   fold_scores?: number[];
   training_seconds: number;
+  training_time_seconds?: number | null;
+  interpretability_score?: number | null;
+  interpretability_label?: string | null;
+  why_recommended?: string | null;
+  risk_flags?: string[];
   reason_codes: string[];
   warnings: string[];
   skip_reason?: string | null;
