@@ -179,10 +179,12 @@ export function AlgorithmRecommendationPanel({
     isManualOverride,
   ]);
 
-  /* ── Adaptive Polling Loop ───────────────────────────────────────── */
+  /* ── Adaptive Polling Loop with Bounded Timeout ─────────────────── */
   const pollingRef = useRef<number | null>(null);
   const abortCtrlRef = useRef<AbortController | null>(null);
   const pollJobRef = useRef<((datasetId: string, jobId: string) => Promise<void>) | null>(null);
+  const pollStartTimeRef = useRef<number>(0);
+  const pollErrorCountRef = useRef<number>(0);
 
   const eligibilityReason = useMemo<string | null>(() => {
     if (!dataset) {
@@ -231,6 +233,28 @@ export function AlgorithmRecommendationPanel({
         return;
       }
 
+      // Check for 45s client-side timeout
+      if (pollStartTimeRef.current > 0 && Date.now() - pollStartTimeRef.current > 45000) {
+        stopPolling();
+        const timeoutMsg = 'Recommendation benchmark timed out after 45 seconds without worker completion. Please retry.';
+        setErrorMessage(timeoutMsg);
+        setActiveJob((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: 'FAILED',
+                stage: 'Failed',
+                error_details: {
+                  error_type: 'TimeoutError',
+                  message: timeoutMsg,
+                },
+              }
+            : null,
+        );
+        onShowToast?.('Benchmark Timeout', timeoutMsg, 'error');
+        return;
+      }
+
       const ctrl = new AbortController();
       abortCtrlRef.current = ctrl;
 
@@ -239,6 +263,7 @@ export function AlgorithmRecommendationPanel({
         if (!job || !job.status) {
           throw new Error('Invalid job response received');
         }
+        pollErrorCountRef.current = 0; // Reset consecutive errors on success
         setActiveJob(job);
 
         const isActive = ['PENDING', 'QUEUED', 'PROFILING', 'SCREENING', 'VERIFYING'].includes(
@@ -266,14 +291,45 @@ export function AlgorithmRecommendationPanel({
               'Target data is insufficient for multi-algorithm benchmarking. Standard manual controls remain available.',
               'info',
             );
+          } else if (job.status === 'FAILED') {
+            const failMsg = job.error_details?.message || 'Benchmark execution encountered an error.';
+            setErrorMessage(failMsg);
+            onShowToast?.('Benchmark Failed', failMsg, 'error');
           }
         }
-      } catch {
+      } catch (err) {
         if (ctrl.signal.aborted) return;
+        pollErrorCountRef.current += 1;
+        if (pollErrorCountRef.current >= 4) {
+          stopPolling();
+          const errDetail =
+            err instanceof ApiError
+              ? err.detail
+              : err instanceof Error
+              ? err.message
+              : 'Failed to communicate with recommendation worker service.';
+          setErrorMessage(errDetail);
+          setActiveJob((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: 'FAILED',
+                  stage: 'Failed',
+                  error_details: {
+                    error_type: 'NetworkError',
+                    message: errDetail,
+                  },
+                }
+              : null,
+          );
+          onShowToast?.('Benchmark Communication Error', errDetail, 'error');
+          return;
+        }
+
         // Non-fatal poll error, retry after delay
         pollingRef.current = window.setTimeout(() => {
           pollJobRef.current?.(datasetId, jobId);
-        }, 3000);
+        }, 2500);
       }
     },
     [stopPolling, onSelectAlgorithm, onShowToast],
@@ -342,7 +398,9 @@ export function AlgorithmRecommendationPanel({
           'success',
         );
       } else {
-        // Start polling
+        // Start polling with fresh timers
+        pollStartTimeRef.current = Date.now();
+        pollErrorCountRef.current = 0;
         pollJob(effectiveDatasetId, res.job.job_id);
         if (res.deduplicated) {
           onShowToast?.(

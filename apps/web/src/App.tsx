@@ -271,7 +271,7 @@ function AppContent() {
             gap: 16,
           }}
         >
-          {/* Header left: Clean (A1: text removed) */}
+          {/* Header left: Clean brand spacer (Timeline permanently removed) */}
           <div style={{ width: 120, flexShrink: 0 }} />
 
           {/* Header Center: C3 Global Search Bar */}
@@ -432,8 +432,13 @@ function AppContent() {
             </ErrorBoundary>
           )}
           {activeTab === 'code-studio' && (
-            <ErrorBoundary key="code-studio" onReset={() => setActiveTab('workspace')}>
-              <ViewAsCodeStudio onShowToast={showToast} onNavigate={(tab) => setActiveTab(tab as PlatformTab)} />
+            <ErrorBoundary key="code-studio" onReset={() => handleNavigate('workspace')}>
+              <ViewAsCodeStudio
+                onShowToast={showToast}
+                onNavigate={(tab) => handleNavigate(tab as PlatformTab)}
+                isCopilotOpen={isCopilotOpen}
+                onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
+              />
             </ErrorBoundary>
           )}
           {activeTab === 'explainability' && (

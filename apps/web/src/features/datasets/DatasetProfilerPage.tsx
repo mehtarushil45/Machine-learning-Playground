@@ -22,7 +22,6 @@ import {
   Play,
   RotateCcw,
   Search,
-  Sparkles,
   Table as TableIcon,
   Upload,
   X,
@@ -30,6 +29,8 @@ import {
 import { useProject, type ActiveTrainingConfiguration } from '../../providers/ProjectContext';
 import { DataUpload } from './DataUpload';
 import { AlgorithmRecommendationPanel } from './AlgorithmRecommendationPanel';
+import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
+import { FeatureTargetSelector } from '../../components/shared/FeatureTargetSelector';
 import { Select } from '../../components/ui/Select';
 import type {
   ColumnProfile,
@@ -447,10 +448,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const [isResizingCol, setIsResizingCol] = useState(false);
   const [isResizingRow, setIsResizingRow] = useState(false);
 
-  /* ── Dedicated Right AI Panel Width ─────────────────────────────── */
-  const [copilotWidth, setCopilotWidth] = useState<number>(340);
-  const [isDraggingCopilot, setIsDraggingCopilot] = useState<boolean>(false);
-
   /* ── Analysis State ─────────────────────────────────────────────── */
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
   const [health, setHealth] = useState<DatasetHealthReport | null>(null);
@@ -620,30 +617,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     document.addEventListener('mouseup', handleMouseUp);
   }, []);
 
-  /* ── Dedicated AI Copilot Panel Resize Drag (A4) ────────────────── */
-  const handleCopilotResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDraggingCopilot(true);
-
-    const startX = e.clientX;
-    const startWidth = copilotWidth;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = startX - moveEvent.clientX;
-      const newWidth = Math.max(260, Math.min(520, startWidth + deltaX));
-      setCopilotWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsDraggingCopilot(false);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [copilotWidth]);
-
   /* ── Handlers ───────────────────────────────────────────────────── */
   const handleDataLoaded = useCallback(
     (d: Dataset) => {
@@ -721,11 +694,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const effectiveImputer = trainingOptions.imputers.some((option) => option.key === imputer)
     ? imputer
     : trainingOptions.imputers[0]?.key || 'median';
-
-  const isIdentifier = (col: string) => {
-    const cp = profile?.columns.find((c) => c.name === col);
-    return cp?.type === 'identifier';
-  };
 
   /* ── Dynamic Dropdown Options from Backend ──────────────────────── */
   const algorithmSelectOptions = useMemo(() => {
@@ -1048,7 +1016,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
           gap: isCopilotOpen ? 10 : 0,
           width: '100%',
           position: 'relative',
-          userSelect: isResizingCol || isResizingRow || isDraggingCopilot ? 'none' : 'auto',
+          userSelect: isResizingCol || isResizingRow ? 'none' : 'auto',
         }}
       >
         {/* ── LEFT / CENTER MAIN WORKSPACE ───────────────────────── */}
@@ -1500,7 +1468,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   display: 'flex',
                   flex: 1,
                   minHeight: 140,
+                  height: `calc(${100 - splitRow}% - 6px)`,
                   width: '100%',
+                  overflow: 'hidden',
                 }}
               >
                 {/* PANEL 3: Feature & Target Selection (Bottom-Left) */}
@@ -1515,157 +1485,26 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                     padding: '12px 14px',
                     display: 'flex',
                     flexDirection: 'column',
+                    height: '100%',
+                    minHeight: 0,
                     gap: 8,
                     overflow: 'hidden',
                     boxSizing: 'border-box',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '0.08em',
-                        textTransform: 'uppercase',
-                        color: BB.muted,
-                      }}
-                    >
-                      Feature &amp; target selection
-                    </span>
-                    <div style={{ display: 'flex', gap: 6, fontSize: 9 }}>
-                      <button
-                        onClick={handleSelectAllFeatures}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: BB.primaryLight,
-                          cursor: 'pointer',
-                          padding: 0,
-                        }}
-                      >
-                        All
-                      </button>
-                      <span style={{ color: BB.disabled }}>·</span>
-                      <button
-                        onClick={handleDeselectAllFeatures}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: BB.muted,
-                          cursor: 'pointer',
-                          padding: 0,
-                        }}
-                      >
-                        None
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: 10, color: BB.muted }}>
-                    Features: <strong style={{ color: BB.text }}>{selectedFeatures.length}</strong> · Target:{' '}
-                    <strong style={{ color: selectedTarget ? BB.maroonLight : BB.disabled }}>
-                      {selectedTarget || 'None'}
-                    </strong>
-                  </div>
-
-                  <div
-                    style={{
-                      overflowY: 'auto',
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 2,
-                      paddingRight: 2,
-                    }}
-                  >
-                    {allColumns.map((col) => {
-                      const isFeature = selectedFeatures.includes(col);
-                      const isTarget = selectedTarget === col;
-                      const isId = isIdentifier(col);
-                      const colType =
-                        profile?.columns.find((c) => c.name === col)?.type ??
-                        (numericSet.has(col) ? 'numeric' : 'categorical');
-                      const excluded = isId;
-
-                      return (
-                        <div
-                          key={col}
-                          style={{
-                            display: 'grid',
-                            gridTemplateColumns: '18px 1fr 18px',
-                            alignItems: 'center',
-                            gap: 8,
-                            padding: '4px 8px',
-                            borderRadius: 6,
-                            background: isTarget
-                              ? 'rgba(110,20,35,0.18)'
-                              : isFeature
-                              ? 'rgba(75,59,124,0.12)'
-                              : 'transparent',
-                            border: `1px solid ${
-                              isTarget
-                                ? 'rgba(110,20,35,0.35)'
-                                : isFeature
-                                ? 'rgba(107,92,166,0.25)'
-                                : 'transparent'
-                            }`,
-                            opacity: excluded ? 0.4 : 1,
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isFeature}
-                            disabled={excluded || isTarget}
-                            onChange={() => !excluded && handleFeatureToggle(col)}
-                            style={{
-                              width: 13,
-                              height: 13,
-                              accentColor: BB.primaryLight,
-                              cursor: excluded || isTarget ? 'not-allowed' : 'pointer',
-                            }}
-                          />
-
-                          <div style={{ minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontSize: 10,
-                                fontWeight: 600,
-                                color: isTarget ? BB.maroonLight : BB.text,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {col}
-                            </div>
-                            <div style={{ fontSize: 9, color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <TypePill type={colType} />
-                              {isId && <span style={{ color: BB.disabled }}>id</span>}
-                              {isTarget && (
-                                <span style={{ color: BB.maroonLight, fontSize: 8, fontWeight: 700 }}>
-                                  TARGET
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <input
-                            type="radio"
-                            name="target-variable"
-                            checked={isTarget}
-                            disabled={excluded}
-                            onChange={() => !excluded && handleTargetChange(col)}
-                            style={{
-                              width: 13,
-                              height: 13,
-                              accentColor: BB.maroon,
-                              cursor: excluded ? 'not-allowed' : 'pointer',
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <FeatureTargetSelector
+                    dataset={dataset}
+                    columns={allColumns}
+                    columnProfiles={profile?.columns}
+                    selectedTarget={selectedTarget}
+                    selectedFeatures={selectedFeatures}
+                    onSelectTarget={handleTargetChange}
+                    onToggleFeature={handleFeatureToggle}
+                    onSelectAllFeatures={handleSelectAllFeatures}
+                    onDeselectAllFeatures={handleDeselectAllFeatures}
+                    showTargetSelection={true}
+                    maxHeight="100%"
+                  />
                 </div>
 
                 {/* C1: Seamless Vertical Splitter (Bottom) */}
@@ -2180,147 +2019,12 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         </div>
 
         {/* ── A4: DEDICATED RIGHT SIDE DRAWER FOR AI COPILOT ──────── */}
-        {isCopilotOpen && (
-          <div
-            style={{
-              position: 'relative',
-              width: copilotWidth,
-              flexShrink: 0,
-              background: BB.surface,
-              border: `1px solid ${BB.border}`,
-              borderRadius: '10px',
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              boxSizing: 'border-box',
-              height: '100%',
-            }}
-          >
-            {/* Left Edge Drag Handle */}
-            <div
-              onMouseDown={handleCopilotResizeMouseDown}
-              title="Drag to resize AI panel width"
-              style={{
-                position: 'absolute',
-                top: 0,
-                bottom: 0,
-                left: 0,
-                width: 6,
-                cursor: 'col-resize',
-                zIndex: 10,
-                background: isDraggingCopilot ? BB.primaryLight : 'transparent',
-              }}
-            />
-
-            {/* AI Panel Header */}
-            <div
-              style={{
-                padding: '10px 12px',
-                borderBottom: `1px solid ${BB.border}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: BB.elevated,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: BB.text }}>AI Copilot</span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span
-                  style={{
-                    fontSize: 8,
-                    fontWeight: 700,
-                    padding: '1px 5px',
-                    borderRadius: 10,
-                    background: 'rgba(75,59,124,0.25)',
-                    color: BB.primaryLight,
-                    border: `1px solid rgba(107,92,166,0.30)`,
-                    textTransform: 'uppercase',
-                  }}
-                >
-                  AGENT
-                </span>
-                <button
-                  onClick={onToggleCopilot}
-                  title="Close AI Copilot"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: BB.muted,
-                    cursor: 'pointer',
-                    padding: 2,
-                  }}
-                >
-                  <X style={{ width: 14, height: 14 }} />
-                </button>
-              </div>
-            </div>
-
-            {/* AI Insights & Message Feed */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '10px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              {copilotMsgs.map((msg) => (
-                <div
-                  key={msg.id}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: '6px',
-                    background:
-                      msg.type === 'warning' ? 'rgba(245,158,11,0.08)' : 'rgba(75,59,124,0.12)',
-                    border: `1px solid ${
-                      msg.type === 'warning' ? 'rgba(245,158,11,0.22)' : 'rgba(107,92,166,0.22)'
-                    }`,
-                    fontSize: 10,
-                    color: BB.muted,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {msg.text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
-                    part.startsWith('**') && part.endsWith('**') ? (
-                      <strong key={i} style={{ color: BB.text }}>
-                        {part.slice(2, -2)}
-                      </strong>
-                    ) : (
-                      part
-                    ),
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Input Stub */}
-            <div style={{ padding: '8px 10px', borderTop: `1px solid ${BB.border}` }}>
-              <input
-                placeholder="Ask about this dataset…"
-                disabled
-                style={{
-                  width: '100%',
-                  padding: '6px 8px',
-                  borderRadius: 5,
-                  border: `1px solid ${BB.border}`,
-                  background: BB.elevated,
-                  color: BB.muted,
-                  fontSize: 10,
-                  fontFamily: 'var(--font-ui)',
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                  cursor: 'not-allowed',
-                }}
-              />
-            </div>
-          </div>
-        )}
+        <AICopilotDrawer
+          isOpen={isCopilotOpen}
+          onToggle={onToggleCopilot || (() => {})}
+          messages={copilotMsgs}
+          placeholder="Ask about this dataset…"
+        />
       </div>
 
       {/* ─────────────────────────────────────────────────────────────

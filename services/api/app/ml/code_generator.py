@@ -284,12 +284,16 @@ def generate_python_code(
         code_blocks.append("# ==============================================================================\n")
 
     # Resolve algorithm node
-    algo_node = _find_node_by_category(pipeline.nodes, ["algorithm", "model", "classifier", "regressor"])
+    algo_node = _find_node_by_category(pipeline.nodes, ["algorithm", "model", "classifier", "regressor", "estimator"])
     algo_type = "classification"
     algo_class_name = "RandomForestClassifier"
 
     if algo_node:
-        algo_name_param = str(algo_node.params.get("algorithm") or algo_node.name).lower().replace(" ", "")
+        algo_name_param = str(
+            algo_node.params.get("algorithm")
+            or algo_node.params.get("type")
+            or algo_node.name
+        ).lower().replace(" ", "").replace("-", "")
         if algo_name_param in _ALGO_CODE_MAP:
             imp_stmt, class_nm, problem_type = _ALGO_CODE_MAP[algo_name_param]
             if imp_stmt not in imports:
@@ -544,7 +548,7 @@ def validate_pipeline_dag(pipeline: PipelineDAG) -> PipelineValidationResponse:
     if not pipeline.nodes:
         errors.append("Pipeline contains no nodes.")
 
-    algo_nodes = [n for n in pipeline.nodes if n.type.lower() in ("algorithm", "model", "classifier", "regressor")]
+    algo_nodes = [n for n in pipeline.nodes if n.type.lower() in ("algorithm", "model", "classifier", "regressor", "estimator")]
     if not algo_nodes:
         errors.append("Pipeline is missing an algorithm/model node.")
 

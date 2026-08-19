@@ -381,6 +381,27 @@ class RecommendationJobService:
                 detail="Recommendation job not found.",
             )
 
+        # Check for stalled/orphaned active jobs (> 180s in non-terminal state)
+        if job.status in (
+            RecommendationJobStatus.PENDING.value,
+            RecommendationJobStatus.QUEUED.value,
+            RecommendationJobStatus.PROFILING.value,
+            RecommendationJobStatus.SCREENING.value,
+            RecommendationJobStatus.VERIFYING.value,
+        ) and job.created_at:
+            age_seconds = (datetime.now(timezone.utc) - job.created_at.replace(tzinfo=timezone.utc if job.created_at.tzinfo is None else job.created_at.tzinfo)).total_seconds()
+            if age_seconds > 180:
+                logger.warning("Auto-failing stalled RecommendationJob %s (age=%.1fs)", job.id, age_seconds)
+                job.status = RecommendationJobStatus.FAILED.value
+                job.stage = "Failed"
+                job.error_details = {
+                    "error_type": "TimeoutError",
+                    "message": "Recommendation benchmark timed out after 180 seconds without worker completion. Please retry.",
+                }
+                job.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+                await db.refresh(job)
+
         return _orm_to_response(job)
 
     async def cancel_recommendation_job(

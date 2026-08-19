@@ -298,4 +298,21 @@ def execute_recommendation_benchmark_job(self: Any, job_id: str) -> Dict[str, An
         raise self.retry(exc=exc)
     except Exception as exc:
         logger.error("Permanent failure in recommendation job %s: %s", job_id, exc)
+        try:
+            async def _mark_failed():
+                async with get_worker_session() as db:
+                    await db.execute(
+                        update(RecommendationJob)
+                        .where(RecommendationJob.id == uuid.UUID(job_id))
+                        .values(
+                            status=RecommendationJobStatus.FAILED.value,
+                            stage="Failed",
+                            error_details={"error_type": type(exc).__name__, "message": str(exc)},
+                            completed_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await db.commit()
+            asyncio.run(_mark_failed())
+        except Exception as db_exc:
+            logger.error("Failed to write failure status to DB for job %s: %s", job_id, db_exc)
         return {"status": "failed", "job_id": job_id, "error": str(exc)}
