@@ -1,27 +1,20 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   FileCode,
-  Layers,
-  HelpCircle,
   Copy,
   Check,
-  ChevronDown,
-  ChevronRight,
   Database,
-  Sliders,
-  Sparkles,
+  FileSpreadsheet,
+  ExternalLink,
   Play,
   AlertCircle,
   CheckCircle2,
   RefreshCw,
-  Box,
-  Binary,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG } from '../../services/api';
 import { fetchTrainingOptions } from '../../services/jobService';
 import type { TrainingOptions } from '../../types/job';
-import { TrainingTimeTravelPanel } from './TrainingTimeTravelPanel';
 import { AICopilotDrawer, type CopilotMsg } from '../../components/shared/AICopilotDrawer';
 import { FeatureTargetSelector, isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 
@@ -64,7 +57,6 @@ export function ViewAsCodeStudio({
     setSelectedTarget: setContextTarget,
     setSelectedFeatures: setContextFeatures,
     trainingConfig,
-    activeJob,
     setLifecycleStage,
   } = useProject();
 
@@ -131,16 +123,37 @@ export function ViewAsCodeStudio({
 
   // Code generation state
   const [generatedCode, setGeneratedCode] = useState<string>('');
-  const [stepExplanations, setStepExplanations] = useState<CodeStepExplanation[]>([]);
+  const [, setStepExplanations] = useState<CodeStepExplanation[]>([]);
   const [isValidSyntax, setIsValidSyntax] = useState<boolean | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [activeStep, setActiveStep] = useState<number | null>(1);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Derive active dataset name
+  // Derive active dataset info
   const effectiveDatasetName = dataset?.fileName || trainingConfig?.dataset_name || 'dataset.csv';
+
+  const activeDatasetName = useMemo(() => {
+    return (
+      dataset?.fileName ||
+      (dataset as any)?.name ||
+      (dataset as any)?.original_filename ||
+      trainingConfig?.dataset_name ||
+      'No CSV Open'
+    );
+  }, [dataset, trainingConfig]);
+
+  const datasetRowCount = useMemo(() => {
+    if (dataset?.rowCount) return dataset.rowCount.toLocaleString();
+    if (dataset?.rows?.length) return dataset.rows.length.toLocaleString();
+    return '15';
+  }, [dataset]);
+
+  const datasetColCount = useMemo(() => {
+    if (dataset?.columns?.length) return dataset.columns.length;
+    if (featureColumns.length > 0) return featureColumns.length + (targetColumn ? 1 : 0);
+    return 8;
+  }, [dataset, featureColumns, targetColumn]);
 
   // Has active configuration check
   const hasActiveConfig = Boolean(
@@ -308,45 +321,6 @@ export function ViewAsCodeStudio({
     return msgs;
   }, [targetColumn, featureColumns, imputerStrategy, scalerType, algorithm, testSize, isValidSyntax, dataset]);
 
-  // Visual DAG nodes
-  const dagNodes = [
-    {
-      id: 'input',
-      title: '1. Dataset Input',
-      desc: `${effectiveDatasetName} (${dataset?.rowCount || dataset?.rows.length || 'N/A'} rows)`,
-      icon: <Database style={{ width: 14, height: 14, color: BB.gold }} />,
-      badge: `${featureColumns.length} Features`,
-    },
-    {
-      id: 'imputer',
-      title: '2. Missing Imputer',
-      desc: `SimpleImputer(strategy='${imputerStrategy}')`,
-      icon: <Sliders style={{ width: 14, height: 14, color: BB.primaryLight }} />,
-      badge: imputerStrategy,
-    },
-    {
-      id: 'scaler',
-      title: '3. Feature Scaler',
-      desc: scalerType === 'none' ? 'Passthrough' : `${scalerType.replace('_', ' ')}()`,
-      icon: <Box style={{ width: 14, height: 14, color: BB.primaryLight }} />,
-      badge: scalerType,
-    },
-    {
-      id: 'split',
-      title: '4. Train-Test Split',
-      desc: `${Math.round((1 - testSize) * 100)}% Train / ${Math.round(testSize * 100)}% Test (seed=42)`,
-      icon: <Binary style={{ width: 14, height: 14, color: BB.maroonLight }} />,
-      badge: `${Math.round(testSize * 100)}% Test`,
-    },
-    {
-      id: 'model',
-      title: '5. ML Estimator',
-      desc: `${algorithm}(random_state=42)`,
-      icon: <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />,
-      badge: algorithm,
-    },
-  ];
-
   /* ── 1. Accessible Empty State ─────────────────────────────────────────── */
   if (!hasActiveConfig) {
     return (
@@ -425,7 +399,7 @@ export function ViewAsCodeStudio({
         overflow: 'hidden',
       }}
     >
-      {/* Main Workspace Area (Controls, DAG, Code Editor, Step Breakdown) */}
+      {/* Main Workspace Area */}
       <div
         style={{
           flex: 1,
@@ -437,7 +411,7 @@ export function ViewAsCodeStudio({
           paddingRight: 2,
         }}
       >
-        {/* 2-Column Grid (Configuration & DAG vs Code Editor & Learning Mode) */}
+        {/* 2-Column Grid (Open CSV & Configuration vs Code Editor) */}
         <div
           style={{
             display: 'grid',
@@ -446,9 +420,131 @@ export function ViewAsCodeStudio({
             alignItems: 'start',
           }}
         >
-          {/* Left Column: Pipeline Configuration & Visual Graph */}
+          {/* Left Column: Open CSV Dataset Panel + Pipeline Configuration Panel */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* 1. Configuration Panel */}
+            {/* Open CSV Dataset Panel (Task 2) */}
+            <div
+              style={{
+                background: BB.surface,
+                border: `1px solid ${BB.border}`,
+                borderRadius: 10,
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <FileSpreadsheet style={{ width: 14, height: 14, color: BB.gold }} />
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      color: BB.text,
+                    }}
+                  >
+                    Open CSV Dataset
+                  </span>
+                </div>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    background: 'rgba(34, 197, 94, 0.12)',
+                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                    color: BB.success,
+                    fontSize: 9,
+                    fontWeight: 600,
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: BB.success }} />
+                  Active
+                </span>
+              </div>
+
+              {/* Filename & Stats Card */}
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  background: BB.elevated,
+                  border: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <div
+                    style={{
+                      padding: 6,
+                      borderRadius: 6,
+                      background: 'rgba(201, 162, 75, 0.15)',
+                      border: `1px solid rgba(201, 162, 75, 0.3)`,
+                      color: BB.gold,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Database style={{ width: 15, height: 15 }} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      title={activeDatasetName}
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: BB.text,
+                        fontFamily: 'var(--font-mono)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {activeDatasetName}
+                    </div>
+                    <div style={{ fontSize: 10, color: BB.muted, marginTop: 2 }}>
+                      {datasetRowCount} rows · {datasetColCount} columns
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onNavigate?.('workspace')}
+                  title="Switch or view full dataset in Profiler"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 8px',
+                    borderRadius: 5,
+                    background: 'rgba(75, 59, 124, 0.3)',
+                    border: `1px solid ${BB.primaryLight}`,
+                    color: BB.text,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    transition: 'all 120ms ease',
+                  }}
+                >
+                  <ExternalLink style={{ width: 11, height: 11 }} />
+                  Switch
+                </button>
+              </div>
+            </div>
+
+            {/* Pipeline Configuration Panel */}
             <div
               style={{
                 background: BB.surface,
@@ -513,7 +609,7 @@ export function ViewAsCodeStudio({
                 />
               </div>
 
-              {/* Feature Columns Selector (B3, B4 Shared Component + Summary) */}
+              {/* Feature Columns Selector (Shared Component + Summary) */}
               <div>
                 <label
                   style={{
@@ -722,109 +818,10 @@ export function ViewAsCodeStudio({
                 Run Pipeline
               </button>
             </div>
-
-            {/* 2. Visual Pipeline Graph (B5) */}
-            <div
-              style={{
-                background: BB.surface,
-                border: `1px solid ${BB.border}`,
-                borderRadius: 10,
-                padding: '14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <Layers style={{ width: 13, height: 13, color: BB.gold }} />
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    color: BB.text,
-                  }}
-                >
-                  Visual Pipeline Graph
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {dagNodes.map((node, idx) => (
-                  <React.Fragment key={node.id}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '8px 10px',
-                        borderRadius: 8,
-                        background: BB.elevated,
-                        border: `1px solid ${BB.border}`,
-                        transition: 'all 120ms ease',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <div
-                          style={{
-                            padding: 6,
-                            borderRadius: 6,
-                            background: 'rgba(75,59,124,0.2)',
-                            border: `1px solid ${BB.border}`,
-                            flexShrink: 0,
-                          }}
-                        >
-                          {node.icon}
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: BB.text }}>{node.title}</div>
-                          <div
-                            style={{
-                              fontSize: 9,
-                              color: BB.muted,
-                              fontFamily: 'var(--font-mono)',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {node.desc}
-                          </div>
-                        </div>
-                      </div>
-
-                      <span
-                        style={{
-                          fontSize: 8,
-                          fontWeight: 700,
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          background: 'rgba(107,92,166,0.2)',
-                          color: BB.primaryLight,
-                          border: `1px solid ${BB.border}`,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.04em',
-                          flexShrink: 0,
-                        }}
-                      >
-                        {node.badge}
-                      </span>
-                    </div>
-
-                    {idx < dagNodes.length - 1 && (
-                      <div style={{ display: 'flex', justifyContent: 'center', padding: '1px 0' }}>
-                        <ChevronDown style={{ width: 12, height: 12, color: BB.disabled }} />
-                      </div>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-            </div>
           </div>
 
-          {/* Right Column: Synchronized Code Editor & Learning Mode */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+          {/* Right Column: Synchronized Full-Height Code Editor */}
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             {/* Synchronized Terminal Code Editor */}
             <div
               style={{
@@ -835,6 +832,7 @@ export function ViewAsCodeStudio({
                 display: 'flex',
                 flexDirection: 'column',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                minHeight: 520,
               }}
             >
               {/* Terminal Window Top Bar */}
@@ -965,7 +963,7 @@ export function ViewAsCodeStudio({
               </div>
 
               {/* Code Viewport or Real Error State (B1) */}
-              <div style={{ minHeight: 320, maxHeight: 480, overflow: 'auto', padding: 16 }}>
+              <div style={{ minHeight: 480, maxHeight: 600, overflow: 'auto', padding: 16 }}>
                 {isGenerating && (
                   <div
                     style={{
@@ -1047,119 +1045,8 @@ export function ViewAsCodeStudio({
                 )}
               </div>
             </div>
-
-            {/* Learning Mode — Step Breakdown (B8) */}
-            <div
-              style={{
-                background: BB.surface,
-                border: `1px solid ${BB.border}`,
-                borderRadius: 10,
-                padding: '14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <HelpCircle style={{ width: 14, height: 14, color: BB.primaryLight }} />
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    color: BB.text,
-                  }}
-                >
-                  Learning Mode — Step Breakdown
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {stepExplanations.map((step) => {
-                  const isOpen = activeStep === step.step_number;
-                  return (
-                    <div
-                      key={step.step_number}
-                      style={{
-                        borderRadius: 8,
-                        background: BB.elevated,
-                        border: `1px solid ${BB.border}`,
-                        overflow: 'hidden',
-                        transition: 'all 120ms ease',
-                      }}
-                    >
-                      <button
-                        onClick={() => setActiveStep(isOpen ? null : step.step_number)}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span
-                            style={{
-                              width: 18,
-                              height: 18,
-                              borderRadius: '50%',
-                              background: 'rgba(75,59,124,0.3)',
-                              color: BB.primaryLight,
-                              fontSize: 10,
-                              fontWeight: 700,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              flexShrink: 0,
-                            }}
-                          >
-                            {step.step_number}
-                          </span>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: BB.text }}>
-                            {step.title}
-                          </span>
-                        </div>
-                        {isOpen ? (
-                          <ChevronDown style={{ width: 14, height: 14, color: BB.muted }} />
-                        ) : (
-                          <ChevronRight style={{ width: 14, height: 14, color: BB.muted }} />
-                        )}
-                      </button>
-
-                      {isOpen && (
-                        <div
-                          style={{
-                            padding: '6px 12px 10px 38px',
-                            fontSize: 11,
-                            color: BB.muted,
-                            lineHeight: 1.45,
-                            borderTop: `1px solid ${BB.border}`,
-                          }}
-                        >
-                          {step.explanation}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
           </div>
         </div>
-
-        {/* Training Time-Travel Panel (Bottom Docked when active job exists) */}
-        {activeJob && (
-          <TrainingTimeTravelPanel
-            jobId={activeJob.job_id}
-            metrics={(activeJob.metadata?.epochs as any) || []}
-          />
-        )}
       </div>
 
       {/* Docked AI Copilot Drawer (B6) */}
