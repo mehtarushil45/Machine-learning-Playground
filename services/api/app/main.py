@@ -10,6 +10,7 @@ In Docker:
 
 import os as _os
 from contextlib import asynccontextmanager
+from typing import Any, cast
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -107,7 +108,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from app.rate_limiter import limiter, custom_rate_limit_exceeded_handler
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, cast(Any, custom_rate_limit_exceeded_handler))
 app.add_middleware(SlowAPIMiddleware)
 
 # ── Routers ───────────────────────────────────────────────────────────────────

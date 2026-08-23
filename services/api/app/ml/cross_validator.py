@@ -24,7 +24,7 @@ Design decisions:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 from sklearn.base import clone
@@ -199,7 +199,7 @@ def cross_validate_pipeline(
             cv=cv_splitter,
             scoring=scorers,
             return_train_score=False,
-            error_score="raise",
+            error_score=cast(Any, "raise"),
         )
     except Exception as exc:
         raise CrossValidationError(

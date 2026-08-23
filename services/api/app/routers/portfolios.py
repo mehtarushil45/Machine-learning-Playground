@@ -109,7 +109,7 @@ async def publish_portfolio_project(
     await db.commit()
     await db.refresh(project)
 
-    return project
+    return PortfolioProjectResponse.model_validate(project)
 
 
 @router.get(
@@ -127,7 +127,7 @@ async def get_user_portfolio(
         PortfolioProject.is_public == True,
     )
     res = await db.execute(stmt)
-    return list(res.scalars().all())
+    return [PortfolioProjectResponse.model_validate(p) for p in res.scalars().all()]
 
 
 @router.get(
@@ -148,7 +148,7 @@ async def get_portfolio_project_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Portfolio project '{project_id}' not found.",
         )
-    return project
+    return PortfolioProjectResponse.model_validate(project)
 
 
 @router.get(

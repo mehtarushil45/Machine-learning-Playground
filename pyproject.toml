@@ -20,3 +20,12 @@ include = ["app*", "services*", "core*", "tasks*"]
 [tool.pytest.ini_options]
 pythonpath = ["services/api"]
 
+[tool.pyright]
+include = ["services"]
+extraPaths = [
+    "services/api",
+    "."
+]
+venvPath = "services/api"
+venv = ".venv"
+

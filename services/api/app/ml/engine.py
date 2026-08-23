@@ -300,7 +300,8 @@ def execute_ml_training_pipeline_sync(
             # can map XGBoost predictions back to the uploaded target values.
             if isinstance(estimator, XGBClassifier):
                 label_encoder = LabelEncoder()
-                class_labels = label_encoder.fit(y).classes_.astype(str).tolist()
+                label_encoder.fit(y)
+                class_labels = [str(c) for c in np.asarray(label_encoder.classes_)]
                 y = label_encoder.transform(y)
         else:
             y = (

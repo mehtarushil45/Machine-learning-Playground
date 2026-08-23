@@ -4,10 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
-try:
-    from app.ml.prediction_logger import get_recent_logs
-except ImportError:
-    def get_recent_logs(model_id=None, limit=50, status=None): return []
+from app.ml.prediction_logger import get_recent_logs
 
 SCHEMA_VERSION = "6b.1.0"
 

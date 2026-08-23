@@ -12,3 +12,12 @@ dependencies = []
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*", "alembic*"]
+
+[tool.pyright]
+include = ["app", "tests"]
+extraPaths = [
+    ".",
+    "../.."
+]
+venvPath = "."
+venv = ".venv"

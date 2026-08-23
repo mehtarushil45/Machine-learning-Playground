@@ -23,7 +23,7 @@ Design decisions:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 from sklearn.inspection import permutation_importance
@@ -98,7 +98,7 @@ def compute_feature_importance(
             n_jobs=-1,
         )
         # Permutation importance is in terms of original feature columns
-        raw = perm_result.importances_mean
+        raw = cast(Any, perm_result).importances_mean
         return _build_ranked_list(feature_columns, raw, "permutation")
     except Exception as exc:
         logger.warning("Permutation importance failed: %s", exc)

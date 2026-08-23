@@ -56,7 +56,7 @@ router = APIRouter(
     summary="Execute real-time model inference",
     response_model=None,
 )
-async def predict_endpoint(request: PredictionRequest) -> Dict[str, Any]:
+async def predict_endpoint(request: PredictionRequest) -> Any:
     """Run real-time inference on a feature dictionary or list of feature dicts."""
     try:
         res = predict(
@@ -106,12 +106,12 @@ async def predict_batch_endpoint(
     dataset_id: Optional[str] = Form(None),
     batch_size: int = Form(1000),
     return_probabilities: bool = Form(True),
-) -> Dict[str, Any]:
+) -> Any:
     """Execute high-throughput batch predictions via JSON payload or uploaded CSV file."""
     try:
         # Case A: CSV File Upload
         if file is not None:
-            if not file.filename.endswith(".csv"):
+            if not file.filename or not file.filename.endswith(".csv"):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Batch upload must be a valid .csv file.",

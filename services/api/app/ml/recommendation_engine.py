@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass, field
 import logging
 import math
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -91,7 +91,7 @@ def _create_dataset_context(df: pd.DataFrame, target_col: str, feature_cols: Lis
         else:
             cat_cols.append(col)
 
-    missing_dict = {c: int(df[c].isna().sum()) for c in df.columns}
+    missing_dict = {c: pd.Series(df[c]).isna().sum() for c in df.columns}
 
     return DatasetContext(
         dataset_id="benchmark_in_memory",
@@ -226,7 +226,9 @@ def compute_fold_score(
                     y_prob = estimator.predict_proba(X_val)
                     if y_prob.shape[1] == 2:
                         y_prob_col = y_prob[:, 1]
-                        classes = getattr(estimator, "classes_", np.unique(y_val))
+                        classes = getattr(estimator, "classes_", None)
+                        if classes is None:
+                            classes = np.unique(np.asarray(y_val))
                         pos_label = classes[1] if len(classes) > 1 else 1
                         y_val_binary = (y_val == pos_label).astype(int)
                         val_score = float(roc_auc_score(y_val_binary, y_prob_col))
@@ -236,7 +238,9 @@ def compute_fold_score(
                         return val_score, val_score
                 elif hasattr(estimator, "decision_function"):
                     y_scores = estimator.decision_function(X_val)
-                    classes = getattr(estimator, "classes_", np.unique(y_val))
+                    classes = getattr(estimator, "classes_", None)
+                    if classes is None:
+                        classes = np.unique(np.asarray(y_val))
                     pos_label = classes[1] if len(classes) > 1 else 1
                     y_val_binary = (y_val == pos_label).astype(int)
                     val_score = float(roc_auc_score(y_val_binary, y_scores))
@@ -246,22 +250,22 @@ def compute_fold_score(
 
         y_pred = estimator.predict(X_val)
         if metric_name == "balanced_accuracy":
-            score = float(balanced_accuracy_score(y_val, y_pred))
+            score = balanced_accuracy_score(y_val, y_pred)
             return score, score
         if metric_name == "accuracy":
-            score = float(accuracy_score(y_val, y_pred))
-            return score, score
+            acc_score = float(accuracy_score(y_val, y_pred))
+            return acc_score, acc_score
 
-        f1_val = float(f1_score(y_val, y_pred, average="macro", zero_division=0))
+        f1_val = float(f1_score(y_val, y_pred, average="macro", zero_division=cast(Any, 0)))
         return f1_val, f1_val
 
     else:
         y_pred = estimator.predict(X_val)
         if metric_name == "mae":
-            mae_val = float(mean_absolute_error(y_val, y_pred))
+            mae_val = mean_absolute_error(y_val, y_pred)
             return -mae_val, mae_val
 
-        mse_val = float(mean_squared_error(y_val, y_pred))
+        mse_val = mean_squared_error(y_val, y_pred)
         rmse_val = math.sqrt(mse_val)
         return -rmse_val, rmse_val
 
@@ -305,7 +309,7 @@ def evaluate_candidate_cv(
             if progress_callback:
                 progress_callback(definition.display_name, fold_idx + 1, total_folds)
 
-            fold_pipeline = clone(unfitted_pipeline)
+            fold_pipeline: Any = clone(unfitted_pipeline)
 
             X_train_fold, X_val_fold = X.iloc[train_idx], X.iloc[val_idx]
             y_train_fold, y_val_fold = y.iloc[train_idx], y.iloc[val_idx]
@@ -406,10 +410,10 @@ def run_recommendation_benchmark(
         )
 
     df = dataframe.copy()
-    target_series = df[config.target_column]
+    target_series = pd.Series(df[config.target_column])
     total_raw_rows = len(df)
 
-    target_missing = int(target_series.isna().sum())
+    target_missing = target_series.isna().sum()
     if target_missing > 0:
         missing_pct = target_missing / total_raw_rows
         if missing_pct > 0.20 or target_missing == total_raw_rows:
@@ -417,7 +421,7 @@ def run_recommendation_benchmark(
                 status="invalid_target",
                 task_type="unknown",
                 target_column=config.target_column,
-                target_cardinality=int(target_series.nunique(dropna=True)),
+                target_cardinality=target_series.nunique(dropna=True),
                 evaluation_metric=config.metric or "unknown",
                 split_strategy="none",
                 cv_folds=config.cv_folds,
@@ -436,7 +440,7 @@ def run_recommendation_benchmark(
             status="insufficient_data",
             task_type="unknown",
             target_column=config.target_column,
-            target_cardinality=int(df[config.target_column].nunique()),
+            target_cardinality=pd.Series(df[config.target_column]).nunique(),
             evaluation_metric=config.metric or "unknown",
             split_strategy="none",
             cv_folds=config.cv_folds,
@@ -448,7 +452,7 @@ def run_recommendation_benchmark(
             limitations=["Dataset contains fewer than 10 valid rows after filtering."],
         )
 
-    target_id_check = detect_identifier_signals(config.target_column, df[config.target_column], len(df), is_target=True)
+    target_id_check = detect_identifier_signals(config.target_column, pd.Series(df[config.target_column]), len(df), is_target=True)
     if target_id_check.is_identifier or target_id_check.reasons:
         warnings.append(
             f"Selected target column '{config.target_column}' exhibits identifier characteristics ({' | '.join(target_id_check.reasons)}). "
@@ -462,10 +466,11 @@ def run_recommendation_benchmark(
         [c for c in df.columns if c != config.target_column],
     )
     detected_prob = detect_problem_type(ctx_for_detection)
+    min_class_samples: int = 0
 
     if detected_prob in (ProblemType.BINARY_CLASSIFICATION, ProblemType.MULTI_CLASSIFICATION):
         task_type = "classification"
-        target_cardinality = int(df[config.target_column].nunique())
+        target_cardinality = pd.Series(df[config.target_column]).nunique()
         if target_cardinality < 2:
             return RecommendationResult(
                 status="invalid_target",
@@ -484,7 +489,7 @@ def run_recommendation_benchmark(
             )
 
         class_counts = df[config.target_column].value_counts()
-        min_class_samples = int(class_counts.min())
+        min_class_samples = pd.Series(class_counts).min()
         if min_class_samples < 2:
             return RecommendationResult(
                 status="insufficient_data",
@@ -503,7 +508,7 @@ def run_recommendation_benchmark(
             )
     else:
         task_type = "regression"
-        target_cardinality = int(df[config.target_column].nunique())
+        target_cardinality = pd.Series(df[config.target_column]).nunique()
         if target_cardinality <= 1:
             return RecommendationResult(
                 status="invalid_target",

@@ -31,7 +31,7 @@ import sys
 import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException, UploadFile, status
 
@@ -40,6 +40,7 @@ from app.ingestion.storage_backend import (
     LocalFileSystemBackend,
     StorageBackend,
     StorageError,
+    StorageLocation,
     get_configured_backend,
 )
 from app.schemas.dataset import DatasetUploadV2Response
@@ -414,7 +415,7 @@ class IngestionService:
         if is_redis_available():
             try:
                 from services.worker.tasks.ingestion_task import ingest_dataset_task  # noqa: PLC0415
-                ingest_dataset_task.delay(job_id, config)
+                cast(Any, ingest_dataset_task).delay(job_id, config)
                 logger.info(
                     "Ingestion job %s dispatched to Celery.", job_id
                 )

@@ -29,7 +29,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import uuid
 
 import joblib
@@ -298,7 +298,7 @@ def preprocess_input(
         df[col] = np.nan
 
     # Reorder columns strictly to match training expectations
-    return df[feature_columns]
+    return pd.DataFrame(df[feature_columns])
 
 
 def validate_input(
@@ -338,8 +338,8 @@ def validate_input(
             if s.dtype == object:
                 s_numeric = pd.to_numeric(s, errors="coerce")
                 # If non-null string entries failed to parse completely, warn/impute
-                non_null_orig = s.notna().sum()
-                non_null_num = s_numeric.notna().sum()
+                non_null_orig = int(pd.Series(s).notna().sum())
+                non_null_num = int(pd.Series(s_numeric).notna().sum())
                 if non_null_orig > 0 and non_null_num < non_null_orig:
                     warnings.append(
                         f"Column '{col}' contains non-numeric strings that were coerced to NaN."
@@ -353,7 +353,7 @@ def validate_input(
                 cleaned_df.loc[inf_mask, col] = np.nan
 
             # Impute remaining NaNs with 0.0 to prevent scikit-learn fit/predict crash if missing
-            if cleaned_df[col].isna().any():
+            if bool(cleaned_df[col].isna().any()):
                 cleaned_df[col] = cleaned_df[col].fillna(0.0)
 
     is_valid = len(errors) == 0
@@ -375,7 +375,7 @@ def postprocess_prediction(
     predictions: np.ndarray,
     probas: Optional[np.ndarray] = None,
     problem_type: str = "BinaryClassification",
-    class_names: Optional[List[Any]] = None,
+    class_names: Optional[Sequence[Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Format raw scikit-learn model outputs into clean prediction dictionaries.
 
@@ -494,7 +494,7 @@ def predict(
             preds,
             probas=probas,
             problem_type=container.problem_type,
-            class_names=container.classes_,
+            class_names=list(container.classes_) if container.classes_ is not None else None,
         )
 
         latency_ms = round((time.monotonic() - t0) * 1000.0, 3)
@@ -681,7 +681,7 @@ def predict_batch(
             chunk_preds,
             probas=chunk_probas,
             problem_type=container.problem_type,
-            class_names=container.classes_,
+            class_names=list(container.classes_) if container.classes_ is not None else None,
         )
 
         formatted_all.extend(chunk_formatted)

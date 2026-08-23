@@ -79,8 +79,8 @@ def detect_identifier_signals(
     if isinstance(values, pd.Series):
         clean_series = values.dropna()
         sample_vals = clean_series.head(100).tolist()
-        non_null_count = int(clean_series.count())
-        unique_count = int(clean_series.nunique())
+        non_null_count = clean_series.count()
+        unique_count = clean_series.nunique()
     else:
         sample_vals = [v for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
         non_null_count = len(sample_vals)
@@ -117,7 +117,7 @@ def detect_identifier_signals(
     # Signal 4: Monotonic sequential check
     sequential_matched = False
     if isinstance(values, pd.Series) and pd.api.types.is_numeric_dtype(values) and non_null_count >= 10:
-        numeric_series = clean_series.astype(float)
+        numeric_series = values.dropna().astype(float)
         diffs = numeric_series.diff().dropna()
         if (diffs == 1.0).all():
             sequential_matched = True
@@ -199,8 +199,8 @@ def sanitize_feature_columns(
             )
             continue
 
-        series = dataframe[col]
-        non_null_count = int(series.count())
+        series = pd.Series(dataframe[col])
+        non_null_count = series.count()
 
         # 100% missing check
         if non_null_count == 0:
@@ -310,7 +310,7 @@ def build_preprocessor(
 
     # ── Numeric columns ───────────────────────────────────────────────────────
     if ctx.numeric_columns:
-        num_steps = [("imputer", numeric_imputer_instance)]
+        num_steps: list[tuple[str, Any]] = [("imputer", numeric_imputer_instance)]
         if scaler_instance is not None:
             num_steps.append(("scaler", scaler_instance))
         transformers.append(
@@ -331,7 +331,7 @@ def build_preprocessor(
 
     # ── Boolean columns ───────────────────────────────────────────────────────
     if ctx.boolean_columns:
-        bool_steps = [
+        bool_steps: list[tuple[str, Any]] = [
             ("cast_obj", FunctionTransformer(_cast_to_object, validate=False)),
             ("imputer", get_imputer("most_frequent")),
             ("to_int", FunctionTransformer(_bool_to_int, validate=False)),
@@ -345,7 +345,7 @@ def build_preprocessor(
 
     # ── Datetime columns ──────────────────────────────────────────────────────
     if ctx.datetime_columns:
-        dt_steps = [
+        dt_steps: list[tuple[str, Any]] = [
             ("imputer", get_imputer("most_frequent")),
             ("to_ts", FunctionTransformer(_to_unix_timestamp, validate=False)),
         ]

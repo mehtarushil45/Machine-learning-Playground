@@ -156,6 +156,7 @@ async def validate_api_key(
     api_key.last_user_agent = user_agent
     await db.commit()
 
+    last_used = api_key.last_used_at
     return {
         "key_id": str(api_key.id),
         "user_id": str(api_key.user_id),
@@ -163,7 +164,7 @@ async def validate_api_key(
         "workspace_id": str(api_key.workspace_id) if api_key.workspace_id else None,
         "scopes": api_key.scopes,
         "key_prefix": api_key.key_prefix,
-        "last_used_at": api_key.last_used_at.isoformat() if api_key.last_used_at else None,
+        "last_used_at": last_used.isoformat() if last_used is not None else None,
     }
 
 
@@ -197,11 +198,12 @@ async def revoke_api_key(
     api_key.revoked_at = _utc_now()
     await db.commit()
 
+    rev_at = api_key.revoked_at
     return {
         "key_id": str(api_key.id),
         "key_prefix": api_key.key_prefix,
         "revoked": True,
-        "revoked_at": api_key.revoked_at.isoformat(),
+        "revoked_at": rev_at.isoformat() if rev_at is not None else None,
         "revoked_by": revoked_by,
     }
 

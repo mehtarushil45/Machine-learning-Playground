@@ -15,8 +15,10 @@ import logging
 import os
 import socket
 import sys
-from typing import Any, Dict, Optional, List
+from typing import Any, Callable, Coroutine, Dict, List, Optional, cast
 import uuid
+
+import pandas as pd
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -33,7 +35,11 @@ from app.ml.dataset_loader import (
     find_dataset_path,
     read_dataset_header,
 )
-from app.ml.problem_detector import ProblemType, detect_problem_type
+from app.ml.problem_detector import (
+    ProblemType,
+    detect_problem_type,
+    detect_problem_type_from_series,
+)
 from app.models.job import Job
 from app.models.recommendation import RecommendationJob, RecommendationJobStatus
 from app.schemas.job import (
@@ -112,14 +118,13 @@ def _validate_dataset_schema_and_features(request: TrainingRequest) -> List[str]
 
 
 def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
-    """Verify algorithm compatibility by inspecting target column sample (≤50 rows) without full data load."""
+    """Verify algorithm compatibility by inspecting target column sample (<=50 rows) using authoritative ProblemType detector."""
     _validate_dataset_schema_and_features(request)
 
     # Read lightweight sample of target column only
     try:
         try:
             file_path = find_dataset_path(request.dataset_id)
-            import pandas as pd
             sample_df = pd.read_csv(file_path, usecols=[request.target_column], nrows=50)
         except Exception:
             from services.worker.core.dataset_loader import load_dataset_dataframe
@@ -131,14 +136,9 @@ def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
             detail=f"Unable to read dataset sample for validation: {exc}",
         ) from exc
 
-    target_series = sample_df[request.target_column]
-    dtype_str = str(target_series.dtype)
-    n_unique = int(target_series.nunique(dropna=True))
-
-    if dtype_str in ("object", "category", "bool") or dtype_str.startswith("str") or n_unique <= 20:
-        task_type = "classification"
-    else:
-        task_type = "regression"
+    target_series = pd.Series(sample_df[request.target_column])
+    detected_problem: ProblemType = detect_problem_type_from_series(target_series)
+    task_type = detected_problem.to_task_type()
 
     try:
         get_algorithm(request.algorithm, task_type=task_type, random_state=request.random_seed or 42)
@@ -204,7 +204,7 @@ async def _validate_recommendation_provenance(
 
     # Provenance check for 'recommended'
     if request.selection_source == "recommended":
-        status_val = rec_job.status.value if hasattr(rec_job.status, "value") else str(rec_job.status)
+        status_val = str(getattr(rec_job.status, "value", rec_job.status))
         if status_val != "COMPLETED":
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -405,7 +405,7 @@ def update_job_state(
 class JobService:
     """Enterprise ML Job Orchestration & Service Layer using SQLAlchemy Async Sessions."""
 
-    def __init__(self, runner: Optional[Callable[[str, Dict[str, Any]], Awaitable[None]]] = None) -> None:
+    def __init__(self, runner: Optional[Callable[[str, Dict[str, Any]], Coroutine[Any, Any, None]]] = None) -> None:
         """Initialize JobService with optional runner callable for dependency injection."""
         self._runner = runner
 
@@ -546,7 +546,7 @@ class JobService:
             try:
                 from services.worker.tasks.training_task import execute_ml_training_job
 
-                execute_ml_training_job.delay(job_id, config)
+                cast(Any, execute_ml_training_job).delay(job_id, config)
                 logger.info("Dispatched job %s to Celery worker.", job_id)
                 return
             except Exception as exc:

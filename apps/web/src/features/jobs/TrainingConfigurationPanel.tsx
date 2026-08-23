@@ -71,9 +71,15 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
     () => trainingOptions.algorithms.filter((option) => option.task_type === taskType),
     [taskType, trainingOptions.algorithms],
   )
-  const effectiveAlgorithm = trainingOptions.algorithms.some((option) => option.key === algorithm)
+  const effectiveAlgorithm = taskAlgorithms.some((option) => option.key === algorithm)
     ? algorithm
     : taskAlgorithms[0]?.key || (taskType === 'classification' ? 'random_forest_classifier' : 'random_forest_regressor')
+
+  useEffect(() => {
+    if (taskAlgorithms.length > 0 && !taskAlgorithms.some((option) => option.key === algorithm)) {
+      setAlgorithm(taskAlgorithms[0].key)
+    }
+  }, [taskAlgorithms, algorithm])
 
   const effectiveScaler = trainingOptions.scalers.some((option) => option.key === scaler)
     ? scaler

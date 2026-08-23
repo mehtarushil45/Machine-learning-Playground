@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db, AdminUser
+from app.dependencies import get_db, get_admin_user
 from app.admin import (
     broadcast_notification,
     create_filesystem_backup,
@@ -64,7 +64,7 @@ from app.schemas.admin import (
 router = APIRouter(
     prefix="/admin",
     tags=["Enterprise Admin"],
-    dependencies=[Depends(AdminUser)],  # ← all admin endpoints require admin role
+    dependencies=[Depends(get_admin_user)],  # ← all admin endpoints require admin role
 )
 
 

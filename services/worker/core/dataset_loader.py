@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 import uuid
 
 import pandas as pd
@@ -47,7 +47,7 @@ def find_dataset_path(dataset_id: str) -> str:
     # 3. Check MinIO / S3 Object Storage backend
     try:
         from app.ingestion.storage_backend import get_configured_backend
-        backend = get_configured_backend()
+        backend: Any = get_configured_backend()
         if backend is not None and hasattr(backend, "download_to_temp"):
             temp_path = backend.download_to_temp(dataset_id=dataset_id)
             if temp_path and os.path.exists(temp_path):
@@ -86,7 +86,7 @@ def load_dataset_dataframe(
         ValueError: If CSV parsing fails or data is corrupted.
     """
     org_id_str = str(organisation_id) if organisation_id else None
-    dataset_id_str = str(dataset_id)
+    dataset_id_str = dataset_id if isinstance(dataset_id, str) else str(dataset_id)
     filename = original_filename or (os.path.basename(file_path_hint) if file_path_hint else "dataset.csv")
 
     try:
@@ -99,7 +99,8 @@ def load_dataset_dataframe(
         backend = None
 
     # ── 1. MinIO / S3 Object Storage Abstraction ──────────────────────────────
-    if backend is not None and hasattr(backend, "download_to_temp"):
+    backend_any: Any = backend
+    if backend_any is not None and hasattr(backend_any, "download_to_temp"):
         logger.info(
             "Loading dataset '%s' (org=%s) via MinIO object storage abstraction",
             dataset_id_str,
@@ -107,13 +108,14 @@ def load_dataset_dataframe(
         )
         temp_path: Optional[str] = None
         try:
-            temp_path = backend.download_to_temp(
+            temp_path = backend_any.download_to_temp(
                 dataset_id=dataset_id_str,
                 filename=filename,
                 organisation_id=org_id_str,
             )
-            df = pd.read_csv(temp_path)
-            return df
+            if temp_path:
+                df = pd.read_csv(temp_path)
+                return df
         except Exception as exc:
             logger.warning(
                 "MinIO download_to_temp failed for dataset '%s': %s. Checking local fallback...",

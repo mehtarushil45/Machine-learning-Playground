@@ -4,16 +4,8 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
-try:
-    from app.ml.monitoring import monitoring_registry
-    from app.ml.monitoring.monitoring_models import make_alert
-except ImportError:
-    class DummyRegistry:
-        def find_active_alert(self, *args, **kwargs): return None
-        def save_alert(self, *args, **kwargs): pass
-        def update_alert(self, *args, **kwargs): pass
-    monitoring_registry = DummyRegistry()
-    def make_alert(**kwargs): return kwargs
+from app.ml.monitoring import monitoring_registry
+from app.ml.monitoring.monitoring_models import make_alert
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +110,7 @@ def create_alert_with_dedup(monitoring_id: str, deployment_id: str, model_id: st
             "severity": severity,
             "message": message,
         }
-        return monitoring_registry.update_alert(monitoring_id, existing["alert_id"], updates)
+        return monitoring_registry.update_alert(monitoring_id, existing["alert_id"], updates) or {}
         
     # Store context_key in context dict for deduplication index
     if context is None:
@@ -192,4 +184,4 @@ def resolve_alert(monitoring_id: str, alert_id: str, resolved_by: str, resolutio
         "resolved_by": resolved_by,
         "resolution_note": resolution_note,
     }
-    return monitoring_registry.update_alert(monitoring_id, alert_id, updates)
+    return monitoring_registry.update_alert(monitoring_id, alert_id, updates) or {}

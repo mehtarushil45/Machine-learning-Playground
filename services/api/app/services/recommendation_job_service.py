@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import logging
 import os
 import socket
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 import uuid
 
 from fastapi import HTTPException, status
@@ -80,7 +80,7 @@ def _orm_to_response(job: RecommendationJob) -> RecommendationJobResponse:
         organisation_id=str(job.organisation_id),
         status=job.status,
         stage=job.stage or "QUEUED",
-        progress=float(job.progress if job.progress is not None else 0.0),
+        progress=job.progress if job.progress is not None else 0.0,
         message=job.message,
         cache_key=job.cache_key,
         created_at=job.created_at.isoformat() if job.created_at else None,
@@ -314,7 +314,7 @@ class RecommendationJobService:
         try:
             from services.worker.tasks.recommendation_task import execute_recommendation_benchmark_job
 
-            task_res = execute_recommendation_benchmark_job.delay(str(new_job.id))
+            task_res = cast(Any, execute_recommendation_benchmark_job).delay(str(new_job.id))
             if hasattr(task_res, "id"):
                 await db.execute(
                     update(RecommendationJob)

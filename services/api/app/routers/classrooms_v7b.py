@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
-from app.models.classroom import Assignment, Classroom, ClassroomMember, Submission
+from app.models.classroom import Assignment, Classroom, ClassroomMember, Feedback, Submission
 from app.ml.classroom_analytics import (
     compute_classroom_dashboard,
     compute_student_progress,
@@ -49,16 +49,34 @@ async def get_classroom_dashboard(classroom_id: UUID, db: AsyncSession = Depends
     assignments_res = await db.execute(
         select(Assignment).where(Assignment.classroom_id == classroom_id)
     )
-    assignments = [{"id": str(a.id), "title": a.title} for a in assignments_res.scalars().all()]
+    assignments_list = list(assignments_res.scalars().all())
+    assignment_ids = [a.id for a in assignments_list]
+    assignments = [{"id": str(a.id), "title": a.title} for a in assignments_list]
 
-    submissions_res = await db.execute(
-        select(Submission).where(Submission.classroom_id == classroom_id)
-    )
-    submissions = [
-        {"assignment_id": str(s.assignment_id), "learner_id": str(s.learner_id),
-         "score": s.score, "feedback": s.feedback}
-        for s in submissions_res.scalars().all()
-    ]
+    submissions: List[Dict[str, Any]] = []
+    if assignment_ids:
+        submissions_res = await db.execute(
+            select(Submission).where(Submission.assignment_id.in_(assignment_ids))
+        )
+        sub_list = list(submissions_res.scalars().all())
+        sub_ids = [s.id for s in sub_list]
+        feedback_map: Dict[UUID, Feedback] = {}
+        if sub_ids:
+            fb_res = await db.execute(
+                select(Feedback).where(Feedback.submission_id.in_(sub_ids))
+            )
+            for fb in fb_res.scalars().all():
+                feedback_map[fb.submission_id] = fb
+
+        submissions = [
+            {
+                "assignment_id": str(s.assignment_id),
+                "learner_id": str(s.learner_id),
+                "score": feedback_map[s.id].score if s.id in feedback_map else None,
+                "feedback": feedback_map[s.id].comments if s.id in feedback_map else None,
+            }
+            for s in sub_list
+        ]
 
     return compute_classroom_dashboard(
         classroom_id=str(classroom_id),
@@ -79,16 +97,34 @@ async def get_classroom_audit(classroom_id: UUID, db: AsyncSession = Depends(get
     assignments_res = await db.execute(
         select(Assignment).where(Assignment.classroom_id == classroom_id)
     )
-    assignments = [{"id": str(a.id), "title": a.title} for a in assignments_res.scalars().all()]
+    assignments_list = list(assignments_res.scalars().all())
+    assignment_ids = [a.id for a in assignments_list]
+    assignments = [{"id": str(a.id), "title": a.title} for a in assignments_list]
 
-    submissions_res = await db.execute(
-        select(Submission).where(Submission.classroom_id == classroom_id)
-    )
-    submissions = [
-        {"assignment_id": str(s.assignment_id), "learner_id": str(s.learner_id),
-         "score": s.score, "is_late": False}
-        for s in submissions_res.scalars().all()
-    ]
+    submissions: List[Dict[str, Any]] = []
+    if assignment_ids:
+        submissions_res = await db.execute(
+            select(Submission).where(Submission.assignment_id.in_(assignment_ids))
+        )
+        sub_list = list(submissions_res.scalars().all())
+        sub_ids = [s.id for s in sub_list]
+        feedback_map: Dict[UUID, Feedback] = {}
+        if sub_ids:
+            fb_res = await db.execute(
+                select(Feedback).where(Feedback.submission_id.in_(sub_ids))
+            )
+            for fb in fb_res.scalars().all():
+                feedback_map[fb.submission_id] = fb
+
+        submissions = [
+            {
+                "assignment_id": str(s.assignment_id),
+                "learner_id": str(s.learner_id),
+                "score": feedback_map[s.id].score if s.id in feedback_map else None,
+                "is_late": False,
+            }
+            for s in sub_list
+        ]
 
     return generate_classroom_audit_report(
         classroom_id=str(classroom_id),
@@ -104,9 +140,22 @@ async def get_student_progress(user_id: UUID, db: AsyncSession = Depends(get_db)
     submissions_res = await db.execute(
         select(Submission).where(Submission.learner_id == user_id)
     )
+    sub_list = list(submissions_res.scalars().all())
+    sub_ids = [s.id for s in sub_list]
+    feedback_map: Dict[UUID, Feedback] = {}
+    if sub_ids:
+        fb_res = await db.execute(
+            select(Feedback).where(Feedback.submission_id.in_(sub_ids))
+        )
+        for fb in fb_res.scalars().all():
+            feedback_map[fb.submission_id] = fb
+
     submissions = [
-        {"score": s.score, "feedback": s.feedback}
-        for s in submissions_res.scalars().all()
+        {
+            "score": feedback_map[s.id].score if s.id in feedback_map else None,
+            "feedback": feedback_map[s.id].comments if s.id in feedback_map else None,
+        }
+        for s in sub_list
     ]
 
     return compute_student_progress(

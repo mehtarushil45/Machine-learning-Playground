@@ -14,7 +14,7 @@ Resolution order:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from fastapi import Depends, HTTPException, status
 
@@ -117,7 +117,7 @@ def evaluate_owner_permission(
 
 # ── FastAPI Depends factory ───────────────────────────────────────────────────
 
-def require_permission(permission: str) -> Callable:
+def require_permission(permission: str) -> Any:
     """Return a FastAPI dependency that enforces *permission*.
 
     Usage in a router::

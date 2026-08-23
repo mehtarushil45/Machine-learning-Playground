@@ -16,10 +16,14 @@ import os
 import threading
 from typing import Any, Dict, List, Optional
 
-try:
-    import psutil
-except ImportError:
-    psutil = None  # Optional memory metrics fallback
+import importlib
+import importlib.util
+
+psutil: Any = (
+    importlib.import_module("psutil")
+    if importlib.util.find_spec("psutil") is not None
+    else None
+)
 
 logger = logging.getLogger("apex_ml.inference_metrics")
 

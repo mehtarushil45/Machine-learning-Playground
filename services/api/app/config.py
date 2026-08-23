@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import ClassVar, FrozenSet
+from typing import Any, ClassVar, FrozenSet
 
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -277,7 +277,7 @@ class Settings(BaseSettings):
 
     @field_validator("access_token_expire_minutes", mode="before")
     @classmethod
-    def validate_access_token_ttl(cls, v: object) -> int:
+    def validate_access_token_ttl(cls, v: Any) -> int:
         """Ensure access token TTL is a positive integer."""
         try:
             val = int(v)
@@ -300,7 +300,7 @@ class Settings(BaseSettings):
 
     @field_validator("refresh_token_expire_days", mode="before")
     @classmethod
-    def validate_refresh_token_ttl(cls, v: object) -> int:
+    def validate_refresh_token_ttl(cls, v: Any) -> int:
         """Ensure refresh token TTL is a positive integer."""
         try:
             val = int(v)

@@ -10,7 +10,7 @@ from fastapi import APIRouter
 
 from app.dependencies import CurrentUser
 from app.ml.algorithm_factory import get_supported_algorithms_catalog
-from app.schemas.algorithm import SupportedAlgorithmsResponse
+from app.schemas.algorithm import SupportedAlgorithmItem, SupportedAlgorithmsResponse
 
 router = APIRouter(prefix="/algorithms", tags=["Algorithms"])
 
@@ -29,4 +29,7 @@ async def get_supported_algorithms(
     - **Dynamic Availability**: Checks whether optional packages (e.g. `xgboost`, `lightgbm`) are importable.
     """
     catalog = get_supported_algorithms_catalog()
-    return SupportedAlgorithmsResponse(total=len(catalog), algorithms=catalog)
+    return SupportedAlgorithmsResponse(
+        total=len(catalog),
+        algorithms=[SupportedAlgorithmItem.model_validate(item) for item in catalog],
+    )

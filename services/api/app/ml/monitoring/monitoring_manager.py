@@ -344,7 +344,7 @@ def run_drift_check(monitoring_id: str, performed_by: str = "system") -> dict:
         "last_drift_check": _utc_now(),
         "drift_detected": drift_report.get("drift_detected", False),
         "last_drift_score": drift_report.get("overall_drift_score"),
-        "active_alerts_count": len([a for a in _ae().get_active_alerts(monitoring_id)]) if hasattr(_ae(), "get_active_alerts") else None,
+        "active_alerts_count": len(reg.list_alerts(monitoring_id, resolved=False)),
     })
 
     return drift_report
@@ -515,8 +515,9 @@ def submit_actuals(monitoring_id: str, actuals_list: List[dict]) -> dict:
     if not config:
         raise ValueError(f"Monitor '{monitoring_id}' not found.")
     result = _pm().submit_actuals(monitoring_id=monitoring_id, actuals_list=actuals_list)
+    current_status = _registry().get_monitor_status(monitoring_id) or {}
     _registry().update_monitor_status(monitoring_id, {
-        "predictions_since_last_check": _registry().get_monitor_status(monitoring_id).get(
+        "predictions_since_last_check": current_status.get(
             "predictions_since_last_check", 0
         ) + result.get("submitted_count", 0),
     })

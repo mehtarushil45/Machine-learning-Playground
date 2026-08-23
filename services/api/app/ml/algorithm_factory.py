@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import importlib.util
 import logging
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping, cast
 
 from sklearn.base import BaseEstimator
 from sklearn.calibration import CalibratedClassifierCV
@@ -99,12 +99,15 @@ def _create_lightgbm_classifier(seed: int) -> BaseEstimator:
         )
     from lightgbm import LGBMClassifier
 
-    return LGBMClassifier(
-        n_estimators=200,
-        learning_rate=0.05,
-        random_state=seed,
-        n_jobs=1,
-        verbosity=-1,
+    return cast(
+        BaseEstimator,
+        LGBMClassifier(
+            n_estimators=200,
+            learning_rate=0.05,
+            random_state=seed,
+            n_jobs=1,
+            verbosity=-1,
+        ),
     )
 
 
@@ -115,12 +118,15 @@ def _create_lightgbm_regressor(seed: int) -> BaseEstimator:
         )
     from lightgbm import LGBMRegressor
 
-    return LGBMRegressor(
-        n_estimators=200,
-        learning_rate=0.05,
-        random_state=seed,
-        n_jobs=1,
-        verbosity=-1,
+    return cast(
+        BaseEstimator,
+        LGBMRegressor(
+            n_estimators=200,
+            learning_rate=0.05,
+            random_state=seed,
+            n_jobs=1,
+            verbosity=-1,
+        ),
     )
 
 
@@ -214,7 +220,7 @@ ALGORITHM_REGISTRY: Mapping[str, AlgorithmDefinition] = {
         key="support_vector_classifier",
         display_name="Support Vector Classifier (SVC)",
         task_type="classification",
-        factory=lambda seed: CalibratedClassifierCV(SVC(random_state=seed), ensemble=False),
+        factory=lambda seed: CalibratedClassifierCV(SVC(random_state=seed), ensemble=cast(Any, False)),
         category="kernel",
         supports_sparse_input=True,
         supports_missing_values=False,

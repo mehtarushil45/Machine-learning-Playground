@@ -131,6 +131,7 @@ def test_alembic_migration_upgrade_and_downgrade():
     migration_files = glob.glob(os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "*recommendation*.py"))
     assert len(migration_files) >= 1
     spec = importlib.util.spec_from_file_location("mig", migration_files[0])
+    assert spec is not None and spec.loader is not None
     mig = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mig)
 

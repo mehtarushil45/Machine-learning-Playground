@@ -43,7 +43,7 @@ import hashlib
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 import uuid
 
 import numpy as np
@@ -180,8 +180,9 @@ def _compute_classification_report_and_cm(
     try:
         from sklearn.metrics import classification_report, confusion_matrix
 
-        clf_dict: Dict[str, Any] = classification_report(
-            y_test, y_pred, output_dict=True, zero_division=0
+        clf_dict: Dict[str, Any] = cast(
+            Dict[str, Any],
+            classification_report(y_test, y_pred, output_dict=True, zero_division=cast(Any, 0)),
         )
         # Convert numpy values to plain Python floats
         clf_serialisable: Dict[str, Any] = {}
@@ -261,11 +262,11 @@ def _compute_extended_regression_metrics(
         y_p = np.asarray(y_pred, dtype=float)
 
         result: Dict[str, float] = {
-            "explained_variance": round(float(explained_variance_score(y_t, y_p)), 6),
-            "max_error": round(float(max_error(y_t, y_p)), 6),
+            "explained_variance": round(explained_variance_score(y_t, y_p), 6),
+            "max_error": round(max_error(y_t, y_p), 6),
         }
         try:
-            mape = float(mean_absolute_percentage_error(y_t, y_p))
+            mape = mean_absolute_percentage_error(y_t, y_p)
             result["mape"] = round(mape, 6)
         except Exception:
             result["mape"] = None  # type: ignore[assignment]

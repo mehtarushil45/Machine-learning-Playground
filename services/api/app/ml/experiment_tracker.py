@@ -266,10 +266,10 @@ def filter_experiments(
         stubs = [s for s in stubs if (s.get("problem_type") or "").lower() == pt]
 
     if min_score is not None:
-        stubs = [s for s in stubs if _primary_score(s) is not None and _primary_score(s) >= min_score]
+        stubs = [s for s in stubs if (score := _primary_score(s)) is not None and score >= min_score]
 
     if max_score is not None:
-        stubs = [s for s in stubs if _primary_score(s) is not None and _primary_score(s) <= max_score]
+        stubs = [s for s in stubs if (score := _primary_score(s)) is not None and score <= max_score]
 
     if from_date:
         stubs = [s for s in stubs if (s.get("started_at") or "") >= from_date]

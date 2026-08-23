@@ -25,12 +25,12 @@ SCHEMA_VERSION = "6b.1.0"
 MIN_RECORDS = 50
 
 # Optional scipy
+_scipy_stats: Any = None
 try:
     from scipy import stats as _scipy_stats
     _SCIPY_AVAILABLE = True
     logger.debug("drift_detector: scipy available — using KS test")
 except ImportError:
-    _scipy_stats = None  # type: ignore[assignment]
     _SCIPY_AVAILABLE = False
     logger.debug("drift_detector: scipy not available — using mean-shift fallback")
 
@@ -59,14 +59,14 @@ def ks_test_or_fallback(
     if not current_values or not baseline_values:
         return {"score": 0.0, "drift_detected": False, "method": "insufficient_data"}
 
-    if _SCIPY_AVAILABLE and len(current_values) >= 5 and len(baseline_values) >= 5:
+    if _SCIPY_AVAILABLE and _scipy_stats is not None and len(current_values) >= 5 and len(baseline_values) >= 5:
         try:
-            result = _scipy_stats.ks_2samp(current_values, baseline_values)
+            result: Any = _scipy_stats.ks_2samp(current_values, baseline_values)
             # KS p-value: low p-value means significant difference
             # We use statistic (0-1) as score; flag if p-value < threshold
             # threshold here is used as p-value threshold
             score = float(result.statistic)
-            drift_detected = result.pvalue < threshold
+            drift_detected = float(result.pvalue) < threshold
             return {"score": score, "drift_detected": drift_detected, "method": "ks", "p_value": float(result.pvalue)}
         except Exception as e:
             logger.warning("KS test failed (%s); falling back to mean-shift", e)

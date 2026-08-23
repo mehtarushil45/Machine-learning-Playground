@@ -3,7 +3,7 @@
 Computes production-grade evaluation metrics for Classification and Regression models.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import numpy as np
 from sklearn.metrics import (
@@ -23,9 +23,9 @@ def evaluate_classification(
 ) -> Dict[str, Optional[float]]:
     """Compute classification evaluation metrics."""
     acc = float(accuracy_score(y_true, y_pred))
-    prec = float(precision_score(y_true, y_pred, average="weighted", zero_division=0))
-    rec = float(recall_score(y_true, y_pred, average="weighted", zero_division=0))
-    f1 = float(f1_score(y_true, y_pred, average="weighted", zero_division=0))
+    prec = float(precision_score(y_true, y_pred, average="weighted", zero_division=cast(Any, 0)))
+    rec = float(recall_score(y_true, y_pred, average="weighted", zero_division=cast(Any, 0)))
+    f1 = float(f1_score(y_true, y_pred, average="weighted", zero_division=cast(Any, 0)))
 
     roc_auc: Optional[float] = None
     if y_prob is not None:
@@ -52,14 +52,14 @@ def evaluate_classification(
 
 def evaluate_regression(y_true: Any, y_pred: Any) -> Dict[str, float]:
     """Compute regression evaluation metrics."""
-    mae = float(mean_absolute_error(y_true, y_pred))
-    mse = float(mean_squared_error(y_true, y_pred))
-    rmse = float(np.sqrt(mse))
-    r2 = float(r2_score(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_true, y_pred)
 
     return {
         "mae": round(mae, 4),
-        "rmse": round(rmse, 4),
+        "rmse": round(float(rmse), 4),
         "r2_score": round(r2, 4),
     }
 

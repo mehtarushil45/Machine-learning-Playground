@@ -17,6 +17,7 @@ try:
     import yaml as _yaml
     _HAS_YAML = True
 except ImportError:
+    _yaml = None
     _HAS_YAML = False
 
 
@@ -208,7 +209,7 @@ def build_workspace_dsl(
 
 def export_dsl_yaml(doc: DSLDocument) -> str:
     """Export DSL document as YAML string."""
-    if _HAS_YAML:
+    if _HAS_YAML and _yaml is not None:
         return _yaml.dump(doc.model_dump(mode="json"), default_flow_style=False, sort_keys=False)
     # Fallback: JSON with YAML-like comment header
     return f"# DSL Export (yaml module not installed; outputting JSON)\n{export_dsl_json(doc)}"
@@ -257,7 +258,7 @@ def import_dsl_json(content: str) -> DSLDocument:
 
 def import_dsl_yaml(content: str) -> DSLDocument:
     """Parse a YAML-encoded DSL document."""
-    if not _HAS_YAML:
+    if not _HAS_YAML or _yaml is None:
         raise ImportError("PyYAML is not installed. Install it to use YAML import.")
     try:
         data = _yaml.safe_load(content)

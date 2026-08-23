@@ -30,7 +30,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from typing import Annotated
+from typing import Annotated, Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -501,7 +501,7 @@ async def get_dataset_health(
 async def get_dataset_recommendations(
     dataset_id: str,
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    db: Annotated[Optional[AsyncSession], Depends(get_db)] = None,
 ) -> DatasetRecommendationResponse:
     """Produce ML task recommendations, candidate targets, feature actions, and model choices.
 

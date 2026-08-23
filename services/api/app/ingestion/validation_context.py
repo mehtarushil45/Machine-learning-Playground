@@ -41,7 +41,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.ingestion.data_quality_validator import ValidationReport
+from .data_quality_validator import ValidationReport
 
 logger = logging.getLogger("apex_ingestion.context")
 

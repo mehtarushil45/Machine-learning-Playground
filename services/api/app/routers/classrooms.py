@@ -76,7 +76,7 @@ async def create_course(
     db.add(course)
     await db.commit()
     await db.refresh(course)
-    return course
+    return CourseResponse.model_validate(course)
 
 
 @router.get(
@@ -91,7 +91,7 @@ async def list_courses(
     """List all courses registered under current organization."""
     stmt = select(Course).where(Course.organisation_id == current_user.organisation_id)
     res = await db.execute(stmt)
-    return list(res.scalars().all())
+    return [CourseResponse.model_validate(c) for c in res.scalars().all()]
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ async def create_classroom(
     db.add(classroom)
     await db.commit()
     await db.refresh(classroom)
-    return classroom
+    return ClassroomResponse.model_validate(classroom)
 
 
 @router.get(
@@ -138,7 +138,7 @@ async def list_classrooms(
     """List all active classrooms in the organization."""
     stmt = select(Classroom).where(Classroom.organisation_id == current_user.organisation_id)
     res = await db.execute(stmt)
-    return list(res.scalars().all())
+    return [ClassroomResponse.model_validate(c) for c in res.scalars().all()]
 
 
 @router.post(
@@ -196,7 +196,7 @@ async def create_assignment(
     db.add(assignment)
     await db.commit()
     await db.refresh(assignment)
-    return assignment
+    return AssignmentResponse.model_validate(assignment)
 
 
 @router.get(
@@ -214,7 +214,7 @@ async def list_assignments(
     if classroom_id:
         stmt = stmt.where(Assignment.classroom_id == classroom_id)
     res = await db.execute(stmt)
-    return list(res.scalars().all())
+    return [AssignmentResponse.model_validate(a) for a in res.scalars().all()]
 
 
 @router.post(
@@ -244,7 +244,7 @@ async def submit_assignment(
     db.add(submission)
     await db.commit()
     await db.refresh(submission)
-    return submission
+    return SubmissionResponse.model_validate(submission)
 
 
 @router.post(

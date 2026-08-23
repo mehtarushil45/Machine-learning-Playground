@@ -642,7 +642,7 @@ def validate_v6a_deployment(
                                 reason="Pre-flight checks passed.")
     update_deployment_state(deployment_id, "DEPLOYING", ev2)
 
-    return get_v6a_deployment(deployment_id)
+    return get_v6a_deployment(deployment_id) or {}
 
 
 def deploy_v6a(
@@ -802,7 +802,7 @@ def scale_v6a(
                                 reason="Scaling complete.")
     update_deployment_state(deployment_id, "ACTIVE", ev2)
 
-    return get_v6a_deployment(deployment_id)
+    return get_v6a_deployment(deployment_id) or {}
 
 
 def update_v6a_deployment(
@@ -896,7 +896,7 @@ def update_v6a_deployment(
     _v6a_logger.info(
         "V6A deployment %s updated: %s → %s.", deployment_id, old_model_id, new_model_id
     )
-    return get_v6a_deployment(deployment_id)
+    return get_v6a_deployment(deployment_id) or {}
 
 
 def rollback_v6a(
@@ -999,7 +999,7 @@ def rollback_v6a(
         "V6A deployment %s rolled back: %s → %s.",
         deployment_id, old_model, resolved_target,
     )
-    return get_v6a_deployment(deployment_id)
+    return get_v6a_deployment(deployment_id) or {}
 
 
 def archive_v6a(
@@ -1042,7 +1042,7 @@ def archive_v6a(
     update_deployment_state(deployment_id, "ARCHIVED", ev)
 
     _v6a_logger.info("V6A deployment %s archived.", deployment_id)
-    return get_v6a_deployment(deployment_id)
+    return get_v6a_deployment(deployment_id) or {}
 
 
 def get_v6a_deployment_record(deployment_id: str) -> Optional[Dict[str, Any]]:

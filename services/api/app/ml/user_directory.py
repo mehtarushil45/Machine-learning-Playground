@@ -28,7 +28,7 @@ def _user_to_dict(user) -> dict:
         "user_id": str(user.id),
         "email": user.email,
         "display_name": getattr(user, "full_name", None) or user.email,
-        "role": role.value if hasattr(role, "value") else str(role),
+        "role": role.value if role is not None and hasattr(role, "value") else (str(role) if role is not None else None),
         "is_active": user.is_active,
         "organisation_id": str(user.organisation_id),
         "created_at": user.created_at.isoformat() if user.created_at else None,

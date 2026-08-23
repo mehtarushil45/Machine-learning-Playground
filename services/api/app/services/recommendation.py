@@ -6,13 +6,59 @@ and produces deterministic, explainable, and reproducible ML recommendations.
 No LLM calls. No randomness. Pure, deterministic recommendation algorithms.
 """
 
+from app.ml.problem_detector import ProblemType
 from app.schemas.dataset import (
+    ColumnProfile,
     DatasetHealthResponse,
     DatasetProfileResponse,
     DatasetRecommendationResponse,
     FeatureRecommendation,
     TargetSuggestion,
 )
+
+
+def _infer_column_task_from_profile(col: ColumnProfile) -> tuple[str, str]:
+    """Determine the task type ('Classification' or 'Regression') and explanation for a column profile.
+
+    Consumes authoritative problem detection rules:
+    - Boolean and categorical types -> Classification
+    - Binary 2-value numeric indicators -> Classification
+    - Continuous numeric types (fractional statistics or high cardinality > 20) -> Regression
+    - Low-cardinality discrete integers (<= 20) -> Classification
+    """
+    if col.type == "boolean":
+        return "Classification", f"Boolean target with binary classes"
+
+    if col.type in ("categorical", "text"):
+        return "Classification", f"Discrete categorical target with {col.unique} unique category values"
+
+    if col.type == "numeric":
+        stats = col.statistics or {}
+        min_val = stats.get("min")
+        max_val = stats.get("max")
+        mean_val = stats.get("mean")
+
+        # Check for fractional floating-point characteristics
+        has_fractional = False
+        for val in (min_val, max_val, mean_val):
+            if val is not None and isinstance(val, (float, int)) and (val % 1 != 0):
+                has_fractional = True
+                break
+
+        if col.unique == 2:
+            return "Classification", "Binary numeric indicator target candidate (2 unique values)"
+
+        if has_fractional or col.unique > 20:
+            range_info = (
+                f"range [{min_val}, {max_val}]"
+                if min_val is not None and max_val is not None
+                else f"{col.unique} unique values"
+            )
+            return "Regression", f"Continuous numeric target candidate with {range_info}"
+
+        return "Classification", f"Discrete integer target candidate with {col.unique} unique class values"
+
+    return "Classification", f"Target candidate '{col.name}'"
 
 
 class RecommendationEngineService:
@@ -54,15 +100,16 @@ class RecommendationEngineService:
             if col.type == "identifier":
                 continue
 
+            task, task_reason = _infer_column_task_from_profile(col)
+
             # High confidence target match via explicit name
             if col_name_lower in target_keywords or any(kw in col_name_lower for kw in ("target", "label", "class_")):
-                task = "Classification" if col.type in ("categorical", "boolean") else "Regression"
                 target_suggestions.append(
                     TargetSuggestion(
                         column_name=col.name,
                         confidence="High",
                         suggested_task=task,
-                        reasoning=f"Column name '{col.name}' explicitly matches standard machine learning target keywords.",
+                        reasoning=f"Column name '{col.name}' explicitly matches standard machine learning target keywords ({task_reason}).",
                     )
                 )
             # High confidence binary/discrete target
@@ -71,31 +118,31 @@ class RecommendationEngineService:
                     TargetSuggestion(
                         column_name=col.name,
                         confidence="High" if col.name == profile.columns[-1].name else "Medium",
-                        suggested_task="Classification",
-                        reasoning=f"Discrete target candidate with {col.unique} unique category values.",
+                        suggested_task=task,
+                        reasoning=task_reason,
                     )
                 )
-            # Continuous numeric target
-            elif col.type == "numeric" and col.unique > 10:
+            # Numeric targets (continuous regression or discrete classification)
+            elif col.type == "numeric" and col.unique >= 2:
                 target_suggestions.append(
                     TargetSuggestion(
                         column_name=col.name,
                         confidence="High" if col.name == profile.columns[-1].name else "Medium",
-                        suggested_task="Regression",
-                        reasoning=f"Continuous numeric target candidate with range [{col.statistics.get('min')}, {col.statistics.get('max')}].",
+                        suggested_task=task,
+                        reasoning=task_reason,
                     )
                 )
 
         # Fallback if no target suggestions generated
         if not target_suggestions and profile.columns:
             last_col = profile.columns[-1]
-            task = "Classification" if last_col.type in ("categorical", "boolean") else "Regression"
+            task, task_reason = _infer_column_task_from_profile(last_col)
             target_suggestions.append(
                 TargetSuggestion(
                     column_name=last_col.name,
                     confidence="Medium",
                     suggested_task=task,
-                    reasoning=f"Positioned as the final column in dataset '{last_col.name}'.",
+                    reasoning=f"Positioned as the final column in dataset '{last_col.name}' ({task_reason}).",
                 )
             )
 

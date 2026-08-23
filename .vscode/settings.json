@@ -1,11 +1,14 @@
 {
     "js/ts.tsdk.path": "node_modules\\typescript\\lib",
-    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "python.defaultInterpreterPath": "${workspaceFolder}/services/api/.venv/Scripts/python.exe",
     "css.lint.unknownAtRules": "ignore",
     "python.analysis.extraPaths": [
-        "./services/api"
+        "./services/api",
+        "."
     ],
     "python.autoComplete.extraPaths": [
-        "./services/api"
+        "./services/api",
+        "."
     ]
-}
+}
+

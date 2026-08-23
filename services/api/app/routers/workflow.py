@@ -41,7 +41,7 @@ async def read_workflow_status(
 @router.get("/lineage/{correlation_id}", response_model=Dict[str, Any], summary="Trace workflow lineage")
 async def read_workflow_lineage(
     correlation_id: str,
-    activity_events: List[Dict[str, Any]] = None,
+    activity_events: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Trace all events sharing a correlation_id across the workflow."""
     return get_workflow_lineage(

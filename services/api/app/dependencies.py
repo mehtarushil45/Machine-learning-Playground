@@ -25,7 +25,7 @@ Both checks fail-open (Redis downtime does not block login).
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, AsyncGenerator
 
 import jwt
 from fastapi import Cookie, Depends, HTTPException, Request, status
@@ -41,7 +41,7 @@ from app.models.user import User
 
 # ── Database session ───────────────────────────────────────────────────────────
 
-async def get_db() -> AsyncSession:  # type: ignore[return]
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async database session per request."""
     async with AsyncSessionLocal() as session:
         yield session

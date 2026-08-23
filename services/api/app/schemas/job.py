@@ -31,25 +31,25 @@ class JobStatusEnum(str, enum.Enum):
 class TrainingRequest(BaseModel):
     """Payload schema for POST /api/v1/jobs/train."""
 
-    dataset_id: str = Field(..., description="ID of the uploaded dataset")
-    target_column: str = Field(..., description="Target column variable name")
-    feature_columns: list[str] = Field(..., description="List of feature column names")
-    algorithm: str = Field("random_forest_classifier", description="Canonical ML model algorithm key")
-    scaler: str | None = Field("standard_scaler", description="Canonical feature scaling strategy key")
-    imputer: str | None = Field("median", description="Canonical missing-value imputation strategy key")
-    train_test_split: float = Field(0.8, description="Train / Test split ratio (0.5 to 0.95)")
-    random_seed: int | None = Field(42, description="Random seed for reproducibility")
-    cross_validation: int | None = Field(5, description="Cross validation folds count")
-    cv_n_splits: int | None = Field(None, description="Alias for cross validation folds count")
-    normalization: bool | None = Field(True, description="Apply StandardScaler normalization (backward-compatible)")
-    feature_selection: str | None = Field("all", description="Feature selection strategy")
-    class_weight: str | None = Field("balanced", description="Class weighting mode")
-    notes: str | None = Field("", description="Optional user notes")
+    dataset_id: str = Field(description="ID of the uploaded dataset")
+    target_column: str = Field(description="Target column variable name")
+    feature_columns: list[str] = Field(description="List of feature column names")
+    algorithm: str = Field(default="random_forest_classifier", description="Canonical ML model algorithm key")
+    scaler: str | None = Field(default="standard_scaler", description="Canonical feature scaling strategy key")
+    imputer: str | None = Field(default="median", description="Canonical missing-value imputation strategy key")
+    train_test_split: float = Field(default=0.8, description="Train / Test split ratio (0.5 to 0.95)")
+    random_seed: int | None = Field(default=42, description="Random seed for reproducibility")
+    cross_validation: int | None = Field(default=5, description="Cross validation folds count")
+    cv_n_splits: int | None = Field(default=None, description="Alias for cross validation folds count")
+    normalization: bool | None = Field(default=True, description="Apply StandardScaler normalization (backward-compatible)")
+    feature_selection: str | None = Field(default="all", description="Feature selection strategy")
+    class_weight: str | None = Field(default="balanced", description="Class weighting mode")
+    notes: str | None = Field(default="", description="Optional user notes")
     recommendation_job_id: str | None = Field(
-        None, description="Originating recommendation benchmark job ID for provenance tracking"
+        default=None, description="Originating recommendation benchmark job ID for provenance tracking"
     )
     selection_source: str = Field(
-        "default",
+        default="default",
         pattern=r"^(recommended|manual|default)$",
         description="Provenance of algorithm selection: 'recommended', 'manual', or 'default'",
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import patch
 
 import numpy as np
@@ -54,13 +55,14 @@ def multiclass_df() -> pd.DataFrame:
 @pytest.fixture
 def regression_df() -> pd.DataFrame:
     """Fixture providing a continuous regression dataset."""
-    X, y = make_regression(
+    reg_data = make_regression(
         n_samples=100,
         n_features=4,
         n_informative=3,
         noise=0.1,
         random_state=42,
     )
+    X, y = reg_data[0], reg_data[1]
     df = pd.DataFrame(X, columns=[f"feat_{i}" for i in range(4)])
     df["target"] = y
     return df
@@ -99,7 +101,7 @@ def test_imbalanced_binary_classification_metric_selection():
     """Severe class imbalance (>10:1 ratio) must select F1 over ROC-AUC."""
     # 100 negative, 8 positive (12.5:1 ratio)
     X = np.random.randn(108, 4)
-    y = np.array([0] * 100 + [1] * 8)
+    y = [0] * 100 + [1] * 8
     df = pd.DataFrame(X, columns=["f1", "f2", "f3", "f4"])
     df["target"] = y
 
@@ -133,9 +135,11 @@ def test_regression_recommendation_and_negative_score_ranking(regression_df: pd.
     assert result.task_type == "regression"
     assert result.evaluation_metric == "rmse"
     assert result.recommended_algorithm is not None
+    assert result.recommended_algorithm.score is not None
     # Higher score is better (negated RMSE closer to 0)
     assert result.recommended_algorithm.score <= 0.0
     # Raw metric value is positive RMSE
+    assert result.recommended_algorithm.raw_metric_value is not None
     assert result.recommended_algorithm.raw_metric_value >= 0.0
 
 
@@ -320,7 +324,22 @@ def test_tie_policy_and_simpler_model_preference(binary_classification_df: pd.Da
 
 def test_cache_key_canonicalization_and_sensitivity():
     """Cache keys must be deterministic and sensitive to any algorithmic or data changes."""
-    base_args = {
+    def _compute_key(args: dict[str, Any]) -> str:
+        return compute_recommendation_cache_key(
+            dataset_content_hash=args["dataset_content_hash"],
+            target_column=args["target_column"],
+            feature_columns=args["feature_columns"],
+            task_type=args["task_type"],
+            metric=args["metric"],
+            split_strategy=args["split_strategy"],
+            train_test_split=args["train_test_split"],
+            cv_folds=args["cv_folds"],
+            random_seed=args["random_seed"],
+            max_training_seconds=args["max_training_seconds"],
+            prefer_interpretable=args["prefer_interpretable"],
+        )
+
+    base_args: dict[str, Any] = {
         "dataset_content_hash": "a" * 64,
         "target_column": "STATUS",
         "feature_columns": ["col_b", "col_a", "col_c"],
@@ -335,34 +354,34 @@ def test_cache_key_canonicalization_and_sensitivity():
     }
 
     # 1. Same config
-    key1 = compute_recommendation_cache_key(**base_args)
+    key1 = _compute_key(base_args)
 
     # 2. Re-ordered feature columns -> Must yield IDENTICAL key
     reordered_args = dict(base_args)
     reordered_args["feature_columns"] = ["col_c", "col_a", "col_b"]
-    key2 = compute_recommendation_cache_key(**reordered_args)
+    key2 = _compute_key(reordered_args)
     assert key1 == key2
 
     # 3. Changed target -> Different key
     diff_target = dict(base_args, target_column="DIFFERENT")
-    assert compute_recommendation_cache_key(**diff_target) != key1
+    assert _compute_key(diff_target) != key1
 
     # 4. Changed random seed -> Different key
     diff_seed = dict(base_args, random_seed=99)
-    assert compute_recommendation_cache_key(**diff_seed) != key1
+    assert _compute_key(diff_seed) != key1
 
     # 5. Changed cv_folds -> Different key
     diff_folds = dict(base_args, cv_folds=10)
-    assert compute_recommendation_cache_key(**diff_folds) != key1
+    assert _compute_key(diff_folds) != key1
 
     # 6. Changed train_test_split -> Different key
     diff_split = dict(base_args, train_test_split=0.7)
-    assert compute_recommendation_cache_key(**diff_split) != key1
+    assert _compute_key(diff_split) != key1
 
     # 7. Changed prefer_interpretable -> Different key
     diff_interp = dict(base_args, prefer_interpretable=True)
-    assert compute_recommendation_cache_key(**diff_interp) != key1
+    assert _compute_key(diff_interp) != key1
 
     # 8. Changed dataset content hash -> Different key
     diff_hash = dict(base_args, dataset_content_hash="b" * 64)
-    assert compute_recommendation_cache_key(**diff_hash) != key1
+    assert _compute_key(diff_hash) != key1

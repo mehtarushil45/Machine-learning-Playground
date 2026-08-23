@@ -242,7 +242,7 @@ def load_dataset_context(
 
     # ── 7. Missing value counts ───────────────────────────────────────────────
     missing_per_column: dict = {
-        col: int(df[col].isna().sum())
+        col: int(pd.Series(df[col]).isna().sum())
         for col in available + [target_column]
     }
 

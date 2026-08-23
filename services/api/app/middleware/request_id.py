@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import uuid
 from contextvars import ContextVar
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, cast
 
 import structlog
 from fastapi import FastAPI, Request, Response, status
@@ -139,9 +139,9 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 def register_request_id_exception_handlers(app: FastAPI) -> None:
     """Register request_id exception handlers on FastAPI application."""
-    app.add_exception_handler(StarletteHTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
-    app.add_exception_handler(Exception, unhandled_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, cast(Any, http_exception_handler))
+    app.add_exception_handler(RequestValidationError, cast(Any, validation_exception_handler))
+    app.add_exception_handler(Exception, cast(Any, unhandled_exception_handler))
 
 
 # ── Celery Signal Integration ────────────────────────────────────────────────

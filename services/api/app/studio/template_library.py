@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 from datetime import datetime, timezone
 from app.schemas.studio import DSLDocument, DSLEdge, DSLNode, DSLTemplate
 
@@ -151,7 +151,7 @@ _TEMPLATES: Dict[str, DSLTemplate] = {
 }
 
 
-def list_templates(dsl_type: str = None, tags: List[str] = None) -> List[DSLTemplate]:
+def list_templates(dsl_type: Optional[str] = None, tags: Optional[List[str]] = None) -> List[DSLTemplate]:
     """Return available templates, optionally filtered by type or tags."""
     templates = list(_TEMPLATES.values())
     if dsl_type:
