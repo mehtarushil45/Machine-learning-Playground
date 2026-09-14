@@ -444,6 +444,18 @@ async def get_dataset_profile(
                 matched_file_path = fpath
                 break
 
+    # 3. Fallback search in configured StorageBackend / MinIO
+    if not matched_file_path or not os.path.isfile(matched_file_path):
+        try:
+            from services.worker.core.dataset_loader import find_dataset_path
+
+            resolved_path = find_dataset_path(dataset_id)
+            if resolved_path and os.path.isfile(resolved_path):
+                matched_file_path = resolved_path
+                matched_filename = os.path.basename(resolved_path)
+        except Exception:
+            pass
+
     if not matched_file_path or not os.path.isfile(matched_file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

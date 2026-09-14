@@ -118,3 +118,4 @@ docker-compose.local.yml
 terraform.tfstate
 terraform.tfstate.*
 .terraform/
+.cora/

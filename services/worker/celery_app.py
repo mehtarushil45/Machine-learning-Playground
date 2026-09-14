@@ -13,6 +13,17 @@ import os
 from typing import Any, Dict
 from celery import Celery
 
+try:
+    from dotenv import load_dotenv
+
+    _env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+    else:
+        load_dotenv()
+except Exception:
+    pass
+
 
 def mask_url(url: str) -> str:
     """Mask sensitive credentials in connection strings for safe logging."""
@@ -74,7 +85,7 @@ def get_celery_config() -> Dict[str, Any]:
         or os.environ.get("BROKER_URL")
     )
     if not broker_url:
-        broker_url = default_redis if is_prod else "memory://"
+        broker_url = default_redis
 
     backend_url = (
         os.environ.get("CELERY_RESULT_BACKEND")
@@ -82,7 +93,7 @@ def get_celery_config() -> Dict[str, Any]:
         or os.environ.get("RESULT_BACKEND")
     )
     if not backend_url:
-        backend_url = default_redis if is_prod else "rpc://"
+        backend_url = default_redis
 
     return {
         "environment": env_name,

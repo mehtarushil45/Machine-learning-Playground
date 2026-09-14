@@ -67,4 +67,45 @@ describe('Training Contract & Provenance Payload — Phase 6', () => {
     expect(payload.selection_source).toBe('default');
     expect(payload.recommendation_job_id).toBeUndefined();
   });
+
+  it('correctly constructs valid regression training contract for study_hours target', () => {
+    const activeConfig: ActiveTrainingConfiguration = {
+      dataset_id: '55b5b1fb-73d9-4799-a7fc-57e051d3f77a',
+      dataset_name: 'mlplayground_full_test.csv',
+      target_column: 'study_hours',
+      feature_columns: ['age', 'attendance_percent', 'final_score', 'city', 'course', 'passed', 'remarks'],
+      algorithm: 'random_forest_regressor',
+      scaler: 'standard_scaler',
+      imputer: 'median',
+      train_test_split: 0.8,
+      cv_folds: 5,
+      random_seed: 42,
+      recommendation_job_id: null,
+      selection_source: 'manual',
+    };
+
+    const payload: TrainingRequestPayload = {
+      dataset_id: activeConfig.dataset_id,
+      target_column: activeConfig.target_column,
+      feature_columns: activeConfig.feature_columns,
+      algorithm: activeConfig.algorithm,
+      scaler: activeConfig.scaler,
+      imputer: activeConfig.imputer,
+      train_test_split: activeConfig.train_test_split,
+      random_seed: activeConfig.random_seed,
+      cross_validation: activeConfig.cv_folds,
+      normalization: true,
+      feature_selection: 'all',
+      notes: `Trained on ${activeConfig.dataset_name} with ${activeConfig.feature_columns.length} features`,
+      recommendation_job_id: activeConfig.recommendation_job_id,
+      selection_source: activeConfig.selection_source,
+    };
+
+    expect(payload.target_column).toBe('study_hours');
+    expect(payload.algorithm).toBe('random_forest_regressor');
+    expect(payload.feature_columns).not.toContain('study_hours');
+    expect(payload.train_test_split).toBe(0.8);
+    expect(payload.cross_validation).toBe(5);
+    expect(payload.dataset_id).toBe('55b5b1fb-73d9-4799-a7fc-57e051d3f77a');
+  });
 });

@@ -410,3 +410,5 @@ class Settings(BaseSettings):
 # The error message tells the operator exactly what to fix.
 # ---------------------------------------------------------------------------
 settings = Settings()
+if settings.redis_url and "REDIS_URL" not in os.environ:
+    os.environ["REDIS_URL"] = settings.redis_url
