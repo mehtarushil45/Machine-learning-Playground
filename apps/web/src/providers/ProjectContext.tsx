@@ -35,8 +35,10 @@ export interface ProjectState {
   selectedFeatures: string[];
   /** Column chosen as target */
   selectedTarget:   string | null;
-  /** Active / persisted training configuration */
+  /** Active / persisted training configuration (single source of truth for pipeline config) */
   trainingConfig:   ActiveTrainingConfiguration | null;
+  /** Task type inferred from backend dataset analysis — drives algorithm filtering in Page 2 */
+  inferredTaskType: 'classification' | 'regression' | null;
   /** Most recently completed / active training job */
   activeJob:        JobEntity | null;
   /** Which lifecycle stage is "current" for the rail */
@@ -56,6 +58,7 @@ interface ProjectContextValue extends ProjectState {
   setSelectedFeatures:   (f: string[])         => void;
   setSelectedTarget:     (t: string | null)    => void;
   setTrainingConfig:     (c: ActiveTrainingConfiguration | null) => void;
+  setInferredTaskType:   (t: 'classification' | 'regression' | null) => void;
   setActiveJob:          (j: JobEntity | null) => void;
   setLifecycleStage:     (s: LifecycleStage)   => void;
   /** Convenience: load a new dataset and reset selection */
@@ -83,21 +86,25 @@ function loadPersistedState(): Partial<ProjectState> {
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const initial = loadPersistedState();
 
-  const [dataset,          setDataset]          = useState<Dataset | null>(initial.dataset ?? null);
-  const [selectedFeatures, setSelectedFeatures] = useState<string[]>(initial.selectedFeatures ?? []);
-  const [selectedTarget,   setSelectedTarget]   = useState<string | null>(initial.selectedTarget ?? null);
-  const [trainingConfig,   setTrainingConfig]   = useState<ActiveTrainingConfiguration | null>(initial.trainingConfig ?? null);
-  const [activeJob,        setActiveJob]        = useState<JobEntity | null>(initial.activeJob ?? null);
-  const [lifecycleStage,   setLifecycleStage]   = useState<LifecycleStage>(initial.lifecycleStage ?? 'dataset');
+  const [dataset,           setDataset]           = useState<Dataset | null>(initial.dataset ?? null);
+  const [selectedFeatures,  setSelectedFeatures]  = useState<string[]>(initial.selectedFeatures ?? []);
+  const [selectedTarget,    setSelectedTarget]    = useState<string | null>(initial.selectedTarget ?? null);
+  const [trainingConfig,    setTrainingConfig]    = useState<ActiveTrainingConfiguration | null>(initial.trainingConfig ?? null);
+  const [inferredTaskType,  setInferredTaskType]  = useState<'classification' | 'regression' | null>(
+    (initial as any).inferredTaskType ?? null,
+  );
+  const [activeJob,         setActiveJob]         = useState<JobEntity | null>(initial.activeJob ?? null);
+  const [lifecycleStage,    setLifecycleStage]    = useState<LifecycleStage>(initial.lifecycleStage ?? 'dataset');
 
   // Persist state updates to localStorage
   useEffect(() => {
     try {
-      const stateToPersist: ProjectState = {
+      const stateToPersist = {
         dataset,
         selectedFeatures,
         selectedTarget,
         trainingConfig,
+        inferredTaskType,
         activeJob,
         lifecycleStage,
       };
@@ -105,13 +112,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.warn('Failed to save project state to localStorage:', err);
     }
-  }, [dataset, selectedFeatures, selectedTarget, trainingConfig, activeJob, lifecycleStage]);
+  }, [dataset, selectedFeatures, selectedTarget, trainingConfig, inferredTaskType, activeJob, lifecycleStage]);
 
   const loadDataset = useCallback((d: Dataset) => {
     setDataset(d);
     setSelectedFeatures([]);
     setSelectedTarget(null);
     setTrainingConfig(null);
+    setInferredTaskType(null);
     setActiveJob(null);
     setLifecycleStage('dataset');
   }, []);
@@ -121,6 +129,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSelectedFeatures([]);
     setSelectedTarget(null);
     setTrainingConfig(null);
+    setInferredTaskType(null);
     setActiveJob(null);
     setLifecycleStage('dataset');
     try {
@@ -137,12 +146,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         selectedFeatures,
         selectedTarget,
         trainingConfig,
+        inferredTaskType,
         activeJob,
         lifecycleStage,
         setDataset,
         setSelectedFeatures,
         setSelectedTarget,
         setTrainingConfig,
+        setInferredTaskType,
         setActiveJob,
         setLifecycleStage,
         loadDataset,

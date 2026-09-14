@@ -63,8 +63,10 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', () => {
   it('renders active training configuration from ProjectContext before job creation', async () => {
     // Helper component to initialize ProjectContext with ActiveTrainingConfiguration
     const Initializer = () => {
-      const { setTrainingConfig } = useProject();
+      const { setTrainingConfig, setSelectedTarget } = useProject();
       React.useEffect(() => {
+        // Set selectedTarget so hasUsableConfig is true (required to exit empty state)
+        setSelectedTarget('churn_label');
         setTrainingConfig({
           dataset_id: 'ds-123',
           dataset_name: 'customer_churn.csv',
@@ -79,7 +81,7 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', () => {
           selection_source: 'recommended',
           recommendation_job_id: 'rec-job-999',
         });
-      }, [setTrainingConfig]);
+      }, [setTrainingConfig, setSelectedTarget]);
       return <ViewAsCodeStudio />;
     };
 
@@ -89,9 +91,16 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', () => {
       </ProjectProvider>,
     );
 
+    // Target and feature columns are now read-only display divs (not inputs).
+    // They are accessible via aria-label.
     await waitFor(() => {
-      expect(screen.getByDisplayValue('churn_label')).toBeInTheDocument();
-      expect(screen.getByDisplayValue('tenure, monthly_charges, contract_type')).toBeInTheDocument();
+      const targetDiv = screen.getByLabelText('Target column (read-only)');
+      expect(targetDiv).toHaveTextContent('churn_label');
+    });
+
+    // Feature columns strip shows badges for up to 6 features
+    await waitFor(() => {
+      expect(screen.getByLabelText('Feature columns (read-only)')).toBeInTheDocument();
     });
 
     // Verify DAG generation call received exact configuration
@@ -107,4 +116,5 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', () => {
       );
     });
   });
+
 });

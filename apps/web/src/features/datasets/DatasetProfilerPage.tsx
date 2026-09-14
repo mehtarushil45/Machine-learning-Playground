@@ -418,9 +418,11 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     dataset,
     selectedFeatures,
     selectedTarget,
+    trainingConfig,
     setSelectedFeatures,
     setSelectedTarget,
     setTrainingConfig,
+    setInferredTaskType,
     loadDataset,
     resetProject,
     setActiveJob,
@@ -458,12 +460,24 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   /* ── Quality Score Breakdown Modal State ────────────────────────── */
   const [showScoreModal, setShowScoreModal] = useState(false);
 
-  /* ── Training Form State ────────────────────────────────────────── */
-  const [algorithm, setAlgorithm] = useState('random_forest_classifier');
-  const [scaler, setScaler] = useState('standard_scaler');
-  const [imputer, setImputer] = useState('median');
-  const [cvFolds, setCvFolds] = useState(5);
-  const [trainTestSplit, setTrainTestSplit] = useState(0.8);
+  /* ── Training Form State — lazy-initialized from canonical trainingConfig on mount ── */
+  // Lazy initializers run once at mount.  If Page 2 has edited trainingConfig before
+  // Page 1 remounts (e.g. back-navigation), the updated values are picked up automatically.
+  const [algorithm, setAlgorithm] = useState<string>(
+    () => trainingConfig?.algorithm ?? 'random_forest_classifier',
+  );
+  const [scaler, setScaler] = useState<string>(
+    () => trainingConfig?.scaler ?? 'standard_scaler',
+  );
+  const [imputer, setImputer] = useState<string>(
+    () => trainingConfig?.imputer ?? 'median',
+  );
+  const [cvFolds, setCvFolds] = useState<number>(
+    () => trainingConfig?.cv_folds ?? 5,
+  );
+  const [trainTestSplit, setTrainTestSplit] = useState<number>(
+    () => trainingConfig?.train_test_split ?? 0.8,  // TRAIN RATIO: 0.8 = 80% train
+  );
   const [isLaunching, setIsLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
 
@@ -487,8 +501,13 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       .then((data) => {
         if (data && data.algorithms?.length > 0) {
           setTrainingOptions(data);
-          if (data.default_cv_folds) setCvFolds(data.default_cv_folds);
-          if (data.default_train_test_split) setTrainTestSplit(data.default_train_test_split);
+          // Only apply backend defaults when no prior canonical config exists.
+          // If trainingConfig is set (e.g. user navigated back from Page 2),
+          // preserve the user-chosen values instead of overwriting.
+          if (!trainingConfig) {
+            if (data.default_cv_folds) setCvFolds(data.default_cv_folds);
+            if (data.default_train_test_split) setTrainTestSplit(data.default_train_test_split);
+          }
           if (data.scalers?.length) {
             setScaler((current) =>
               data.scalers.some((option) => option.key === current) ? current : data.scalers[0].key,
@@ -503,6 +522,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       })
       .catch(() => {});
     return () => ctrl.abort();
+    // trainingConfig intentionally excluded: only read at mount via lazy useState above
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ── Profile & Health Engine Trigger ───────────────────────────── */
@@ -692,6 +713,80 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       setAlgorithm(taskAlgorithms[0].key);
     }
   }, [taskAlgorithms, algorithm]);
+
+  /* ── Sync inferred task type to context (Page 2 uses this to filter algorithms) ── */
+  useEffect(() => {
+    setInferredTaskType(selectedTaskType);
+  }, [selectedTaskType, setInferredTaskType]);
+
+  /* ── Live-sync: write canonical trainingConfig whenever local config changes ──────
+   * Fires on every algorithm/scaler/imputer/split/cv change when prerequisites exist.
+   * This is the "Page 1 → canonical" direction.
+   * Page 2 reads trainingConfig directly from context (no duplication).
+   */
+  useEffect(() => {
+    if (!dataset || !selectedTarget || selectedFeatures.length === 0) return;
+
+    const algToUse = taskAlgorithms.length > 0
+      ? (taskAlgorithms.some((o) => o.key === algorithm) ? algorithm : taskAlgorithms[0].key)
+      : algorithm;
+    const scalerToUse = trainingOptions.scalers.some((o) => o.key === scaler)
+      ? scaler
+      : (trainingOptions.scalers[0]?.key || 'standard_scaler');
+    const imputerToUse = trainingOptions.imputers.some((o) => o.key === imputer)
+      ? imputer
+      : (trainingOptions.imputers[0]?.key || 'median');
+
+    setTrainingConfig({
+      dataset_id: dataset.datasetId || `client-${dataset.fileName}`,
+      dataset_name: dataset.fileName,
+      target_column: selectedTarget,
+      feature_columns: selectedFeatures,
+      algorithm: algToUse,
+      scaler: scalerToUse,
+      imputer: imputerToUse,
+      train_test_split: trainTestSplit,  // TRAIN RATIO: 0.8 = 80% train
+      cv_folds: cvFolds,
+      random_seed: 42,
+      recommendation_job_id: recommendationProvenance.recommendationJobId,
+      selection_source:
+        recommendationProvenance.isRecommended &&
+        algToUse === recommendationProvenance.recommendedAlgorithmId
+          ? 'recommended'
+          : recommendationProvenance.recommendationJobId
+          ? 'manual'
+          : 'default',
+    });
+  }, [
+    dataset,
+    selectedTarget,
+    selectedFeatures,
+    algorithm,
+    scaler,
+    imputer,
+    trainTestSplit,
+    cvFolds,
+    taskAlgorithms,
+    trainingOptions.scalers,
+    trainingOptions.imputers,
+    recommendationProvenance,
+    setTrainingConfig,
+  ]);
+
+  /* ── Back-navigation sync: when trainingConfig changes from outside (Page 2 edits)
+   * update local state so Page 1 UI reflects the change.
+   * React bails out if the new value equals the current one, so no infinite loop.
+   */
+  useEffect(() => {
+    if (!trainingConfig) return;
+    if (trainingConfig.algorithm !== algorithm) setAlgorithm(trainingConfig.algorithm);
+    if (trainingConfig.scaler !== scaler) setScaler(trainingConfig.scaler);
+    if (trainingConfig.imputer !== imputer) setImputer(trainingConfig.imputer);
+    if (trainingConfig.train_test_split !== trainTestSplit) setTrainTestSplit(trainingConfig.train_test_split);
+    if (trainingConfig.cv_folds !== cvFolds) setCvFolds(trainingConfig.cv_folds);
+    // Intentionally only trainingConfig in deps — local values used inside for comparison only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trainingConfig]);
 
   const effectiveScaler = trainingOptions.scalers.some((option) => option.key === scaler)
     ? scaler
