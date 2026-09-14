@@ -443,6 +443,26 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     recommendedAlgorithmId: null,
   });
 
+  const handleRecommendationProvenanceChange = useCallback(
+    (next: {
+      recommendationJobId: string | null;
+      isRecommended: boolean;
+      recommendedAlgorithmId: string | null;
+    }) => {
+      setRecommendationProvenance((prev) => {
+        if (
+          prev.recommendationJobId === next.recommendationJobId &&
+          prev.isRecommended === next.isRecommended &&
+          prev.recommendedAlgorithmId === next.recommendedAlgorithmId
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
   /* ── Manual 4-Panel Grid Resizing State (C1) ──────────────────── */
   const [splitCol, setSplitCol] = useState<number>(50);
   const [splitRow, setSplitRow] = useState<number>(46);
@@ -493,6 +513,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>(CANONICAL_TRAINING_OPTIONS);
 
   const abortRef = useRef<AbortController | null>(null);
+  const lastEmittedConfigRef = useRef<ActiveTrainingConfiguration | null>(null);
 
   /* ── Fetch Real Training Options from Backend API ───────────────── */
   useEffect(() => {
@@ -737,7 +758,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       ? imputer
       : (trainingOptions.imputers[0]?.key || 'median');
 
-    setTrainingConfig({
+    const nextConfig: ActiveTrainingConfiguration = {
       dataset_id: dataset.datasetId || `client-${dataset.fileName}`,
       dataset_name: dataset.fileName,
       target_column: selectedTarget,
@@ -756,7 +777,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
           : recommendationProvenance.recommendationJobId
           ? 'manual'
           : 'default',
-    });
+    };
+
+    lastEmittedConfigRef.current = nextConfig;
+    setTrainingConfig(nextConfig);
   }, [
     dataset,
     selectedTarget,
@@ -775,16 +799,17 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
   /* ── Back-navigation sync: when trainingConfig changes from outside (Page 2 edits)
    * update local state so Page 1 UI reflects the change.
-   * React bails out if the new value equals the current one, so no infinite loop.
+   * If trainingConfig is the exact object reference Page 1 just emitted, skip back-sync.
    */
   useEffect(() => {
     if (!trainingConfig) return;
+    if (trainingConfig === lastEmittedConfigRef.current) return;
+
     if (trainingConfig.algorithm !== algorithm) setAlgorithm(trainingConfig.algorithm);
     if (trainingConfig.scaler !== scaler) setScaler(trainingConfig.scaler);
     if (trainingConfig.imputer !== imputer) setImputer(trainingConfig.imputer);
     if (trainingConfig.train_test_split !== trainTestSplit) setTrainTestSplit(trainingConfig.train_test_split);
     if (trainingConfig.cv_folds !== cvFolds) setCvFolds(trainingConfig.cv_folds);
-    // Intentionally only trainingConfig in deps — local values used inside for comparison only
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trainingConfig]);
 
@@ -1673,7 +1698,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       cvFolds={cvFolds}
                       trainTestSplit={trainTestSplit}
                       onShowToast={onShowToast}
-                      onRecommendationChange={setRecommendationProvenance}
+                      onRecommendationChange={handleRecommendationProvenanceChange}
                     />
 
                     {/* Algorithm Select */}
@@ -1795,11 +1820,13 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                               letterSpacing: '0.08em',
                             }}
                           >
-                            Split
+                            Split Ratio
                           </label>
                           <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: BB.text }}>
-                            <strong style={{ color: BB.maroonLight }}>{Math.round(trainTestSplit * 100)}%</strong> Train ·{' '}
+                            <strong style={{ color: BB.maroonLight }}>{Math.round(trainTestSplit * 100)}%</strong> Train
+                            {(dataset?.rowCount || dataset?.rows?.length) ? ` (~${Math.round((dataset.rowCount || dataset.rows.length) * trainTestSplit)})` : ''} ·{' '}
                             <strong style={{ color: BB.primaryLight }}>{Math.round((1 - trainTestSplit) * 100)}%</strong> Test
+                            {(dataset?.rowCount || dataset?.rows?.length) ? ` (~${(dataset.rowCount || dataset.rows.length) - Math.round((dataset.rowCount || dataset.rows.length) * trainTestSplit)})` : ''}
                           </span>
                         </div>
                         <input
@@ -1808,17 +1835,23 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           max={0.95}
                           step={0.01}
                           value={trainTestSplit}
-                          onChange={(e) => setTrainTestSplit(parseFloat(e.target.value))}
+                          onChange={(e) => {
+                            const val = Math.round(parseFloat(e.target.value) * 100) / 100;
+                            setTrainTestSplit(val);
+                          }}
                           style={{
                             width: '100%',
                             height: 6,
                             borderRadius: 3,
                             appearance: 'none',
                             outline: 'none',
-                            cursor: 'grab',
+                            cursor: 'pointer',
+                            accentColor: BB.maroonLight,
                             background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${
-                              trainTestSplit * 100
-                            }%, rgba(107,92,166,0.25) ${trainTestSplit * 100}%, rgba(107,92,166,0.25) 100%)`,
+                              Math.max(0, Math.min(100, ((trainTestSplit - 0.5) / 0.45) * 100))
+                            }%, rgba(107,92,166,0.25) ${
+                              Math.max(0, Math.min(100, ((trainTestSplit - 0.5) / 0.45) * 100))
+                            }%, rgba(107,92,166,0.25) 100%)`,
                           }}
                         />
                       </div>

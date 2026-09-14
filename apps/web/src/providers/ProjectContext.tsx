@@ -96,22 +96,26 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [activeJob,         setActiveJob]         = useState<JobEntity | null>(initial.activeJob ?? null);
   const [lifecycleStage,    setLifecycleStage]    = useState<LifecycleStage>(initial.lifecycleStage ?? 'dataset');
 
-  // Persist state updates to localStorage
+  // Persist state updates to localStorage (debounced to avoid blocking UI during fast slider changes)
   useEffect(() => {
-    try {
-      const stateToPersist = {
-        dataset,
-        selectedFeatures,
-        selectedTarget,
-        trainingConfig,
-        inferredTaskType,
-        activeJob,
-        lifecycleStage,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
-    } catch (err) {
-      console.warn('Failed to save project state to localStorage:', err);
-    }
+    const timer = setTimeout(() => {
+      try {
+        const stateToPersist = {
+          dataset,
+          selectedFeatures,
+          selectedTarget,
+          trainingConfig,
+          inferredTaskType,
+          activeJob,
+          lifecycleStage,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
+      } catch (err) {
+        console.warn('Failed to save project state to localStorage:', err);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
   }, [dataset, selectedFeatures, selectedTarget, trainingConfig, inferredTaskType, activeJob, lifecycleStage]);
 
   const loadDataset = useCallback((d: Dataset) => {

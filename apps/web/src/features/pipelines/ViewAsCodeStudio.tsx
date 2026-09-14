@@ -5,7 +5,6 @@ import {
   Check,
   Database,
   FileSpreadsheet,
-  ExternalLink,
   Play,
   AlertCircle,
   CheckCircle2,
@@ -14,6 +13,13 @@ import {
   ArrowLeft,
   ChevronRight,
   Info,
+  Download,
+  GitBranch,
+  Settings2,
+  Cpu,
+  Sliders,
+  ShieldCheck,
+  Workflow,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG } from '../../services/api';
@@ -23,24 +29,29 @@ import type { TrainingOptions } from '../../types/job';
 import { AICopilotDrawer, type CopilotMsg } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 
-/* ── BB Brand Tokens (Matches Page 1) ─────────────────────────────────── */
+/* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
   base: '#0B0912',
-  surface: '#1B1530',
-  elevated: '#2A2247',
-  border: 'rgba(107,92,166,0.18)',
-  borderHover: 'rgba(107,92,166,0.38)',
+  surface: '#151026',
+  surfaceSubtle: '#1C1534',
+  elevated: '#241B42',
+  elevatedHover: '#2E2254',
+  border: 'rgba(107,92,166,0.22)',
+  borderHover: 'rgba(107,92,166,0.48)',
   primary: '#4B3B7C',
-  primaryLight: '#6C5CA6',
+  primaryLight: '#7C6BAE',
+  primaryGlow: 'rgba(124, 107, 174, 0.25)',
   maroon: '#6E1423',
   maroonLight: '#B23A4E',
   gold: '#C9A24B',
+  goldLight: '#E2BD68',
   text: '#F5F1EC',
   muted: '#9E93B8',
   disabled: '#3D3558',
-  success: '#22c55e',
-  warning: '#f59e0b',
-  error: '#ef4444',
+  success: '#22C55E',
+  warning: '#F59E0B',
+  error: '#EF4444',
+  codeBg: '#0D0A18',
 } as const;
 
 export interface ViewAsCodeStudioProps {
@@ -48,6 +59,85 @@ export interface ViewAsCodeStudioProps {
   onNavigate?: (tab: string) => void;
   isCopilotOpen?: boolean;
   onToggleCopilot?: () => void;
+}
+
+type StudioTab = 'code' | 'dag';
+
+/* ── Simple Fast Python Syntax Highlighter Tokenizer ─────────────────── */
+function highlightPythonLine(line: string) {
+  const commentIdx = line.indexOf('#');
+  let codePart = line;
+  let commentPart = '';
+  if (commentIdx !== -1) {
+    codePart = line.substring(0, commentIdx);
+    commentPart = line.substring(commentIdx);
+  }
+
+  const tokenRegex =
+    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:import|from|as|def|return|class|if|else|elif|try|except|with|in|for|while|pass|break|continue|lambda|yield|None|True|False|and|or|not|is)\b|\b(?:Pipeline|StandardScaler|MinMaxScaler|RobustScaler|SimpleImputer|train_test_split|mean_squared_error|mean_absolute_error|r2_score|accuracy_score|f1_score|fit|predict|transform|score|print|len|range)\b|\b\d+(?:\.\d+)?\b|[=()[\],:{}+*/-])/g;
+
+  const parts: { text: string; type: string }[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenRegex.exec(codePart)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ text: codePart.substring(lastIndex, match.index), type: 'plain' });
+    }
+    const token = match[0];
+    let type = 'plain';
+
+    if (token.startsWith('"') || token.startsWith("'")) {
+      type = 'string';
+    } else if (/^(import|from|as|def|return|class|if|else|elif|try|except|with|in|for|while|pass|break|continue|lambda|yield|None|True|False|and|or|not|is)$/.test(token)) {
+      type = 'keyword';
+    } else if (/^(Pipeline|StandardScaler|MinMaxScaler|RobustScaler|SimpleImputer|train_test_split|mean_squared_error|mean_absolute_error|r2_score|accuracy_score|f1_score|fit|predict|transform|score|print|len|range)$/.test(token)) {
+      type = 'builtin';
+    } else if (/^\d+(?:\.\d+)?$/.test(token)) {
+      type = 'number';
+    } else if (/^[=()[\],:{}+*/-]$/.test(token)) {
+      type = 'operator';
+    }
+
+    parts.push({ text: token, type });
+    lastIndex = tokenRegex.lastIndex;
+  }
+
+  if (lastIndex < codePart.length) {
+    parts.push({ text: codePart.substring(lastIndex), type: 'plain' });
+  }
+
+  return (
+    <>
+      {parts.map((p, i) => {
+        let color = '#E2E8F0';
+        let fontWeight = 400;
+
+        if (p.type === 'keyword') {
+          color = '#C792EA';
+          fontWeight = 600;
+        } else if (p.type === 'builtin') {
+          color = '#82AAFF';
+          fontWeight = 600;
+        } else if (p.type === 'string') {
+          color = '#C3E88D';
+        } else if (p.type === 'number') {
+          color = '#F78C6C';
+        } else if (p.type === 'operator') {
+          color = '#89DDFF';
+        }
+
+        return (
+          <span key={i} style={{ color, fontWeight }}>
+            {p.text}
+          </span>
+        );
+      })}
+      {commentPart && (
+        <span style={{ color: '#697098', fontStyle: 'italic' }}>{commentPart}</span>
+      )}
+    </>
+  );
 }
 
 export function ViewAsCodeStudio({
@@ -96,19 +186,23 @@ export function ViewAsCodeStudio({
     max_train_test_split: 0.95,
   });
 
+  /* ── Studio view mode: 'code' (Python Editor) or 'dag' (Visual Pipeline Flow) ─ */
+  const [activeTab, setActiveTab] = useState<StudioTab>('code');
+
   /* ── Code generation state ──────────────────────────────────────────── */
   const [generatedCode, setGeneratedCode] = useState<string>('');
   const [, setStepExplanations] = useState<CodeStepExplanation[]>([]);
   const [isValidSyntax, setIsValidSyntax] = useState<boolean | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  /** Distinct error buckets – never collapsed into one generic message. */
-  const [generationError, setGenerationError] = useState<string | null>(null); // code-gen / backend
-  const [authError, setAuthError] = useState<string | null>(null);              // session expired
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  /* ── Derived: canonical config values (NO local copy of config state) ─ */
-  // train_test_split is stored as TRAIN RATIO: 0.8 = 80 % train / 20 % test
+  /* ── Feature Search in Inspector ────────────────────────────────────── */
+  const [featureSearch, setFeatureSearch] = useState('');
+
+  /* ── Derived: canonical config values ───────────────────────────────── */
   const trainRatio         = trainingConfig?.train_test_split ?? 0.8;
   const testRatio          = 1 - trainRatio;
   const canonicalAlgorithm = trainingConfig?.algorithm ?? '';
@@ -131,6 +225,8 @@ export function ViewAsCodeStudio({
     if (dataset?.rows?.length) return dataset.rows.length.toLocaleString();
     return '—';
   }, [dataset]);
+
+  const rawRowCount = dataset?.rowCount || dataset?.rows?.length || 0;
 
   const datasetColCount = useMemo(() => {
     if (dataset?.columns?.length) return dataset.columns.length;
@@ -197,7 +293,6 @@ export function ViewAsCodeStudio({
     [trainingConfig, setTrainingConfig],
   );
 
-  /** newTrainRatio is the TRAIN ratio (0.5–0.95), e.g. 0.8 means 80% train. */
   const handleSplitChange = useCallback(
     (newTrainRatio: number) => {
       if (!trainingConfig) return;
@@ -248,7 +343,6 @@ export function ViewAsCodeStudio({
           node_id: 'n3',
           type:    'train_test_split',
           name:    'Train-Test Split',
-          // Backend code-gen endpoint accepts test_size (test ratio), not train ratio
           params:  { test_size: testRatio, random_seed: trainingConfig!.random_seed ?? 42 },
         },
         {
@@ -272,7 +366,6 @@ export function ViewAsCodeStudio({
       setIsValidSyntax(false);
       setGeneratedCode('');
       if (err instanceof AuthExpiredError) {
-        // Auth failure – categorically different from a compilation failure
         setAuthError('Session expired. Please log in again to generate pipeline code.');
       } else if (err instanceof ApiTimeoutError) {
         setGenerationError('Backend unavailable. The code generation service timed out. Please try again.');
@@ -302,7 +395,7 @@ export function ViewAsCodeStudio({
     generatePipelineCode();
   }, [generatePipelineCode, refreshTrigger]);
 
-  /* ── Copy code ──────────────────────────────────────────────────────── */
+  /* ── Copy code to clipboard ─────────────────────────────────────────── */
   const handleCopyCode = async () => {
     if (!generatedCode) return;
     try {
@@ -315,7 +408,33 @@ export function ViewAsCodeStudio({
     }
   };
 
-  /* ── AI Copilot messages – derived from canonical state, no local copy ─ */
+  /* ── Download Python script (.py) ────────────────────────────────────── */
+  const handleDownloadScript = () => {
+    if (!generatedCode) return;
+    try {
+      const blob = new Blob([generatedCode], { type: 'text/x-python;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeName = activeDatasetName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      a.href = url;
+      a.download = `pipeline_${safeName}.py`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      onShowToast?.('Download Complete', `Saved pipeline_${safeName}.py`, 'success');
+    } catch {
+      onShowToast?.('Download Error', 'Could not export Python script file.', 'error');
+    }
+  };
+
+  /* ── Code Lines for Editor View ─────────────────────────────────────── */
+  const codeLines = useMemo(() => {
+    if (!generatedCode) return [];
+    return generatedCode.split('\n');
+  }, [generatedCode]);
+
+  /* ── AI Copilot messages ─────────────────────────────────────────────── */
   const copilotMessages = useMemo<CopilotMsg[]>(() => {
     const msgs: CopilotMsg[] = [];
     const target   = selectedTarget || trainingConfig?.target_column;
@@ -324,7 +443,7 @@ export function ViewAsCodeStudio({
     msgs.push({
       id:   'pipeline-target',
       type: 'tip',
-      text: `Target variable is **${target || 'not set'}**. Pipeline generates supervised learning scikit-learn code.`,
+      text: `Supervised target variable: **${target || 'not set'}** (${inferredTaskType || 'supervised learning'}).`,
     });
 
     const excludedIds = (dataset?.columns || []).filter((c) => isColumnIdentifier(c));
@@ -339,13 +458,13 @@ export function ViewAsCodeStudio({
     msgs.push({
       id:   'pipeline-features',
       type: 'info',
-      text: `**${features.length} features** transformed via **${canonicalImputer || 'median'}** imputation and **${canonicalScaler || 'standard_scaler'}** normalization.`,
+      text: `**${features.length} features** transformed via **${canonicalImputer || 'median'}** imputation and **${canonicalScaler || 'standard_scaler'}** scaling.`,
     });
 
     msgs.push({
       id:   'pipeline-model',
       type: 'info',
-      text: `Model architecture: **${canonicalAlgorithm || 'not set'}** with **${Math.round(testRatio * 100)}% test split** (random_state=${trainingConfig?.random_seed ?? 42}).`,
+      text: `Model architecture: **${canonicalAlgorithm || 'not set'}** with **${Math.round(testRatio * 100)}% test split** (${canonicalCvFolds}-fold CV).`,
     });
 
     if (isValidSyntax) {
@@ -355,7 +474,7 @@ export function ViewAsCodeStudio({
     }
 
     return msgs;
-  }, [selectedTarget, selectedFeatures, trainingConfig, dataset, canonicalAlgorithm, canonicalScaler, canonicalImputer, testRatio, isValidSyntax]);
+  }, [selectedTarget, selectedFeatures, trainingConfig, dataset, canonicalAlgorithm, canonicalScaler, canonicalImputer, testRatio, canonicalCvFolds, inferredTaskType, isValidSyntax]);
 
   /* ── 1. Intentional Empty State ─────────────────────────────────────── */
   if (!hasUsableConfig) {
@@ -364,354 +483,1286 @@ export function ViewAsCodeStudio({
         role="region"
         aria-label="Empty Pipeline Studio"
         style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          height: '100%', padding: 32, textAlign: 'center',
-          background: BB.base, borderRadius: 12, border: `1px solid ${BB.border}`,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100%',
+          padding: 32,
+          textAlign: 'center',
+          background: `radial-gradient(ellipse at 50% 30%, rgba(75,59,124,0.18) 0%, ${BB.base} 70%)`,
+          borderRadius: 14,
+          border: `1px solid ${BB.border}`,
+          boxSizing: 'border-box',
         }}
       >
-        <div style={{ width: 56, height: 56, borderRadius: 14, background: 'rgba(107,92,166,0.15)', border: `1px solid ${BB.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-          <FileCode style={{ width: 28, height: 28, color: BB.gold }} />
+        <div
+          style={{
+            width: 64,
+            height: 64,
+            borderRadius: 18,
+            background: 'linear-gradient(135deg, rgba(107,92,166,0.25), rgba(110,20,35,0.25))',
+            border: `1px solid ${BB.primaryLight}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 20,
+            boxShadow: '0 8px 32px rgba(107,92,166,0.3)',
+          }}
+        >
+          <Workflow style={{ width: 32, height: 32, color: BB.gold }} />
         </div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: BB.text, margin: '0 0 8px' }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, color: BB.text, margin: '0 0 10px', letterSpacing: '-0.01em' }}>
           No active dataset or training configuration
         </h2>
-        <p style={{ fontSize: 12, color: BB.muted, maxWidth: 460, margin: '0 0 20px', lineHeight: 1.5 }}>
-          Upload a dataset and select your target and features in Dataset &amp; Profiler to start compiling visual scikit-learn pipelines.
+        <p style={{ fontSize: 13, color: BB.muted, maxWidth: 480, margin: '0 0 24px', lineHeight: 1.6 }}>
+          Upload a dataset and select your target and features in the Dataset Workspace to start generating production-ready scikit-learn pipeline code and interactive DAGs.
         </p>
         <button
           onClick={() => onNavigate?.('workspace')}
           style={{
-            display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 8,
-            background: `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})`,
-            border: `1px solid ${BB.primaryLight}`, color: BB.text, fontSize: 12, fontWeight: 700,
-            cursor: 'pointer', boxShadow: '0 4px 14px rgba(110,20,35,0.3)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 22px',
+            borderRadius: 9,
+            background: `linear-gradient(135deg, ${BB.primary} 0%, ${BB.maroon} 100%)`,
+            border: `1px solid ${BB.primaryLight}`,
+            color: BB.text,
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: 'pointer',
+            boxShadow: '0 6px 20px rgba(110,20,35,0.4)',
+            transition: 'transform 150ms ease, box-shadow 150ms ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-1px)';
+            e.currentTarget.style.boxShadow = '0 8px 24px rgba(110,20,35,0.5)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 6px 20px rgba(110,20,35,0.4)';
           }}
         >
-          Go to Dataset and Profiler
+          <Database style={{ width: 16, height: 16 }} />
+          <span>Go to Dataset and Profiler</span>
         </button>
       </div>
     );
   }
 
+  /* ── Filtered feature column list ───────────────────────────────────── */
+  const allFeatures = selectedFeatures.length > 0 ? selectedFeatures : (trainingConfig?.feature_columns ?? []);
+  const displayedFeatures = featureSearch
+    ? allFeatures.filter((f) => f.toLowerCase().includes(featureSearch.toLowerCase()))
+    : allFeatures;
+
   /* ── 2. Main Studio Canvas ───────────────────────────────────────────── */
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, width: '100%', height: '100%', gap: isCopilotOpen ? 12 : 0, position: 'relative', boxSizing: 'border-box', overflow: 'hidden' }}>
-      {/* Main Workspace */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, overflowY: 'auto', paddingRight: 2 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 380px) 1fr', gap: 12, alignItems: 'start' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        background: BB.base,
+        gap: 10,
+      }}
+    >
+      {/* ── TOP STUDIO COMMAND STRIP ───────────────────────────────────── */}
+      <div
+        style={{
+          background: BB.surface,
+          border: `1px solid ${BB.border}`,
+          borderRadius: 10,
+          padding: '8px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexShrink: 0,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+        }}
+      >
+        {/* Left: Breadcrumbs & Status Pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 8px',
+              borderRadius: 6,
+              background: 'rgba(201, 162, 75, 0.12)',
+              border: `1px solid rgba(201, 162, 75, 0.3)`,
+              color: BB.gold,
+              fontSize: 11,
+              fontWeight: 700,
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            <Database style={{ width: 13, height: 13 }} />
+            <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {activeDatasetName}
+            </span>
+          </div>
 
-          {/* ── Left Column ─────────────────────────────────────────────── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <ChevronRight style={{ width: 12, height: 12, color: BB.disabled, flexShrink: 0 }} />
 
-            {/* Dataset Info Card */}
-            <div style={{ background: BB.surface, border: `1px solid ${BB.border}`, borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <FileSpreadsheet style={{ width: 14, height: 14, color: BB.gold }} />
-                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.08em', color: BB.text }}>Active Dataset</span>
-                </div>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 6px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.3)', color: BB.success, fontSize: 9, fontWeight: 600 }}>
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: BB.success }} />
-                  Active
+          {/* Task Type Pill */}
+          {inferredTaskType && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '3px 8px',
+                borderRadius: 5,
+                background: inferredTaskType === 'regression' ? 'rgba(201,162,75,0.14)' : 'rgba(124,107,174,0.18)',
+                border: `1px solid ${inferredTaskType === 'regression' ? 'rgba(201,162,75,0.45)' : 'rgba(124,107,174,0.45)'}`,
+                color: inferredTaskType === 'regression' ? BB.goldLight : BB.primaryLight,
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
+            >
+              <Cpu style={{ width: 11, height: 11 }} />
+              {inferredTaskType}
+            </span>
+          )}
+
+          {/* AST Syntax Validation Pill */}
+          {isValidSyntax === true && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 5,
+                background: 'rgba(34, 197, 94, 0.12)',
+                border: '1px solid rgba(34, 197, 94, 0.35)',
+                color: BB.success,
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              <CheckCircle2 style={{ width: 12, height: 12 }} />
+              Python 3.10 AST Validated
+            </span>
+          )}
+
+          {isGenerating && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 5,
+                background: 'rgba(201, 162, 75, 0.1)',
+                border: '1px solid rgba(201, 162, 75, 0.25)',
+                color: BB.gold,
+                fontSize: 10,
+                fontWeight: 600,
+              }}
+            >
+              <RefreshCw style={{ width: 11, height: 11, animation: 'spin 1s linear infinite' }} />
+              Compiling...
+            </span>
+          )}
+        </div>
+
+        {/* Right: View Switcher & Action Tools */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* View Tab Switcher: Code vs DAG */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              background: BB.elevated,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 6,
+              padding: 2,
+              gap: 2,
+            }}
+          >
+            <button
+              onClick={() => setActiveTab('code')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                borderRadius: 4,
+                border: 'none',
+                background: activeTab === 'code' ? BB.primary : 'transparent',
+                color: activeTab === 'code' ? BB.text : BB.muted,
+                fontSize: 11,
+                fontWeight: activeTab === 'code' ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 120ms ease',
+              }}
+            >
+              <FileCode style={{ width: 12, height: 12 }} />
+              <span>Python Script</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('dag')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                borderRadius: 4,
+                border: 'none',
+                background: activeTab === 'dag' ? BB.primary : 'transparent',
+                color: activeTab === 'dag' ? BB.text : BB.muted,
+                fontSize: 11,
+                fontWeight: activeTab === 'dag' ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 120ms ease',
+              }}
+            >
+              <GitBranch style={{ width: 12, height: 12 }} />
+              <span>Visual DAG Flow</span>
+            </button>
+          </div>
+
+          <div style={{ width: 1, height: 18, background: BB.border }} />
+
+          {/* Recompile Button */}
+          <button
+            onClick={() => setRefreshTrigger((prev) => prev + 1)}
+            disabled={!isConfigValid || isGenerating}
+            title="Recompile Python scikit-learn code"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '5px 9px',
+              borderRadius: 6,
+              background: BB.elevated,
+              border: `1px solid ${BB.border}`,
+              color: BB.muted,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: isConfigValid && !isGenerating ? 'pointer' : 'not-allowed',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <RefreshCw style={{ width: 12, height: 12, animation: isGenerating ? 'spin 1s linear infinite' : 'none' }} />
+            <span>Recompile</span>
+          </button>
+
+          {/* Copy Code */}
+          <button
+            onClick={handleCopyCode}
+            disabled={!generatedCode}
+            title={copied ? 'Copied to clipboard!' : 'Copy Python code to clipboard'}
+            aria-label="Copy Code"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '5px 9px',
+              borderRadius: 6,
+              background: copied ? 'rgba(34,197,94,0.18)' : BB.elevated,
+              border: `1px solid ${copied ? 'rgba(34,197,94,0.45)' : BB.border}`,
+              color: copied ? BB.success : BB.text,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: generatedCode ? 'pointer' : 'not-allowed',
+              transition: 'all 120ms ease',
+            }}
+          >
+            {copied ? <Check style={{ width: 12, height: 12 }} /> : <Copy style={{ width: 12, height: 12 }} />}
+            <span>{copied ? 'Copied!' : 'Copy'}</span>
+          </button>
+
+          {/* Download Script */}
+          <button
+            onClick={handleDownloadScript}
+            disabled={!generatedCode}
+            title="Download standalone Python script"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '5px 9px',
+              borderRadius: 6,
+              background: BB.elevated,
+              border: `1px solid ${BB.border}`,
+              color: BB.text,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: generatedCode ? 'pointer' : 'not-allowed',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <Download style={{ width: 12, height: 12 }} />
+            <span>Export .py</span>
+          </button>
+
+          {/* Run Pipeline Button */}
+          <button
+            onClick={() => {
+              if (!isValidSyntax) {
+                onShowToast?.('Invalid Pipeline', 'Fix pipeline configuration before running.', 'error');
+                return;
+              }
+              onNavigate?.('explainability');
+            }}
+            disabled={!isConfigValid || !isValidSyntax}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '5px 14px',
+              borderRadius: 6,
+              background: (!isConfigValid || !isValidSyntax)
+                ? BB.disabled
+                : `linear-gradient(135deg, ${BB.maroon} 0%, #A01830 100%)`,
+              border: 'none',
+              color: BB.text,
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: (!isConfigValid || !isValidSyntax) ? 'not-allowed' : 'pointer',
+              boxShadow: (!isConfigValid || !isValidSyntax) ? 'none' : '0 3px 12px rgba(110,20,35,0.4)',
+              transition: 'all 150ms ease',
+            }}
+          >
+            <Play style={{ width: 11, height: 11, fill: 'currentColor' }} />
+            <span>Run Pipeline</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── WORKSPACE BODY: INSPECTOR (LEFT) + CODE/DAG VIEW (RIGHT) ─── */}
+      <div
+        style={{
+          display: 'flex',
+          flex: 1,
+          minHeight: 0,
+          gap: 12,
+          overflow: 'hidden',
+        }}
+      >
+        {/* ── LEFT COLUMN: STUDIO INSPECTOR ──────────────────────────── */}
+        <div
+          style={{
+            width: 360,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            overflowY: 'auto',
+            paddingRight: 4,
+          }}
+        >
+          {/* Card 1: Dataset & Blueprint Variables */}
+          <div
+            style={{
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 10,
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <FileSpreadsheet style={{ width: 13, height: 13, color: BB.gold }} />
+                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
+                  Variable Blueprint
                 </span>
               </div>
-              <div style={{ padding: '10px 12px', borderRadius: 8, background: BB.elevated, border: `1px solid ${BB.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                  <div style={{ padding: 6, borderRadius: 6, background: 'rgba(201, 162, 75, 0.15)', border: '1px solid rgba(201, 162, 75, 0.3)', color: BB.gold, flexShrink: 0 }}>
-                    <Database style={{ width: 15, height: 15 }} />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div title={activeDatasetName} style={{ fontSize: 12, fontWeight: 700, color: BB.text, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                      {activeDatasetName}
-                    </div>
-                    <div style={{ fontSize: 10, color: BB.muted, marginTop: 2 }}>{datasetRowCount} rows · {datasetColCount} columns</div>
-                  </div>
-                </div>
-                <button onClick={() => onNavigate?.('workspace')} title="Switch or view full dataset in Profiler" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 5, background: 'rgba(75, 59, 124, 0.3)', border: `1px solid ${BB.primaryLight}`, color: BB.text, fontSize: 10, fontWeight: 600, cursor: 'pointer', flexShrink: 0, transition: 'all 120ms ease' }}>
-                  <ExternalLink style={{ width: 11, height: 11 }} />Switch
-                </button>
-              </div>
-            </div>
-
-            {/* Pipeline Summary Strip */}
-            <div aria-label="Pipeline summary" style={{ background: BB.elevated, border: `1px solid ${BB.border}`, borderRadius: 8, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' as const, fontSize: 9, color: BB.muted, fontFamily: 'var(--font-mono)' }}>
-              <span style={{ color: BB.gold, fontWeight: 700 }}>{activeDatasetName.replace(/\.(csv|xlsx|parquet)$/i, '')}</span>
-              <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />
-              <span style={{ color: BB.maroonLight }}>{selectedTarget || trainingConfig?.target_column || '?'}</span>
-              <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />
-              <span>{(selectedFeatures.length || trainingConfig?.feature_columns?.length || 0)} features</span>
-              <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />
-              <span style={{ color: BB.primaryLight }}>{canonicalImputer || '—'}</span>
-              <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />
-              <span style={{ color: BB.primaryLight }}>{canonicalScaler || '—'}</span>
-              <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />
-              <span style={{ color: BB.gold }}>{canonicalAlgorithm || '—'}</span>
-              <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />
-              <span>{Math.round(trainRatio * 100)}/{Math.round(testRatio * 100)}</span>
-              <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />
-              <span>{canonicalCvFolds}-fold CV</span>
-            </div>
-
-            {/* Pipeline Configuration Panel */}
-            <div style={{ background: BB.surface, border: `1px solid ${BB.border}`, borderRadius: 10, padding: '14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.08em', color: BB.muted }}>Pipeline Configuration</span>
-                {inferredTaskType && (
-                  <span style={{
-                    padding: '2px 7px', borderRadius: 4,
-                    background: inferredTaskType === 'regression' ? 'rgba(201,162,75,0.15)' : 'rgba(107,92,166,0.15)',
-                    border: `1px solid ${inferredTaskType === 'regression' ? 'rgba(201,162,75,0.4)' : 'rgba(107,92,166,0.4)'}`,
-                    color: inferredTaskType === 'regression' ? BB.gold : BB.primaryLight,
-                    fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em',
-                  }}>
-                    {inferredTaskType}
-                  </span>
-                )}
-              </div>
-
-              {/* Target Column – READ ONLY (canonical: selectedTarget from context) */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <label style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Lock style={{ width: 9, height: 9 }} /> Target Column (y)
-                  </label>
-                  <button onClick={() => onNavigate?.('workspace')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 8, color: BB.primaryLight, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    <ArrowLeft style={{ width: 9, height: 9 }} /> Change in Dataset Workspace
-                  </button>
-                </div>
-                <div
-                  aria-label="Target column (read-only)"
-                  aria-readonly="true"
-                  style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: `1px solid ${BB.border}`, background: BB.elevated, color: (selectedTarget || trainingConfig?.target_column) ? BB.maroonLight : BB.disabled, fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-mono)', boxSizing: 'border-box' as const }}
-                >
-                  {selectedTarget || trainingConfig?.target_column || '—'}
-                </div>
-              </div>
-
-              {/* Feature Columns – READ ONLY (canonical: selectedFeatures from context) */}
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <label style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Lock style={{ width: 9, height: 9 }} />
-                    Feature Columns (X) — {selectedFeatures.length || trainingConfig?.feature_columns?.length || 0} selected
-                  </label>
-                  <button onClick={() => onNavigate?.('workspace')} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 8, color: BB.primaryLight, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                    <ArrowLeft style={{ width: 9, height: 9 }} /> Change in Dataset Workspace
-                  </button>
-                </div>
-                <div
-                  aria-label="Feature columns (read-only)"
-                  style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: `1px solid ${BB.border}`, background: BB.elevated, boxSizing: 'border-box' as const, minHeight: 32, display: 'flex', flexWrap: 'wrap' as const, gap: 3, alignItems: 'center' }}
-                >
-                  {(selectedFeatures.length > 0 ? selectedFeatures : (trainingConfig?.feature_columns ?? [])).slice(0, 6).map((f) => (
-                    <span key={f} style={{ display: 'inline-block', padding: '1px 5px', borderRadius: 3, background: 'rgba(107,92,166,0.15)', border: `1px solid ${BB.border}`, color: BB.text, fontSize: 8, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{f}</span>
-                  ))}
-                  {(selectedFeatures.length || trainingConfig?.feature_columns?.length || 0) > 6 && (
-                    <span style={{ fontSize: 8, color: BB.muted }}>+{(selectedFeatures.length || trainingConfig?.feature_columns?.length || 0) - 6} more</span>
-                  )}
-                  {(selectedFeatures.length || trainingConfig?.feature_columns?.length || 0) === 0 && (
-                    <span style={{ fontSize: 9, color: BB.disabled }}>No features selected</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Imputer + Scaler – EDITABLE, write to setTrainingConfig */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: BB.muted, marginBottom: 4 }}>Missing Imputer</label>
-                  <select value={canonicalImputer} onChange={(e) => handleImputerChange(e.target.value)} disabled={!trainingConfig} aria-label="Missing value imputer" style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: `1px solid ${BB.border}`, background: BB.elevated, color: BB.text, fontSize: 10, outline: 'none', cursor: trainingConfig ? 'pointer' : 'not-allowed' }}>
-                    {trainingOptions.imputers.map((imp) => <option key={imp.key} value={imp.key}>{imp.display_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: BB.muted, marginBottom: 4 }}>Feature Scaler</label>
-                  <select value={canonicalScaler} onChange={(e) => handleScalerChange(e.target.value)} disabled={!trainingConfig} aria-label="Feature scaler" style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: `1px solid ${BB.border}`, background: BB.elevated, color: BB.text, fontSize: 10, outline: 'none', cursor: trainingConfig ? 'pointer' : 'not-allowed' }}>
-                    {trainingOptions.scalers.map((sc) => <option key={sc.key} value={sc.key}>{sc.display_name}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              {/* Algorithm – EDITABLE, filtered to task-compatible options */}
-              <div>
-                <label style={{ display: 'block', fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: BB.muted, marginBottom: 4 }}>ML Estimator Algorithm</label>
-                <select value={canonicalAlgorithm} onChange={(e) => handleAlgorithmChange(e.target.value)} disabled={!trainingConfig} aria-label="ML estimator algorithm" style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: `1px solid ${BB.border}`, background: BB.elevated, color: BB.gold, fontSize: 11, fontWeight: 600, outline: 'none', cursor: trainingConfig ? 'pointer' : 'not-allowed' }}>
-                  {taskFilteredAlgorithms.map((algo) => <option key={algo.key} value={algo.key}>{algo.display_name}</option>)}
-                </select>
-                {inferredTaskType && (
-                  <div style={{ fontSize: 8, color: BB.muted, marginTop: 3, display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <Info style={{ width: 9, height: 9 }} />
-                    Showing {inferredTaskType} algorithms only, inferred from dataset analysis.
-                  </div>
-                )}
-              </div>
-
-              {/* Train/Test Split – EDITABLE, slider uses TRAIN RATIO (0.5–0.95) */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 4 }}>
-                  <span style={{ color: BB.muted, fontWeight: 600 }}>Train / Test Split</span>
-                  {/* Label is "X% Train / Y% Test" — same order as Page 1 */}
-                  <span
-                    style={{ color: BB.gold, fontFamily: 'var(--font-mono)', fontWeight: 700 }}
-                    aria-label={`${Math.round(trainRatio * 100)}% Train / ${Math.round(testRatio * 100)}% Test`}
-                  >
-                    {Math.round(trainRatio * 100)}% Train / {Math.round(testRatio * 100)}% Test
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={trainingOptions.min_train_test_split ?? 0.5}
-                  max={trainingOptions.max_train_test_split ?? 0.95}
-                  step={0.05}
-                  value={trainRatio}
-                  onChange={(e) => handleSplitChange(parseFloat(e.target.value))}
-                  disabled={!trainingConfig}
-                  aria-label={`Train/test split: ${Math.round(trainRatio * 100)}% train`}
-                  aria-valuemin={50}
-                  aria-valuemax={95}
-                  aria-valuenow={Math.round(trainRatio * 100)}
-                  style={{ width: '100%', accentColor: BB.primaryLight, cursor: trainingConfig ? 'pointer' : 'not-allowed' }}
-                />
-              </div>
-
-              {/* CV Folds – EDITABLE */}
-              <div>
-                <label style={{ display: 'block', fontSize: 9, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.06em', color: BB.muted, marginBottom: 4 }}>Cross-Validation Folds</label>
-                <input
-                  type="number" min={2} max={20} value={canonicalCvFolds}
-                  onChange={(e) => handleCvFoldsChange(parseInt(e.target.value, 10) || 5)}
-                  disabled={!trainingConfig}
-                  aria-label="Cross-validation folds"
-                  style={{ width: '100%', padding: '5px 8px', borderRadius: 6, border: `1px solid ${BB.border}`, background: BB.elevated, color: BB.text, fontSize: 10, fontFamily: 'var(--font-mono)', outline: 'none', boxSizing: 'border-box' as const, cursor: trainingConfig ? 'pointer' : 'not-allowed' }}
-                />
-              </div>
-
-              {/* Validation errors */}
-              {validationErrors.length > 0 && (
-                <div role="alert" aria-label="Pipeline validation errors" style={{ padding: '8px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.3)', display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
-                  {validationErrors.map((e, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 10, color: BB.error }}>
-                      <AlertCircle style={{ width: 11, height: 11, flexShrink: 0, marginTop: 1 }} />
-                      <span>{e}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Run Pipeline CTA */}
               <button
-                onClick={() => {
-                  if (!isValidSyntax) {
-                    onShowToast?.('Invalid Pipeline', 'Fix pipeline errors before running.', 'error');
-                    return;
-                  }
-                  onNavigate?.('explainability');
-                }}
-                disabled={!isConfigValid || !isValidSyntax}
+                onClick={() => onNavigate?.('workspace')}
                 style={{
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  width: '100%', padding: '9px 16px', borderRadius: 8,
-                  background: (!isConfigValid || !isValidSyntax) ? BB.disabled : `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})`,
-                  border: `1px solid ${(!isConfigValid || !isValidSyntax) ? 'transparent' : BB.primaryLight}`,
-                  color: BB.text, fontSize: 11, fontWeight: 700,
-                  cursor: (!isConfigValid || !isValidSyntax) ? 'not-allowed' : 'pointer',
-                  boxShadow: (!isConfigValid || !isValidSyntax) ? 'none' : '0 4px 14px rgba(110,20,35,0.3)',
-                  transition: 'all 150ms ease', marginTop: 6,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  fontSize: 9,
+                  color: BB.primaryLight,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                  fontWeight: 600,
                 }}
               >
-                <Play style={{ width: 13, height: 13, fill: 'currentColor' }} />
-                Run Pipeline
+                <ArrowLeft style={{ width: 9, height: 9 }} /> Switch in Workspace
               </button>
+            </div>
+
+            {/* Target Variable Display */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Lock style={{ width: 9, height: 9 }} /> Target Column (y)
+                </span>
+                <span style={{ fontSize: 9, color: BB.muted }}>Supervised label</span>
+              </div>
+              <div
+                aria-label="Target column (read-only)"
+                aria-readonly="true"
+                style={{
+                  width: '100%',
+                  padding: '7px 10px',
+                  borderRadius: 6,
+                  border: `1px solid ${BB.border}`,
+                  background: BB.elevated,
+                  color: (selectedTarget || trainingConfig?.target_column) ? BB.maroonLight : BB.disabled,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-mono)',
+                  boxSizing: 'border-box',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <span>{selectedTarget || trainingConfig?.target_column || '—'}</span>
+                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(110,20,35,0.2)', color: BB.maroonLight, fontWeight: 600 }}>
+                  Ground Truth
+                </span>
+              </div>
+            </div>
+
+            {/* Feature Matrix Display */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Lock style={{ width: 9, height: 9 }} /> Feature Matrix (X)
+                </span>
+                <span style={{ fontSize: 9, color: BB.gold, fontWeight: 600 }}>
+                  {allFeatures.length} columns ({datasetColCount} total)
+                </span>
+              </div>
+
+              {allFeatures.length > 5 && (
+                <input
+                  type="text"
+                  placeholder="Filter feature columns..."
+                  value={featureSearch}
+                  onChange={(e) => setFeatureSearch(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '4px 8px',
+                    borderRadius: 5,
+                    border: `1px solid ${BB.border}`,
+                    background: BB.codeBg,
+                    color: BB.text,
+                    fontSize: 10,
+                    outline: 'none',
+                    marginBottom: 6,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              )}
+
+              <div
+                aria-label="Feature columns (read-only)"
+                style={{
+                  width: '100%',
+                  maxHeight: 100,
+                  overflowY: 'auto',
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  border: `1px solid ${BB.border}`,
+                  background: BB.elevated,
+                  boxSizing: 'border-box',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 4,
+                  alignItems: 'flex-start',
+                }}
+              >
+                {displayedFeatures.map((feat) => (
+                  <span
+                    key={feat}
+                    style={{
+                      display: 'inline-block',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      background: 'rgba(107,92,166,0.18)',
+                      border: `1px solid ${BB.border}`,
+                      color: BB.text,
+                      fontSize: 9,
+                      fontWeight: 600,
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    {feat}
+                  </span>
+                ))}
+                {displayedFeatures.length === 0 && (
+                  <span style={{ fontSize: 9, color: BB.disabled }}>
+                    {featureSearch ? 'No matching features' : 'No features selected'}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* ── Right Column: Code Editor ───────────────────────────────── */}
-          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <div style={{ background: BB.surface, border: `1px solid ${BB.border}`, borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', minHeight: 520 }}>
-              {/* Terminal Top Bar */}
-              <div style={{ padding: '8px 14px', background: BB.elevated, borderBottom: `1px solid ${BB.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#FF4D6D' }} />
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F5A623' }} />
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00F5A0' }} />
-                  <span style={{ marginLeft: 8, fontSize: 11, fontFamily: 'var(--font-mono)', color: BB.gold, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <FileCode style={{ width: 13, height: 13 }} />pipeline_generated.py
-                  </span>
+          {/* Card 2: Preprocessing Architecture */}
+          <div
+            style={{
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 10,
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Settings2 style={{ width: 13, height: 13, color: BB.primaryLight }} />
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
+                Preprocessing Architecture
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {/* Missing Value Imputer */}
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: BB.disabled,
+                    marginBottom: 3,
+                  }}
+                >
+                  Imputer Strategy
+                </label>
+                <select
+                  value={canonicalImputer}
+                  onChange={(e) => handleImputerChange(e.target.value)}
+                  disabled={!trainingConfig}
+                  aria-label="Missing value imputer"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    border: `1px solid ${BB.border}`,
+                    background: BB.elevated,
+                    color: BB.text,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    outline: 'none',
+                    cursor: trainingConfig ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {trainingOptions.imputers.map((imp) => (
+                    <option key={imp.key} value={imp.key}>
+                      {imp.display_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Feature Scaler */}
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 9,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: BB.disabled,
+                    marginBottom: 3,
+                  }}
+                >
+                  Feature Scaler
+                </label>
+                <select
+                  value={canonicalScaler}
+                  onChange={(e) => handleScalerChange(e.target.value)}
+                  disabled={!trainingConfig}
+                  aria-label="Feature scaler"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    border: `1px solid ${BB.border}`,
+                    background: BB.elevated,
+                    color: BB.text,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    outline: 'none',
+                    cursor: trainingConfig ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {trainingOptions.scalers.map((sc) => (
+                    <option key={sc.key} value={sc.key}>
+                      {sc.display_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: ML Estimator Model Choice */}
+          <div
+            style={{
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 10,
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Cpu style={{ width: 13, height: 13, color: BB.gold }} />
+                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
+                  Estimator Model Architecture
+                </span>
+              </div>
+              {inferredTaskType && (
+                <span style={{ fontSize: 9, color: BB.muted, textTransform: 'capitalize' }}>
+                  {inferredTaskType} Models
+                </span>
+              )}
+            </div>
+
+            <div>
+              <select
+                value={canonicalAlgorithm}
+                onChange={(e) => handleAlgorithmChange(e.target.value)}
+                disabled={!trainingConfig}
+                aria-label="ML estimator algorithm"
+                style={{
+                  width: '100%',
+                  padding: '7px 10px',
+                  borderRadius: 6,
+                  border: `1px solid ${BB.border}`,
+                  background: BB.elevated,
+                  color: BB.gold,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  outline: 'none',
+                  cursor: trainingConfig ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {taskFilteredAlgorithms.map((algo) => (
+                  <option key={algo.key} value={algo.key}>
+                    {algo.display_name}
+                  </option>
+                ))}
+              </select>
+              {inferredTaskType && (
+                <div style={{ fontSize: 8, color: BB.muted, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Info style={{ width: 9, height: 9, flexShrink: 0 }} />
+                  <span>Filtered to task-compatible {inferredTaskType} estimators only.</span>
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Card 4: Split & Validation Strategy */}
+          <div
+            style={{
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 10,
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Sliders style={{ width: 13, height: 13, color: BB.maroonLight }} />
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
+                Validation & Partition
+              </span>
+            </div>
+
+            {/* Train / Test Split Slider */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 4 }}>
+                <span style={{ color: BB.disabled, fontWeight: 700, textTransform: 'uppercase', fontSize: 9 }}>
+                  Train / Test Split
+                </span>
+                <span
+                  style={{ color: BB.gold, fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                  aria-label={`${Math.round(trainRatio * 100)}% Train / ${Math.round(testRatio * 100)}% Test`}
+                >
+                  {Math.round(trainRatio * 100)}% Train / {Math.round(testRatio * 100)}% Test
+                </span>
+              </div>
+              <input
+                type="range"
+                min={trainingOptions.min_train_test_split ?? 0.5}
+                max={trainingOptions.max_train_test_split ?? 0.95}
+                step={0.05}
+                value={trainRatio}
+                onChange={(e) => handleSplitChange(parseFloat(e.target.value))}
+                disabled={!trainingConfig}
+                aria-label={`Train/test split: ${Math.round(trainRatio * 100)}% train`}
+                aria-valuemin={50}
+                aria-valuemax={95}
+                aria-valuenow={Math.round(trainRatio * 100)}
+                style={{
+                  width: '100%',
+                  height: 6,
+                  borderRadius: 3,
+                  appearance: 'none',
+                  outline: 'none',
+                  accentColor: BB.maroonLight,
+                  cursor: trainingConfig ? 'pointer' : 'not-allowed',
+                  background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${
+                    Math.max(0, Math.min(100, ((trainRatio - 0.5) / 0.45) * 100))
+                  }%, rgba(107,92,166,0.25) ${
+                    Math.max(0, Math.min(100, ((trainRatio - 0.5) / 0.45) * 100))
+                  }%, rgba(107,92,166,0.25) 100%)`,
+                }}
+              />
+              {rawRowCount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: BB.muted, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
+                  <span>~{Math.round(rawRowCount * trainRatio)} Train Samples</span>
+                  <span>~{rawRowCount - Math.round(rawRowCount * trainRatio)} Test Samples</span>
+                </div>
+              )}
+            </div>
+
+            {/* Cross-Validation Folds */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                <label style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: BB.disabled }}>
+                  Cross-Validation Folds
+                </label>
+                <span style={{ fontSize: 9, color: BB.muted, fontFamily: 'var(--font-mono)' }}>K-Fold Strategy</span>
+              </div>
+              <input
+                type="number"
+                min={2}
+                max={20}
+                value={canonicalCvFolds}
+                onChange={(e) => handleCvFoldsChange(parseInt(e.target.value, 10) || 5)}
+                disabled={!trainingConfig}
+                aria-label="Cross-validation folds"
+                style={{
+                  width: '100%',
+                  padding: '5px 8px',
+                  borderRadius: 6,
+                  border: `1px solid ${BB.border}`,
+                  background: BB.elevated,
+                  color: BB.text,
+                  fontSize: 10,
+                  fontFamily: 'var(--font-mono)',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  cursor: trainingConfig ? 'pointer' : 'not-allowed',
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Validation Errors Panel */}
+          {validationErrors.length > 0 && (
+            <div
+              role="alert"
+              aria-label="Pipeline validation errors"
+              style={{
+                padding: '8px 10px',
+                borderRadius: 6,
+                background: 'rgba(239,68,68,0.10)',
+                border: '1px solid rgba(239,68,68,0.3)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              {validationErrors.map((e, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 5, fontSize: 10, color: BB.error }}>
+                  <AlertCircle style={{ width: 11, height: 11, flexShrink: 0, marginTop: 1 }} />
+                  <span>{e}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── RIGHT COLUMN: STUDIO WORKSPACE (CODE OR DAG VIEW) ─────── */}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            background: BB.surface,
+            border: `1px solid ${BB.border}`,
+            borderRadius: 10,
+            overflow: 'hidden',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+          }}
+        >
+          {/* TAB 1: CODE EDITOR VIEW */}
+          {activeTab === 'code' && (
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+              {/* Terminal Window Top Bar */}
+              <div
+                style={{
+                  padding: '8px 14px',
+                  background: BB.elevated,
+                  borderBottom: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexShrink: 0,
+                }}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {isValidSyntax === true && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 4, background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.3)', color: BB.success, fontSize: 9, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-                      <CheckCircle2 style={{ width: 11, height: 11 }} />AST Validated (Python 3.10)
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#FF4D6D' }} />
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F5A623' }} />
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00F5A0' }} />
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: 'rgba(201, 162, 75, 0.12)',
+                      border: `1px solid rgba(201, 162, 75, 0.25)`,
+                    }}
+                  >
+                    <FileCode style={{ width: 12, height: 12, color: BB.gold }} />
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: BB.gold }}>
+                      pipeline_generated.py
                     </span>
-                  )}
-                  {isValidSyntax === false && !authError && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 7px', borderRadius: 4, background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', color: BB.error, fontSize: 9, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-                      <AlertCircle style={{ width: 11, height: 11 }} />AST Failed
-                    </span>
-                  )}
-                  <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: BB.muted }}>Python 3.10 / scikit-learn</span>
-                  <button onClick={() => setRefreshTrigger((prev) => prev + 1)} title="Recompile pipeline code" disabled={!isConfigValid} style={{ background: 'none', border: 'none', color: BB.muted, cursor: isConfigValid ? 'pointer' : 'not-allowed', padding: 2, display: 'flex', alignItems: 'center' }}>
-                    <RefreshCw style={{ width: 12, height: 12 }} />
-                  </button>
-                  <button onClick={handleCopyCode} disabled={!generatedCode} title={copied ? 'Copied to clipboard!' : 'Copy Python code'} aria-label="Copy Code" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 5, background: copied ? 'rgba(34,197,94,0.15)' : BB.surface, border: `1px solid ${copied ? 'rgba(34,197,94,0.4)' : BB.border}`, color: copied ? BB.success : BB.muted, cursor: generatedCode ? 'pointer' : 'not-allowed', transition: 'all 150ms ease', padding: 0 }}>
-                    {copied ? <Check style={{ width: 12, height: 12, color: BB.success }} /> : <Copy style={{ width: 12, height: 12 }} />}
-                  </button>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: BB.muted }}>
+                  <span>Python 3.10 / scikit-learn 1.4</span>
+                  <span>•</span>
+                  <span>{codeLines.length} lines</span>
                 </div>
               </div>
 
-              {/* Code Viewport */}
-              <div style={{ minHeight: 480, maxHeight: 600, overflow: 'auto', padding: 16 }}>
-
-                {/* AUTH ERROR – Session Expired (NOT "Compilation Failed") */}
+              {/* Viewport Area */}
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  background: BB.codeBg,
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
+                {/* Auth Error */}
                 {authError && (
-                  <div role="alert" aria-live="assertive" style={{ padding: 16, borderRadius: 8, background: 'rgba(75, 59, 124, 0.15)', border: '1px solid rgba(107,92,166,0.4)', display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+                  <div
+                    role="alert"
+                    aria-live="assertive"
+                    style={{
+                      margin: 20,
+                      padding: 16,
+                      borderRadius: 8,
+                      background: 'rgba(75, 59, 124, 0.18)',
+                      border: '1px solid rgba(107,92,166,0.45)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                       <Lock style={{ width: 18, height: 18, color: BB.primaryLight, flexShrink: 0, marginTop: 2 }} />
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>Session Expired</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: BB.text }}>Session Expired</div>
                         <div style={{ fontSize: 11, color: BB.muted, marginTop: 4 }}>{authError}</div>
                       </div>
                     </div>
-                    <button onClick={() => onNavigate?.('workspace')} style={{ padding: '6px 12px', borderRadius: 6, background: BB.elevated, border: `1px solid ${BB.border}`, color: BB.text, fontSize: 11, fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' as const }}>
+                    <button
+                      onClick={() => onNavigate?.('workspace')}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 6,
+                        background: BB.elevated,
+                        border: `1px solid ${BB.border}`,
+                        color: BB.text,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        alignSelf: 'flex-start',
+                      }}
+                    >
                       Go to Login
                     </button>
                   </div>
                 )}
 
-                {/* CODE GENERATION ERROR */}
+                {/* Compilation Error */}
                 {!authError && !isGenerating && generationError && (
-                  <div role="alert" style={{ padding: 16, borderRadius: 8, background: 'rgba(110,20,35,0.22)', border: '1px solid rgba(178,58,78,0.4)', display: 'flex', flexDirection: 'column' as const, gap: 10 }}>
+                  <div
+                    role="alert"
+                    style={{
+                      margin: 20,
+                      padding: 16,
+                      borderRadius: 8,
+                      background: 'rgba(110,20,35,0.22)',
+                      border: '1px solid rgba(178,58,78,0.45)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 10,
+                    }}
+                  >
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                       <AlertCircle style={{ width: 18, height: 18, color: BB.maroonLight, flexShrink: 0, marginTop: 2 }} />
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>Code Generation Failed</div>
-                        <div style={{ fontSize: 11, color: BB.muted, marginTop: 4, fontFamily: 'var(--font-mono)' }}>{generationError}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: BB.text }}>Code Generation Failed</div>
+                        <div style={{ fontSize: 11, color: BB.muted, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
+                          {generationError}
+                        </div>
                       </div>
                     </div>
-                    <button onClick={() => generatePipelineCode()} style={{ padding: '6px 12px', borderRadius: 6, background: BB.elevated, border: `1px solid ${BB.border}`, color: BB.text, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                    <button
+                      onClick={() => generatePipelineCode()}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 6,
+                        background: BB.elevated,
+                        border: `1px solid ${BB.border}`,
+                        color: BB.text,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        alignSelf: 'flex-start',
+                      }}
+                    >
                       Retry Code Generation
                     </button>
                   </div>
                 )}
 
-                {/* LOADING */}
+                {/* Loading State */}
                 {isGenerating && (
-                  <div style={{ display: 'flex', flexDirection: 'column' as const, alignItems: 'center', justifyContent: 'center', padding: 40, gap: 8, color: BB.muted, fontSize: 11, fontFamily: 'var(--font-mono)' }}>
-                    <RefreshCw style={{ width: 18, height: 18, animation: 'spin 1s linear infinite', color: BB.gold }} />
-                    Compiling scikit-learn pipeline code…
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flex: 1,
+                      padding: 40,
+                      gap: 10,
+                      color: BB.muted,
+                      fontSize: 12,
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    <RefreshCw style={{ width: 22, height: 22, animation: 'spin 1s linear infinite', color: BB.gold }} />
+                    <span>Synthesizing scikit-learn pipeline DAG code…</span>
                   </div>
                 )}
 
-                {/* GENERATED CODE */}
+                {/* Synthesized Python Code with Line Numbers & Syntax Highlighting */}
                 {!isGenerating && !generationError && !authError && generatedCode && (
-                  <pre style={{ margin: 0, fontSize: 11, fontFamily: 'var(--font-mono)', color: '#E2E8F0', lineHeight: 1.55, whiteSpace: 'pre-wrap' as const, wordBreak: 'break-word' as const }}>
-                    <code>{generatedCode}</code>
-                  </pre>
+                  <div style={{ display: 'flex', minHeight: '100%', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.6 }}>
+                    {/* Line Numbers Gutter */}
+                    <div
+                      style={{
+                        userSelect: 'none',
+                        padding: '12px 10px',
+                        textAlign: 'right',
+                        color: '#433B62',
+                        background: 'rgba(0,0,0,0.25)',
+                        borderRight: `1px solid ${BB.border}`,
+                        minWidth: 42,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {codeLines.map((_, i) => (
+                        <div key={i}>{i + 1}</div>
+                      ))}
+                    </div>
+
+                    {/* Syntax Highlighted Lines */}
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: '12px 16px',
+                        flex: 1,
+                        overflowX: 'auto',
+                        whiteSpace: 'pre',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      <code>
+                        {codeLines.map((line, idx) => (
+                          <div key={idx}>{highlightPythonLine(line)}</div>
+                        ))}
+                      </code>
+                    </pre>
+                  </div>
                 )}
               </div>
             </div>
-          </div>
+          )}
+
+          {/* TAB 2: INTERACTIVE VISUAL DAG FLOW VIEW */}
+          {activeTab === 'dag' && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                minHeight: 0,
+                background: BB.codeBg,
+                overflowY: 'auto',
+                padding: '24px 20px',
+                alignItems: 'center',
+                gap: 16,
+              }}
+            >
+              <div style={{ textAlign: 'center', marginBottom: 6 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.1em',
+                    color: BB.gold,
+                  }}
+                >
+                  Compiled Scikit-Learn Pipeline Graph
+                </span>
+                <h3 style={{ margin: '4px 0 0', fontSize: 15, fontWeight: 700, color: BB.text }}>
+                  Directed Acyclic Graph (DAG) Execution Flow
+                </h3>
+              </div>
+
+              {/* Node 1: Ingestion */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 540,
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  background: BB.surface,
+                  border: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(201,162,75,0.15)', color: BB.gold }}>
+                    <Database style={{ width: 16, height: 16 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>1. Data Ingestion &amp; Schema Extraction</div>
+                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      {activeDatasetName} ({datasetRowCount} rows)
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(34,197,94,0.15)', color: BB.success, fontWeight: 600 }}>
+                  Verified
+                </span>
+              </div>
+
+              {/* Arrow */}
+              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
+
+              {/* Node 2: Imputation */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 540,
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  background: BB.surface,
+                  border: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(107,92,166,0.18)', color: BB.primaryLight }}>
+                    <Settings2 style={{ width: 16, height: 16 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>2. Missing Value Imputation (SimpleImputer)</div>
+                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      strategy=&quot;{canonicalImputer || 'median'}&quot;
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(107,92,166,0.2)', color: BB.primaryLight, fontWeight: 600 }}>
+                  Step 02
+                </span>
+              </div>
+
+              {/* Arrow */}
+              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
+
+              {/* Node 3: Scaling */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 540,
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  background: BB.surface,
+                  border: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(107,92,166,0.18)', color: BB.primaryLight }}>
+                    <Sliders style={{ width: 16, height: 16 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>3. Feature Transformation &amp; Normalization</div>
+                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      scaler=&quot;{canonicalScaler || 'standard_scaler'}&quot;
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(107,92,166,0.2)', color: BB.primaryLight, fontWeight: 600 }}>
+                  Step 03
+                </span>
+              </div>
+
+              {/* Arrow */}
+              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
+
+              {/* Node 4: Train / Test Split */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 540,
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  background: BB.surface,
+                  border: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(178,58,78,0.18)', color: BB.maroonLight }}>
+                    <GitBranch style={{ width: 16, height: 16 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>4. Stratified Train / Test Partitioning</div>
+                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      test_size={testRatio.toFixed(2)} (random_state={trainingConfig?.random_seed ?? 42})
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(178,58,78,0.2)', color: BB.maroonLight, fontWeight: 600 }}>
+                  Step 04
+                </span>
+              </div>
+
+              {/* Arrow */}
+              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
+
+              {/* Node 5: Model Fit */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 540,
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  background: BB.surface,
+                  border: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(201,162,75,0.18)', color: BB.gold }}>
+                    <Cpu style={{ width: 16, height: 16 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>5. ML Estimator Training</div>
+                    <div style={{ fontSize: 10, color: BB.gold, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      {canonicalAlgorithm || 'random_forest_classifier'}
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(201,162,75,0.2)', color: BB.gold, fontWeight: 700 }}>
+                  Fit &amp; Predict
+                </span>
+              </div>
+
+              {/* Arrow */}
+              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
+
+              {/* Node 6: Evaluation & Metrics */}
+              <div
+                style={{
+                  width: '100%',
+                  maxWidth: 540,
+                  padding: '12px 16px',
+                  borderRadius: 8,
+                  background: BB.surface,
+                  border: `1px solid ${BB.border}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(34,197,94,0.15)', color: BB.success }}>
+                    <ShieldCheck style={{ width: 16, height: 16 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>6. Performance Scoring &amp; Model Persistence</div>
+                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
+                      {canonicalCvFolds}-Fold Cross Validation &amp; model.joblib Serialization
+                    </div>
+                  </div>
+                </div>
+                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(34,197,94,0.15)', color: BB.success, fontWeight: 700 }}>
+                  Complete
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
