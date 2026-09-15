@@ -140,6 +140,214 @@ function highlightPythonLine(line: string) {
   );
 }
 
+/* ── Pipeline Branching SVG DAG Component ─────────────────────────── */
+interface PipelineDAGGraphProps {
+  datasetName: string;
+  imputer: string;
+  scaler: string;
+  algorithm: string;
+  trainRatio: number;
+  testRatio: number;
+  cvFolds: number;
+  rawRowCount: number;
+  inferredTaskType?: string;
+}
+
+function PipelineDAGGraph({
+  datasetName,
+  imputer,
+  scaler,
+  algorithm,
+  trainRatio,
+  testRatio,
+  cvFolds,
+  rawRowCount,
+  inferredTaskType = 'supervised',
+}: PipelineDAGGraphProps) {
+  const [activeNode, setActiveNode] = useState<string | null>(null);
+
+  const W = 500, CX = 250, LCX = 112, RCX = 388, NW = 310, BNW = 195, NH = 52, R = 9;
+  const Y1 = 10, Y2 = 115, Y3 = 215, Y4 = 330, Y5 = 440, Y6 = 553;
+  const SVG_H = Y6 + NH + 16;
+
+  const trainN = rawRowCount > 0 ? Math.round(rawRowCount * trainRatio) : 0;
+  const testN  = rawRowCount > 0 ? rawRowCount - trainN : 0;
+
+  const scalerLabel = scaler === 'standard_scaler' ? 'StandardScaler'
+    : scaler === 'minmax_scaler' ? 'MinMaxScaler'
+    : scaler === 'robust_scaler' ? 'RobustScaler'
+    : scaler === 'none' ? 'Passthrough'
+    : scaler;
+
+  const algLabel = algorithm
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (l) => l.toUpperCase())
+    .slice(0, 24);
+
+  const na = (id: string, strokeColor: string) => ({
+    fill:        activeNode === id ? 'rgba(75,59,124,0.30)' : 'rgba(21,16,38,0.92)',
+    stroke:      activeNode === id ? BB.primaryLight : strokeColor,
+    strokeWidth: activeNode === id ? 1.8 : 1,
+    style:       { cursor: 'pointer', transition: 'fill 150ms, stroke 150ms' } as React.CSSProperties,
+  });
+
+  type EdgeDef = { id: string; d: string; color: string; delay: string; dur: string };
+  const edges: EdgeDef[] = [
+    { id: 'e1', d: `M ${CX} ${Y1+NH} L ${CX} ${Y2}`,                                                                    color: BB.primaryLight, delay: '0s',   dur: '1.8s' },
+    { id: 'e2', d: `M ${CX} ${Y2+NH} L ${CX} ${Y3}`,                                                                    color: BB.primaryLight, delay: '0.3s', dur: '1.8s' },
+    { id: 'e3', d: `M ${CX} ${Y3+NH} C ${CX} ${Y3+NH+26}, ${LCX} ${Y4-26}, ${LCX} ${Y4}`,                              color: BB.maroonLight,  delay: '0.6s', dur: '1.5s' },
+    { id: 'e4', d: `M ${CX} ${Y3+NH} C ${CX} ${Y3+NH+26}, ${RCX} ${Y4-26}, ${RCX} ${Y4}`,                              color: BB.gold,         delay: '0.6s', dur: '1.5s' },
+    { id: 'e5', d: `M ${LCX} ${Y4+NH} L ${LCX} ${Y5}`,                                                                  color: BB.maroonLight,  delay: '1.0s', dur: '1.5s' },
+    { id: 'e6', d: `M ${RCX} ${Y4+NH} L ${RCX} ${Y5}`,                                                                  color: BB.gold,         delay: '1.0s', dur: '1.5s' },
+    { id: 'e7', d: `M ${LCX} ${Y5+NH} C ${LCX} ${Y5+NH+26}, ${CX} ${Y6-26}, ${CX} ${Y6}`,                              color: BB.success,      delay: '1.5s', dur: '1.4s' },
+    { id: 'e8', d: `M ${RCX} ${Y5+NH} C ${RCX} ${Y5+NH+26}, ${CX} ${Y6-26}, ${CX} ${Y6}`,                              color: BB.success,      delay: '1.5s', dur: '1.4s' },
+  ];
+
+  const detail: Record<string, string> = {
+    d:   `Source: ${datasetName}${rawRowCount > 0 ? ` · ${rawRowCount.toLocaleString()} rows` : ''} · ${inferredTaskType} task`,
+    imp: `SimpleImputer fills NaN using strategy="${imputer}". Applied before scaling to prevent leakage.`,
+    sc:  `${scalerLabel} normalises feature ranges. Fitted on X_train only, then applied to X_test.`,
+    tr:  `Train partition: ${Math.round(trainRatio*100)}% of rows. The only data the model sees during .fit().`,
+    te:  `Test holdout: ${Math.round(testRatio*100)}% of rows. Never seen during training. Used for final scoring.`,
+    al:  `${algLabel}: calls .fit(X_train, y_train) to learn decision boundaries from training data.`,
+    pr:  `.predict(X_test) runs inference on the holdout set to measure generalisation performance.`,
+    ev:  `${cvFolds}-fold cross-validation on training data. Final metrics scored against X_test predictions.`,
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        width: '100%',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        padding: '16px 20px',
+        boxSizing: 'border-box',
+        flex: 1,
+        minHeight: 0,
+        gap: 12,
+      }}
+    >
+      <svg
+        viewBox={`0 0 ${W} ${SVG_H}`}
+        style={{ width: '100%', maxWidth: 520, fontFamily: 'var(--font-mono)' }}
+        aria-label="Pipeline DAG visualisation"
+      >
+        <defs>
+          <style>{`
+            @keyframes dag-flow { to { stroke-dashoffset: -18; } }
+          `}</style>
+        </defs>
+
+        {/* Edges */}
+        {edges.map((e) => (
+          <path
+            key={e.id}
+            d={e.d}
+            fill="none"
+            stroke={e.color + '88'}
+            strokeWidth={1.8}
+            strokeDasharray="5 4"
+            style={{ animation: `dag-flow ${e.dur} linear infinite`, animationDelay: e.delay }}
+          />
+        ))}
+
+        {/* Node 1: Dataset */}
+        <g onMouseEnter={() => setActiveNode('d')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={CX - NW/2} y={Y1} width={NW} height={NH} rx={R} {...na('d', BB.gold)} />
+          <text x={CX} y={Y1+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>DATASET SOURCE</text>
+          <text x={CX} y={Y1+30} textAnchor="middle" fill={BB.gold} fontSize={11} fontWeight={700}>{datasetName.length > 36 ? datasetName.slice(0, 34) + '…' : datasetName}</text>
+          <text x={CX} y={Y1+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>{rawRowCount > 0 ? `${rawRowCount.toLocaleString()} rows · ${inferredTaskType} task` : `${inferredTaskType} task`}</text>
+        </g>
+
+        {/* Node 2: Imputer */}
+        <g onMouseEnter={() => setActiveNode('imp')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={CX - NW/2} y={Y2} width={NW} height={NH} rx={R} {...na('imp', BB.primaryLight)} />
+          <text x={CX} y={Y2+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>STEP 01 · IMPUTATION</text>
+          <text x={CX} y={Y2+30} textAnchor="middle" fill={BB.primaryLight} fontSize={11} fontWeight={700}>SimpleImputer</text>
+          <text x={CX} y={Y2+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>{'strategy="' + imputer + '"'}</text>
+        </g>
+
+        {/* Node 3: Scaler */}
+        <g onMouseEnter={() => setActiveNode('sc')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={CX - NW/2} y={Y3} width={NW} height={NH} rx={R} {...na('sc', BB.primaryLight)} />
+          <text x={CX} y={Y3+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>STEP 02 · SCALING</text>
+          <text x={CX} y={Y3+30} textAnchor="middle" fill={BB.primaryLight} fontSize={11} fontWeight={700}>{scalerLabel}</text>
+          <text x={CX} y={Y3+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>fit on X_train · transform on X_test</text>
+        </g>
+
+        {/* Split label */}
+        <text x={CX} y={(Y3+NH + Y4)/2 + 4} textAnchor="middle" fill={BB.disabled} fontSize={8} letterSpacing={0.8}>
+          {'train_test_split(test_size=' + testRatio.toFixed(2) + ', random_state=42)'}
+        </text>
+
+        {/* Node 4: X_train */}
+        <g onMouseEnter={() => setActiveNode('tr')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={LCX - BNW/2} y={Y4} width={BNW} height={NH} rx={R} {...na('tr', BB.maroonLight)} />
+          <text x={LCX} y={Y4+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>TRAIN SPLIT</text>
+          <text x={LCX} y={Y4+30} textAnchor="middle" fill={BB.maroonLight} fontSize={11} fontWeight={700}>X_train / y_train</text>
+          <text x={LCX} y={Y4+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>{trainN > 0 ? `~${trainN.toLocaleString()} rows (${Math.round(trainRatio*100)}%)` : `${Math.round(trainRatio*100)}%`}</text>
+        </g>
+
+        {/* Node 5: X_test */}
+        <g onMouseEnter={() => setActiveNode('te')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={RCX - BNW/2} y={Y4} width={BNW} height={NH} rx={R} {...na('te', BB.gold)} />
+          <text x={RCX} y={Y4+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>TEST HOLDOUT</text>
+          <text x={RCX} y={Y4+30} textAnchor="middle" fill={BB.gold} fontSize={11} fontWeight={700}>X_test / y_test</text>
+          <text x={RCX} y={Y4+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>{testN > 0 ? `~${testN.toLocaleString()} rows (${Math.round(testRatio*100)}%)` : `${Math.round(testRatio*100)}%`}</text>
+        </g>
+
+        {/* Node 6: Algorithm fit */}
+        <g onMouseEnter={() => setActiveNode('al')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={LCX - BNW/2} y={Y5} width={BNW} height={NH} rx={R} {...na('al', BB.gold)} />
+          <text x={LCX} y={Y5+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>STEP 03 · FIT</text>
+          <text x={LCX} y={Y5+30} textAnchor="middle" fill={BB.gold} fontSize={10} fontWeight={700}>{algLabel}</text>
+          <text x={LCX} y={Y5+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>.fit(X_train, y_train)</text>
+        </g>
+
+        {/* Node 7: Predict */}
+        <g onMouseEnter={() => setActiveNode('pr')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={RCX - BNW/2} y={Y5} width={BNW} height={NH} rx={R} {...na('pr', BB.success)} />
+          <text x={RCX} y={Y5+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>STEP 04 · PREDICT</text>
+          <text x={RCX} y={Y5+30} textAnchor="middle" fill={BB.success} fontSize={11} fontWeight={700}>.predict(X_test)</text>
+          <text x={RCX} y={Y5+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>y_pred → evaluate</text>
+        </g>
+
+        {/* Node 8: Evaluation */}
+        <g onMouseEnter={() => setActiveNode('ev')} onMouseLeave={() => setActiveNode(null)}>
+          <rect x={CX - NW/2} y={Y6} width={NW} height={NH} rx={R} {...na('ev', BB.success)} />
+          <text x={CX} y={Y6+14} textAnchor="middle" fill={BB.disabled} fontSize={8} fontWeight={700} letterSpacing={1.2}>STEP 05 · EVALUATION</text>
+          <text x={CX} y={Y6+30} textAnchor="middle" fill={BB.success} fontSize={11} fontWeight={700}>Metrics & Cross-Validation</text>
+          <text x={CX} y={Y6+46} textAnchor="middle" fill={BB.disabled} fontSize={9}>{cvFolds}-fold K-Fold CV · model.joblib serialisation</text>
+        </g>
+      </svg>
+
+      {/* Node inspector callout */}
+      {activeNode && (
+        <div
+          style={{
+            padding: '8px 14px',
+            borderRadius: 7,
+            background: BB.elevated,
+            border: `1px solid ${BB.border}`,
+            fontSize: 10,
+            color: BB.muted,
+            maxWidth: 500,
+            width: '100%',
+            textAlign: 'center',
+            lineHeight: 1.5,
+            boxSizing: 'border-box',
+          }}
+        >
+          {detail[activeNode]}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ViewAsCodeStudio({
   onShowToast,
   onNavigate,
@@ -220,11 +428,7 @@ export function ViewAsCodeStudio({
     [dataset, trainingConfig],
   );
 
-  const datasetRowCount = useMemo(() => {
-    if (dataset?.rowCount) return dataset.rowCount.toLocaleString();
-    if (dataset?.rows?.length) return dataset.rows.length.toLocaleString();
-    return '—';
-  }, [dataset]);
+
 
   const rawRowCount = dataset?.rowCount || dataset?.rows?.length || 0;
 
@@ -1283,6 +1487,75 @@ export function ViewAsCodeStudio({
             </div>
           </div>
 
+          {/* Card 5: Pipeline Telemetry */}
+          <div
+            style={{
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 10,
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <ShieldCheck style={{ width: 13, height: 13, color: BB.success }} />
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
+                Pipeline Telemetry
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+              {[
+                {
+                  label: 'Est. Latency',
+                  value: rawRowCount > 0 ? `~${Math.max(1, Math.round(rawRowCount / 1000))}ms` : '—',
+                  sub: 'per 1k rows',
+                  hi: BB.gold,
+                },
+                {
+                  label: 'Memory Est.',
+                  value: (allFeatures.length > 0 && rawRowCount > 0) ? `~${(allFeatures.length * rawRowCount * 8 / 1048576).toFixed(1)}MB` : '—',
+                  sub: 'float64 matrix',
+                  hi: BB.gold,
+                },
+                {
+                  label: 'Determinism',
+                  value: trainingConfig?.random_seed != null ? '✓ Fixed Seed' : '⚠ No Seed',
+                  sub: trainingConfig?.random_seed != null ? `seed ${trainingConfig.random_seed}` : 'random state',
+                  hi: trainingConfig?.random_seed != null ? BB.success : BB.warning,
+                },
+                {
+                  label: 'Pipeline Depth',
+                  value: '3 stages',
+                  sub: 'imp → scale → fit',
+                  hi: BB.primaryLight,
+                },
+              ].map((s) => (
+                <div
+                  key={s.label}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    background: BB.elevated,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}
+                >
+                  <span style={{ fontSize: 8, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {s.label}
+                  </span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: s.hi, fontFamily: 'var(--font-mono)' }}>
+                    {s.value}
+                  </span>
+                  <span style={{ fontSize: 8, color: BB.muted }}>{s.sub}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Validation Errors Panel */}
           {validationErrors.length > 0 && (
             <div
@@ -1529,7 +1802,7 @@ export function ViewAsCodeStudio({
             </div>
           )}
 
-          {/* TAB 2: INTERACTIVE VISUAL DAG FLOW VIEW */}
+          {/* TAB 2: BRANCHING SVG PIPELINE DAG */}
           {activeTab === 'dag' && (
             <div
               style={{
@@ -1538,229 +1811,63 @@ export function ViewAsCodeStudio({
                 height: '100%',
                 minHeight: 0,
                 background: BB.codeBg,
-                overflowY: 'auto',
-                padding: '24px 20px',
-                alignItems: 'center',
-                gap: 16,
+                overflow: 'hidden',
               }}
             >
-              <div style={{ textAlign: 'center', marginBottom: 6 }}>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.1em',
-                    color: BB.gold,
-                  }}
-                >
-                  Compiled Scikit-Learn Pipeline Graph
-                </span>
-                <h3 style={{ margin: '4px 0 0', fontSize: 15, fontWeight: 700, color: BB.text }}>
-                  Directed Acyclic Graph (DAG) Execution Flow
-                </h3>
-              </div>
-
-              {/* Node 1: Ingestion */}
+              {/* DAG Header Bar */}
               <div
                 style={{
-                  width: '100%',
-                  maxWidth: 540,
-                  padding: '12px 16px',
-                  borderRadius: 8,
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
+                  padding: '8px 14px',
+                  background: BB.elevated,
+                  borderBottom: `1px solid ${BB.border}`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                  flexShrink: 0,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(201,162,75,0.15)', color: BB.gold }}>
-                    <Database style={{ width: 16, height: 16 }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#FF4D6D' }} />
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F5A623' }} />
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00F5A0' }} />
                   </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>1. Data Ingestion &amp; Schema Extraction</div>
-                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      {activeDatasetName} ({datasetRowCount} rows)
-                    </div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(34,197,94,0.15)', color: BB.success, fontWeight: 600 }}>
-                  Verified
-                </span>
-              </div>
-
-              {/* Arrow */}
-              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
-
-              {/* Node 2: Imputation */}
-              <div
-                style={{
-                  width: '100%',
-                  maxWidth: 540,
-                  padding: '12px 16px',
-                  borderRadius: 8,
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(107,92,166,0.18)', color: BB.primaryLight }}>
-                    <Settings2 style={{ width: 16, height: 16 }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>2. Missing Value Imputation (SimpleImputer)</div>
-                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      strategy=&quot;{canonicalImputer || 'median'}&quot;
-                    </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: 'rgba(107,92,166,0.12)',
+                      border: `1px solid ${BB.border}`,
+                    }}
+                  >
+                    <GitBranch style={{ width: 12, height: 12, color: BB.primaryLight }} />
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: BB.primaryLight }}>
+                      pipeline_dag.svg
+                    </span>
                   </div>
                 </div>
-                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(107,92,166,0.2)', color: BB.primaryLight, fontWeight: 600 }}>
-                  Step 02
-                </span>
-              </div>
-
-              {/* Arrow */}
-              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
-
-              {/* Node 3: Scaling */}
-              <div
-                style={{
-                  width: '100%',
-                  maxWidth: 540,
-                  padding: '12px 16px',
-                  borderRadius: 8,
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(107,92,166,0.18)', color: BB.primaryLight }}>
-                    <Sliders style={{ width: 16, height: 16 }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>3. Feature Transformation &amp; Normalization</div>
-                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      scaler=&quot;{canonicalScaler || 'standard_scaler'}&quot;
-                    </div>
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: BB.muted }}>
+                  <span>Hover a node to inspect</span>
+                  <span>•</span>
+                  <span>8 pipeline stages</span>
                 </div>
-                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(107,92,166,0.2)', color: BB.primaryLight, fontWeight: 600 }}>
-                  Step 03
-                </span>
               </div>
 
-              {/* Arrow */}
-              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
-
-              {/* Node 4: Train / Test Split */}
-              <div
-                style={{
-                  width: '100%',
-                  maxWidth: 540,
-                  padding: '12px 16px',
-                  borderRadius: 8,
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(178,58,78,0.18)', color: BB.maroonLight }}>
-                    <GitBranch style={{ width: 16, height: 16 }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>4. Stratified Train / Test Partitioning</div>
-                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      test_size={testRatio.toFixed(2)} (random_state={trainingConfig?.random_seed ?? 42})
-                    </div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(178,58,78,0.2)', color: BB.maroonLight, fontWeight: 600 }}>
-                  Step 04
-                </span>
-              </div>
-
-              {/* Arrow */}
-              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
-
-              {/* Node 5: Model Fit */}
-              <div
-                style={{
-                  width: '100%',
-                  maxWidth: 540,
-                  padding: '12px 16px',
-                  borderRadius: 8,
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(201,162,75,0.18)', color: BB.gold }}>
-                    <Cpu style={{ width: 16, height: 16 }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>5. ML Estimator Training</div>
-                    <div style={{ fontSize: 10, color: BB.gold, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      {canonicalAlgorithm || 'random_forest_classifier'}
-                    </div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(201,162,75,0.2)', color: BB.gold, fontWeight: 700 }}>
-                  Fit &amp; Predict
-                </span>
-              </div>
-
-              {/* Arrow */}
-              <div style={{ width: 2, height: 20, background: BB.primaryLight }} />
-
-              {/* Node 6: Evaluation & Metrics */}
-              <div
-                style={{
-                  width: '100%',
-                  maxWidth: 540,
-                  padding: '12px 16px',
-                  borderRadius: 8,
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ padding: 7, borderRadius: 6, background: 'rgba(34,197,94,0.15)', color: BB.success }}>
-                    <ShieldCheck style={{ width: 16, height: 16 }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>6. Performance Scoring &amp; Model Persistence</div>
-                    <div style={{ fontSize: 10, color: BB.muted, fontFamily: 'var(--font-mono)', marginTop: 2 }}>
-                      {canonicalCvFolds}-Fold Cross Validation &amp; model.joblib Serialization
-                    </div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: 'rgba(34,197,94,0.15)', color: BB.success, fontWeight: 700 }}>
-                  Complete
-                </span>
-              </div>
+              {/* Branching SVG DAG */}
+              <PipelineDAGGraph
+                datasetName={activeDatasetName}
+                imputer={canonicalImputer || 'median'}
+                scaler={canonicalScaler || 'standard_scaler'}
+                algorithm={canonicalAlgorithm || 'random_forest'}
+                trainRatio={trainRatio}
+                testRatio={testRatio}
+                cvFolds={canonicalCvFolds}
+                rawRowCount={rawRowCount}
+                inferredTaskType={inferredTaskType || undefined}
+              />
             </div>
           )}
         </div>

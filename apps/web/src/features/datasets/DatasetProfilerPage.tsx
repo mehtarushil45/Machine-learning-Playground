@@ -317,6 +317,49 @@ function TypePill({ type }: { type: string }) {
   );
 }
 
+/* ── Type Composition Meter ─────────────────────────────────────────── */
+function TypeCompositionMeter({ columns }: { columns: Array<Partial<ColumnProfile>> }) {
+  const total = columns.length || 1;
+  const typeGroups = [
+    { type: 'numeric',     color: BB.primaryLight },
+    { type: 'categorical', color: BB.gold },
+    { type: 'boolean',     color: BB.success },
+    { type: 'datetime',    color: '#60a5fa' },
+    { type: 'identifier',  color: BB.disabled },
+  ] as const;
+  const counts = typeGroups
+    .map((g) => ({ ...g, count: columns.filter((c) => c.type === g.type).length }))
+    .filter((g) => g.count > 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 9, fontWeight: 700, color: BB.muted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          Type Composition
+        </span>
+        <span style={{ fontSize: 9, color: BB.disabled, fontFamily: 'var(--font-mono)' }}>{total} cols</span>
+      </div>
+      <div style={{ display: 'flex', height: 7, borderRadius: 4, overflow: 'hidden', gap: 1.5 }}>
+        {counts.map((g) => (
+          <div
+            key={g.type}
+            style={{ flex: g.count, background: g.color, opacity: 0.85, borderRadius: 3, minWidth: 4 }}
+            title={`${g.count} ${g.type}`}
+          />
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px' }}>
+        {counts.map((g) => (
+          <span key={g.type} style={{ fontSize: 9, color: g.color, display: 'flex', alignItems: 'center', gap: 3 }}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: g.color, display: 'inline-block', flexShrink: 0 }} />
+            {g.count} {g.type}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ── Copilot Messages Generator ───────────────────────────────────────── */
 interface CopilotMsg {
   id: string;
@@ -1302,6 +1345,11 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                     </div>
                   </div>
 
+                  {/* Type Composition Meter */}
+                  {profile?.columns && profile.columns.length > 0 && (
+                    <TypeCompositionMeter columns={profile.columns} />
+                  )}
+
                   {/* Next Best Actions */}
                   {health?.recommendations && health.recommendations.length > 0 && (
                     <div>
@@ -1496,18 +1544,24 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                               {col.name}
                             </span>
                             <TypePill type={col.type || 'text'} />
-                            <span
-                              style={{
-                                textAlign: 'right',
-                                color: (col.missing_percentage ?? 0) > 5 ? BB.gold : BB.muted,
-                                fontFamily: 'var(--font-mono)',
-                                fontSize: 10,
-                              }}
-                            >
-                              {(col.missing_percentage ?? 0) > 0
-                                ? `${Math.round(col.missing_percentage ?? 0)}%`
-                                : '0%'}
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                              <span style={{ color: (col.missing_percentage ?? 0) > 5 ? BB.gold : BB.muted, fontFamily: 'var(--font-mono)', fontSize: 9 }}>
+                                {(col.missing_percentage ?? 0) > 0
+                                  ? `${Math.round(col.missing_percentage ?? 0)}%`
+                                  : '0%'}
+                              </span>
+                              <div style={{ width: 32, height: 3, background: BB.elevated, borderRadius: 2, overflow: 'hidden' }}>
+                                <div
+                                  style={{
+                                    width: `${Math.min(100, col.missing_percentage ?? 0)}%`,
+                                    height: '100%',
+                                    background: (col.missing_percentage ?? 0) > 5 ? BB.gold : BB.disabled,
+                                    borderRadius: 2,
+                                    minWidth: (col.missing_percentage ?? 0) > 0 ? 2 : 0,
+                                  }}
+                                />
+                              </div>
+                            </div>
                             <span
                               style={{
                                 textAlign: 'right',
@@ -1618,6 +1672,49 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                     boxSizing: 'border-box',
                   }}
                 >
+                  {/* Feature Preset Quick-Select Chips */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      Presets:
+                    </span>
+                    {[
+                      { label: 'All Features', action: handleSelectAllFeatures },
+                      { label: 'Numeric Only', action: () => setSelectedFeatures(allColumns.filter((c) => c !== selectedTarget && profile?.columns?.find((pc) => pc.name === c)?.type === 'numeric')) },
+                      { label: 'Deselect All', action: handleDeselectAllFeatures },
+                    ].map((preset) => (
+                      <button
+                        key={preset.label}
+                        onClick={preset.action}
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          border: `1px solid ${BB.border}`,
+                          background: 'transparent',
+                          color: BB.muted,
+                          fontSize: 9,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          transition: 'all 120ms',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          fontFamily: 'var(--font-ui)',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = BB.text;
+                          e.currentTarget.style.borderColor = BB.primaryLight;
+                          e.currentTarget.style.background = 'rgba(107,92,166,0.10)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = BB.muted;
+                          e.currentTarget.style.borderColor = BB.border;
+                          e.currentTarget.style.background = 'transparent';
+                        }}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+
                   <FeatureTargetSelector
                     dataset={dataset}
                     columns={allColumns}
