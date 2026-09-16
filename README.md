@@ -257,7 +257,9 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 
 pip install -r requirements.txt
 alembic upgrade head
-uvicorn main:app --reload --port 8000
+.venv\Scripts\activate.bat
+python -m uvicorn app.main:app --reload --port 8000
+http://localhost:8000/docs
 
 # Celery worker (separate terminal)
 celery -A services.worker.celery_app worker --loglevel=info
