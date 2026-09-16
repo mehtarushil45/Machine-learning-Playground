@@ -85,7 +85,8 @@ scratch/
 *.bin
 *.pb
 *.safetensors
-models/
+/models/
+!services/api/app/models/
 saved_models/
 checkpoints/
 mlruns/
