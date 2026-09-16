@@ -28,6 +28,7 @@ import { fetchTrainingOptions } from '../../services/jobService';
 import type { TrainingOptions } from '../../types/job';
 import { AICopilotDrawer, type CopilotMsg } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
+import { TrainingJobCard } from '../jobs/TrainingJobCard';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -363,6 +364,8 @@ export function ViewAsCodeStudio({
     setTrainingConfig,
     inferredTaskType,
     setLifecycleStage,
+    activeJob,
+    setActiveJob,
   } = useProject();
 
   /* ── Available training options (fetched list; NOT config values) ─── */
@@ -1071,6 +1074,17 @@ export function ViewAsCodeStudio({
             paddingRight: 4,
           }}
         >
+          {/* Active Training Job Live Telemetry Card */}
+          {activeJob && (
+            <div style={{ marginBottom: 4 }}>
+              <TrainingJobCard
+                job={activeJob}
+                onJobUpdated={(updated) => setActiveJob(updated)}
+                onJobRetried={(newJob) => setActiveJob(newJob)}
+              />
+            </div>
+          )}
+
           {/* Card 1: Dataset & Blueprint Variables */}
           <div
             style={{

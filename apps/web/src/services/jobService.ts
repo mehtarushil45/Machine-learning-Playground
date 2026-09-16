@@ -153,7 +153,9 @@ export function subscribeToJobProgressSSE(
   maxReconnectAttempts = 5
 ): () => void {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
-  const url = `${baseUrl}/jobs/${jobId}/stream`
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : ''
+  const url = `${baseUrl}/jobs/${jobId}/stream${tokenQuery}`
 
   let eventSource: EventSource | null = null
   let reconnectAttempts = 0

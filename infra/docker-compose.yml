@@ -78,6 +78,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ../services:/app/services
       - uploads_data:/app/services/api/uploads
     depends_on:
       db:
@@ -113,6 +114,7 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - S3_ENDPOINT_URL=http://minio:9000
     volumes:
+      - ../services:/app/services
       - uploads_data:/app/services/api/uploads
     depends_on:
       db:

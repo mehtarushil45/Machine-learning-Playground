@@ -56,6 +56,7 @@ import {
   createTrainingJob,
   fetchTrainingOptions,
 } from '../../services/jobService';
+import { TrainingJobCard } from '../jobs/TrainingJobCard';
 import {
   CANONICAL_TRAINING_OPTIONS,
   type TrainingOptions,
@@ -468,6 +469,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     setInferredTaskType,
     loadDataset,
     resetProject,
+    activeJob,
     setActiveJob,
     setLifecycleStage,
   } = useProject();
@@ -2015,6 +2017,17 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       </>
                     )}
                   </button>
+
+                  {/* Active Training Job Live Telemetry Card */}
+                  {activeJob && (
+                    <div style={{ marginTop: 8 }}>
+                      <TrainingJobCard
+                        job={activeJob}
+                        onJobUpdated={(updated) => setActiveJob(updated)}
+                        onJobRetried={(newJob) => setActiveJob(newJob)}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -68,7 +68,7 @@ async def _resolve_token(
     Cookie wins because it is httpOnly and therefore XSS-safe.
     The Authorization header is kept for non-browser clients.
     """
-    raw = access_token_cookie or bearer_token
+    raw = access_token_cookie or bearer_token or request.query_params.get("token")
     if not raw:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

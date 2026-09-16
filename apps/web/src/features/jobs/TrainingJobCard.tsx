@@ -1,6 +1,6 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { JobEntity } from '../../types/job'
-import { retryJob, subscribeToJobProgressSSE } from '../../services/jobService'
+import { fetchJobDetails, pollJobUntilDone, retryJob, subscribeToJobProgressSSE } from '../../services/jobService'
 import { useCancelJobMutation } from '../../hooks/useMLQueries'
 import { TrainingStatusBadge } from './TrainingStatusBadge'
 import { TrainingProgressBar } from './TrainingProgressBar'
@@ -22,18 +22,42 @@ export const TrainingJobCard = memo(function TrainingJobCard({
 }: TrainingJobCardProps) {
   const [job, setJob] = useState<JobEntity>(initialJob)
   const [isActionLoading, setIsActionLoading] = useState(false)
+  const onJobUpdatedRef = useRef(onJobUpdated)
+  onJobUpdatedRef.current = onJobUpdated
+  const fetchedDetailsRef = useRef<string | null>(null)
 
-  // Server-Sent Events (SSE) Effect for Live Progress Telemetry
+  const notifyUpdated = (updatedJob: JobEntity) => {
+    queueMicrotask(() => {
+      onJobUpdatedRef.current?.(updatedJob)
+    })
+  }
+
   useEffect(() => {
-    setJob(initialJob)
+    setJob((prev) => (prev.job_id === initialJob.job_id ? { ...prev, ...initialJob } : initialJob))
+  }, [initialJob.job_id, initialJob.status, initialJob.progress])
 
+  // Live Telemetry (SSE + resilient Polling fallback)
+  useEffect(() => {
     const terminalStatuses = ['COMPLETED', 'FAILED', 'CANCELLED']
     if (terminalStatuses.includes(initialJob.status)) {
+      if (initialJob.status === 'COMPLETED' && !initialJob.metadata?.metrics && fetchedDetailsRef.current !== initialJob.job_id) {
+        fetchedDetailsRef.current = initialJob.job_id
+        fetchJobDetails(initialJob.job_id).then((fullJob) => {
+          if (fullJob) {
+            setJob(fullJob)
+            notifyUpdated(fullJob)
+          }
+        }).catch(() => {})
+      }
       return
     }
 
+    let isSubscribed = true
+    const abortController = new AbortController()
+
     const unsubscribe = subscribeToJobProgressSSE(initialJob.job_id, {
       onProgress: (liveProg) => {
+        if (!isSubscribed) return
         setJob((prev) => {
           const next = {
             ...prev,
@@ -42,29 +66,38 @@ export const TrainingJobCard = memo(function TrainingJobCard({
             current_stage: liveProg.current_stage,
             estimated_seconds: liveProg.estimated_seconds_remaining,
           }
-          if (onJobUpdated) onJobUpdated(next)
+          notifyUpdated(next)
           return next
         })
       },
-      onComplete: (liveProg) => {
-        setJob((prev) => {
-          const next = {
-            ...prev,
-            status: liveProg.status,
-            progress: liveProg.progress,
-            current_stage: liveProg.current_stage,
-            estimated_seconds: liveProg.estimated_seconds_remaining,
-          }
-          if (onJobUpdated) onJobUpdated(next)
-          return next
-        })
+      onComplete: async () => {
+        if (!isSubscribed) return
+        abortController.abort()
+        fetchedDetailsRef.current = initialJob.job_id
+        const fullJob = await fetchJobDetails(initialJob.job_id).catch(() => null)
+        if (fullJob && isSubscribed) {
+          setJob(fullJob)
+          notifyUpdated(fullJob)
+        }
       },
     })
 
+    pollJobUntilDone(
+      initialJob.job_id,
+      (polledJob) => {
+        if (!isSubscribed) return
+        setJob(polledJob)
+        notifyUpdated(polledJob)
+      },
+      abortController.signal,
+    ).catch(() => {})
+
     return () => {
+      isSubscribed = false
+      abortController.abort()
       unsubscribe()
     }
-  }, [initialJob, onJobUpdated])
+  }, [initialJob.job_id])
 
   const cancelJobMutation = useCancelJobMutation()
 
@@ -99,6 +132,7 @@ export const TrainingJobCard = memo(function TrainingJobCard({
   }
 
   const isTerminal = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)
+  const metrics = (job.metadata?.metrics || (job as any).metrics) as Record<string, number | string> | undefined
 
   return (
     <Card variant="glass" className="border-primary/40 shadow-md">
@@ -171,6 +205,31 @@ export const TrainingJobCard = memo(function TrainingJobCard({
             </span>
           </div>
         </div>
+
+        {/* Evaluation Metrics on Completion */}
+        {metrics && Object.keys(metrics).length > 0 && (
+          <div className="p-3 rounded-xl border border-primary/30 bg-primary/5 space-y-2">
+            <span className="text-[10px] text-primary font-bold uppercase tracking-wider block">
+              Trained Model Evaluation Metrics
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              {Object.entries(metrics).map(([key, val]) => (
+                <div key={key} className="p-2 rounded-lg bg-card/60 border border-border/50 text-center">
+                  <span className="text-[9px] text-muted-foreground uppercase font-semibold block truncate">
+                    {key.replace('_', ' ')}
+                  </span>
+                  <span className="font-mono text-sm font-bold text-foreground">
+                    {typeof val === 'number'
+                      ? (val <= 1 && val >= 0 && key !== 'mae' && key !== 'mse' && key !== 'rmse'
+                          ? (val * 100).toFixed(1) + '%'
+                          : val.toFixed(4))
+                      : String(val ?? '—')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Actions Footer */}
         <div className="flex items-center justify-between gap-3 pt-2">
