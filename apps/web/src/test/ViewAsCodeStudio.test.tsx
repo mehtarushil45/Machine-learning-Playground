@@ -153,6 +153,10 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
       </ProjectProvider>,
     );
 
+    // Expand Technical Details to access the train/test split slider
+    const techDetailsBtn = await screen.findByRole('button', { name: /technical details/i });
+    fireEvent.click(techDetailsBtn);
+
     // Verify slider rendered with step 0.01 and 65% train
     const slider = await screen.findByRole('slider', { name: /train\/test split: 65% train/i });
     expect(slider).toBeInTheDocument();

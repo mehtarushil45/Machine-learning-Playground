@@ -5,21 +5,17 @@ import {
   Check,
   Database,
   FileSpreadsheet,
-  Play,
   AlertCircle,
   CheckCircle2,
   RefreshCw,
   Lock,
   ArrowLeft,
-  ChevronRight,
   Info,
   Download,
   GitBranch,
   Settings2,
-  Cpu,
-  Sliders,
-  ShieldCheck,
   Workflow,
+  BarChart2,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG } from '../../services/api';
@@ -28,7 +24,6 @@ import { fetchTrainingOptions } from '../../services/jobService';
 import type { TrainingOptions } from '../../types/job';
 import { AICopilotDrawer, type CopilotMsg } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
-import { TrainingJobCard } from '../jobs/TrainingJobCard';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -365,7 +360,6 @@ export function ViewAsCodeStudio({
     inferredTaskType,
     setLifecycleStage,
     activeJob,
-    setActiveJob,
   } = useProject();
 
   /* ── Available training options (fetched list; NOT config values) ─── */
@@ -400,6 +394,9 @@ export function ViewAsCodeStudio({
   /* ── Studio view mode: 'code' (Python Editor) or 'dag' (Visual Pipeline Flow) ─ */
   const [activeTab, setActiveTab] = useState<StudioTab>('code');
 
+  /* ── Technical details panel — collapsed by default for beginner UX ─ */
+  const [techDetailsOpen, setTechDetailsOpen] = useState(false);
+
   /* ── Code generation state ──────────────────────────────────────────── */
   const [generatedCode, setGeneratedCode] = useState<string>('');
   const [, setStepExplanations] = useState<CodeStepExplanation[]>([]);
@@ -410,8 +407,6 @@ export function ViewAsCodeStudio({
   const [copied, setCopied] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  /* ── Feature Search in Inspector ────────────────────────────────────── */
-  const [featureSearch, setFeatureSearch] = useState('');
 
   /* ── Derived: canonical config values ───────────────────────────────── */
   const trainRatio         = Math.round((trainingConfig?.train_test_split ?? 0.8) * 100) / 100;
@@ -438,11 +433,7 @@ export function ViewAsCodeStudio({
 
   const rawRowCount = dataset?.rowCount || dataset?.rows?.length || 0;
 
-  const datasetColCount = useMemo(() => {
-    if (dataset?.columns?.length) return dataset.columns.length;
-    const featCount = selectedFeatures.length || trainingConfig?.feature_columns?.length || 0;
-    return featCount > 0 ? featCount + (selectedTarget ? 1 : 0) : '—';
-  }, [dataset, selectedFeatures, selectedTarget, trainingConfig]);
+
 
   /* ── Derived: algorithm list filtered to task-compatible options only ─ */
   const taskFilteredAlgorithms = useMemo(() => {
@@ -779,9 +770,6 @@ export function ViewAsCodeStudio({
 
   /* ── Filtered feature column list ───────────────────────────────────── */
   const allFeatures = selectedFeatures.length > 0 ? selectedFeatures : (trainingConfig?.feature_columns ?? []);
-  const displayedFeatures = featureSearch
-    ? allFeatures.filter((f) => f.toLowerCase().includes(featureSearch.toLowerCase()))
-    : allFeatures;
 
   /* ── 2. Main Studio Canvas ───────────────────────────────────────────── */
   return (
@@ -815,55 +803,10 @@ export function ViewAsCodeStudio({
           boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
         }}
       >
-        {/* Left: Breadcrumbs & Status Pills */}
+        {/* Left: Status Pills — simplified [§8.1] */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 8px',
-              borderRadius: 6,
-              background: 'rgba(201, 162, 75, 0.12)',
-              border: `1px solid rgba(201, 162, 75, 0.3)`,
-              color: BB.gold,
-              fontSize: 11,
-              fontWeight: 700,
-              fontFamily: 'var(--font-mono)',
-            }}
-          >
-            <Database style={{ width: 13, height: 13 }} />
-            <span style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeDatasetName}
-            </span>
-          </div>
 
-          <ChevronRight style={{ width: 12, height: 12, color: BB.disabled, flexShrink: 0 }} />
-
-          {/* Task Type Pill */}
-          {inferredTaskType && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '3px 8px',
-                borderRadius: 5,
-                background: inferredTaskType === 'regression' ? 'rgba(201,162,75,0.14)' : 'rgba(124,107,174,0.18)',
-                border: `1px solid ${inferredTaskType === 'regression' ? 'rgba(201,162,75,0.45)' : 'rgba(124,107,174,0.45)'}`,
-                color: inferredTaskType === 'regression' ? BB.goldLight : BB.primaryLight,
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-              }}
-            >
-              <Cpu style={{ width: 11, height: 11 }} />
-              {inferredTaskType}
-            </span>
-          )}
-
-          {/* AST Syntax Validation Pill */}
+          {/* AST Syntax Validation Pill — small, not dominant */}
           {isValidSyntax === true && (
             <span
               style={{
@@ -872,16 +815,16 @@ export function ViewAsCodeStudio({
                 gap: 4,
                 padding: '3px 8px',
                 borderRadius: 5,
-                background: 'rgba(34, 197, 94, 0.12)',
-                border: '1px solid rgba(34, 197, 94, 0.35)',
+                background: 'rgba(34, 197, 94, 0.10)',
+                border: '1px solid rgba(34, 197, 94, 0.28)',
                 color: BB.success,
                 fontSize: 10,
                 fontWeight: 600,
                 fontFamily: 'var(--font-mono)',
               }}
             >
-              <CheckCircle2 style={{ width: 12, height: 12 }} />
-              Python 3.10 AST Validated
+              <CheckCircle2 style={{ width: 11, height: 11 }} />
+              AST Valid
             </span>
           )}
 
@@ -901,8 +844,33 @@ export function ViewAsCodeStudio({
               }}
             >
               <RefreshCw style={{ width: 11, height: 11, animation: 'spin 1s linear infinite' }} />
-              Compiling...
+              Compiling…
             </span>
+          )}
+
+          {/* Link to Training Results when a job exists */}
+          {activeJob && (
+            <button
+              onClick={() => onNavigate?.('training-results')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 8px',
+                borderRadius: 5,
+                background: 'rgba(107,92,166,0.12)',
+                border: `1px solid ${BB.border}`,
+                color: BB.primaryLight,
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'var(--font-ui)',
+              }}
+              title={`View training results — Job ${activeJob.job_id.slice(0, 8)}`}
+            >
+              <BarChart2 style={{ width: 11, height: 11 }} />
+              View Results →
+            </button>
           )}
         </div>
 
@@ -1036,38 +1004,6 @@ export function ViewAsCodeStudio({
             <Download style={{ width: 12, height: 12 }} />
             <span>Export .py</span>
           </button>
-
-          {/* Run Pipeline Button */}
-          <button
-            onClick={() => {
-              if (!isValidSyntax) {
-                onShowToast?.('Invalid Pipeline', 'Fix pipeline configuration before running.', 'error');
-                return;
-              }
-              onNavigate?.('explainability');
-            }}
-            disabled={!isConfigValid || !isValidSyntax}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '5px 14px',
-              borderRadius: 6,
-              background: (!isConfigValid || !isValidSyntax)
-                ? BB.disabled
-                : `linear-gradient(135deg, ${BB.maroon} 0%, #A01830 100%)`,
-              border: 'none',
-              color: BB.text,
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: (!isConfigValid || !isValidSyntax) ? 'not-allowed' : 'pointer',
-              boxShadow: (!isConfigValid || !isValidSyntax) ? 'none' : '0 3px 12px rgba(110,20,35,0.4)',
-              transition: 'all 150ms ease',
-            }}
-          >
-            <Play style={{ width: 11, height: 11, fill: 'currentColor' }} />
-            <span>Run Pipeline</span>
-          </button>
         </div>
       </div>
 
@@ -1081,10 +1017,10 @@ export function ViewAsCodeStudio({
           overflow: 'hidden',
         }}
       >
-        {/* ── LEFT COLUMN: STUDIO INSPECTOR ──────────────────────────── */}
+        {/* ── LEFT COLUMN: STUDIO INSPECTOR (280px) ───────────────── */}
         <div
           style={{
-            width: 360,
+            width: 280,
             flexShrink: 0,
             display: 'flex',
             flexDirection: 'column',
@@ -1096,18 +1032,8 @@ export function ViewAsCodeStudio({
             boxSizing: 'border-box',
           }}
         >
-          {/* Active Training Job Live Telemetry Card */}
-          {activeJob && (
-            <div style={{ marginBottom: 4 }}>
-              <TrainingJobCard
-                job={activeJob}
-                onJobUpdated={(updated) => setActiveJob(updated)}
-                onJobRetried={(newJob) => setActiveJob(newJob)}
-              />
-            </div>
-          )}
 
-          {/* Card 1: Dataset & Blueprint Variables */}
+          {/* ── Card A: Pipeline Summary (always visible) ─────────── */}
           <div
             style={{
               background: BB.surface,
@@ -1116,480 +1042,306 @@ export function ViewAsCodeStudio({
               padding: '12px 14px',
               display: 'flex',
               flexDirection: 'column',
-              gap: 10,
+              gap: 8,
               boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+              flexShrink: 0,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <FileSpreadsheet style={{ width: 13, height: 13, color: BB.gold }} />
                 <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
-                  Variable Blueprint
+                  Pipeline Summary
                 </span>
               </div>
-              <button
-                onClick={() => onNavigate?.('workspace')}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  fontSize: 9,
-                  color: BB.primaryLight,
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: 0,
-                  fontWeight: 600,
-                }}
-              >
-                <ArrowLeft style={{ width: 9, height: 9 }} /> Switch in Workspace
-              </button>
+              {inferredTaskType && (
+                <span style={{
+                  fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 20,
+                  background: inferredTaskType === 'regression' ? 'rgba(201,162,75,0.14)' : 'rgba(107,92,166,0.16)',
+                  color: inferredTaskType === 'regression' ? BB.gold : BB.primaryLight,
+                  border: `1px solid ${inferredTaskType === 'regression' ? 'rgba(201,162,75,0.4)' : 'rgba(107,92,166,0.4)'}`,
+                  textTransform: 'capitalize',
+                }}>
+                  {inferredTaskType}
+                </span>
+              )}
             </div>
 
-            {/* Target Variable Display */}
+            {/* Target Variable */}
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Lock style={{ width: 9, height: 9 }} /> Target Column (y)
-                </span>
-                <span style={{ fontSize: 9, color: BB.muted }}>Supervised label</span>
-              </div>
+              <div style={{ fontSize: 8, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Target (y)</div>
               <div
                 aria-label="Target column (read-only)"
-                aria-readonly="true"
                 style={{
-                  width: '100%',
-                  padding: '7px 10px',
-                  borderRadius: 6,
-                  border: `1px solid ${BB.border}`,
-                  background: BB.elevated,
+                  padding: '5px 8px', borderRadius: 5, border: `1px solid ${BB.border}`, background: BB.elevated,
                   color: (selectedTarget || trainingConfig?.target_column) ? BB.maroonLight : BB.disabled,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  fontFamily: 'var(--font-mono)',
-                  boxSizing: 'border-box',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
+                  fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)',
                 }}
               >
-                <span>{selectedTarget || trainingConfig?.target_column || '—'}</span>
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'rgba(110,20,35,0.2)', color: BB.maroonLight, fontWeight: 600 }}>
-                  Ground Truth
-                </span>
+                {selectedTarget || trainingConfig?.target_column || '—'}
               </div>
             </div>
 
-            {/* Feature Matrix Display */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Lock style={{ width: 9, height: 9 }} /> Feature Matrix (X)
-                </span>
-                <span style={{ fontSize: 9, color: BB.gold, fontWeight: 600 }}>
-                  {allFeatures.length} columns ({datasetColCount} total)
-                </span>
-              </div>
-
-              {allFeatures.length > 5 && (
-                <input
-                  type="text"
-                  placeholder="Filter feature columns..."
-                  value={featureSearch}
-                  onChange={(e) => setFeatureSearch(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '4px 8px',
-                    borderRadius: 5,
-                    border: `1px solid ${BB.border}`,
-                    background: BB.codeBg,
-                    color: BB.text,
-                    fontSize: 10,
-                    outline: 'none',
-                    marginBottom: 6,
-                    boxSizing: 'border-box',
-                  }}
-                />
-              )}
-
-              <div
-                aria-label="Feature columns (read-only)"
-                style={{
-                  width: '100%',
-                  maxHeight: 100,
-                  overflowY: 'auto',
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  border: `1px solid ${BB.border}`,
-                  background: BB.elevated,
-                  boxSizing: 'border-box',
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 4,
-                  alignItems: 'flex-start',
-                }}
-              >
-                {displayedFeatures.map((feat) => (
-                  <span
-                    key={feat}
-                    style={{
-                      display: 'inline-block',
-                      padding: '2px 6px',
-                      borderRadius: 4,
-                      background: 'rgba(107,92,166,0.18)',
-                      border: `1px solid ${BB.border}`,
-                      color: BB.text,
-                      fontSize: 9,
-                      fontWeight: 600,
-                      fontFamily: 'var(--font-mono)',
-                    }}
-                  >
-                    {feat}
-                  </span>
-                ))}
-                {displayedFeatures.length === 0 && (
-                  <span style={{ fontSize: 9, color: BB.disabled }}>
-                    {featureSearch ? 'No matching features' : 'No features selected'}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Preprocessing Architecture */}
-          <div
-            style={{
-              background: BB.surface,
-              border: `1px solid ${BB.border}`,
-              borderRadius: 10,
-              padding: '12px 14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Settings2 style={{ width: 13, height: 13, color: BB.primaryLight }} />
-              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
-                Preprocessing Architecture
-              </span>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {/* Missing Value Imputer */}
+            {/* Feature count + algorithm */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
               <div>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                    color: BB.disabled,
-                    marginBottom: 3,
-                  }}
-                >
-                  Imputer Strategy
-                </label>
-                <select
-                  value={canonicalImputer}
-                  onChange={(e) => handleImputerChange(e.target.value)}
-                  disabled={!trainingConfig}
-                  aria-label="Missing value imputer"
-                  style={{
-                    width: '100%',
-                    padding: '6px 8px',
-                    borderRadius: 6,
-                    border: `1px solid ${BB.border}`,
-                    background: BB.elevated,
-                    color: BB.text,
-                    fontSize: 10,
-                    fontWeight: 600,
-                    outline: 'none',
-                    cursor: trainingConfig ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  {trainingOptions.imputers.map((imp) => (
-                    <option key={imp.key} value={imp.key}>
-                      {imp.display_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Feature Scaler */}
-              <div>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                    color: BB.disabled,
-                    marginBottom: 3,
-                  }}
-                >
-                  Feature Scaler
-                </label>
-                <select
-                  value={canonicalScaler}
-                  onChange={(e) => handleScalerChange(e.target.value)}
-                  disabled={!trainingConfig}
-                  aria-label="Feature scaler"
-                  style={{
-                    width: '100%',
-                    padding: '6px 8px',
-                    borderRadius: 6,
-                    border: `1px solid ${BB.border}`,
-                    background: BB.elevated,
-                    color: BB.text,
-                    fontSize: 10,
-                    fontWeight: 600,
-                    outline: 'none',
-                    cursor: trainingConfig ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  {trainingOptions.scalers.map((sc) => (
-                    <option key={sc.key} value={sc.key}>
-                      {sc.display_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: ML Estimator Model Choice */}
-          <div
-            style={{
-              background: BB.surface,
-              border: `1px solid ${BB.border}`,
-              borderRadius: 10,
-              padding: '12px 14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Cpu style={{ width: 13, height: 13, color: BB.gold }} />
-                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
-                  Estimator Model Architecture
-                </span>
-              </div>
-              {inferredTaskType && (
-                <span style={{ fontSize: 9, color: BB.muted, textTransform: 'capitalize' }}>
-                  {inferredTaskType} Models
-                </span>
-              )}
-            </div>
-
-            <div>
-              <select
-                value={canonicalAlgorithm}
-                onChange={(e) => handleAlgorithmChange(e.target.value)}
-                disabled={!trainingConfig}
-                aria-label="ML estimator algorithm"
-                style={{
-                  width: '100%',
-                  padding: '7px 10px',
-                  borderRadius: 6,
-                  border: `1px solid ${BB.border}`,
-                  background: BB.elevated,
-                  color: BB.gold,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  outline: 'none',
-                  cursor: trainingConfig ? 'pointer' : 'not-allowed',
-                }}
-              >
-                {taskFilteredAlgorithms.map((algo) => (
-                  <option key={algo.key} value={algo.key}>
-                    {algo.display_name}
-                  </option>
-                ))}
-              </select>
-              {inferredTaskType && (
-                <div style={{ fontSize: 8, color: BB.muted, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Info style={{ width: 9, height: 9, flexShrink: 0 }} />
-                  <span>Filtered to task-compatible {inferredTaskType} estimators only.</span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Card 4: Split & Validation Strategy */}
-          <div
-            style={{
-              background: BB.surface,
-              border: `1px solid ${BB.border}`,
-              borderRadius: 10,
-              padding: '12px 14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Sliders style={{ width: 13, height: 13, color: BB.maroonLight }} />
-              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
-                Validation & Partition
-              </span>
-            </div>
-
-            {/* Train / Test Split Slider */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginBottom: 4 }}>
-                <span style={{ color: BB.disabled, fontWeight: 700, textTransform: 'uppercase', fontSize: 9 }}>
-                  Train / Test Split
-                </span>
-                <span
-                  style={{ color: BB.gold, fontFamily: 'var(--font-mono)', fontWeight: 700 }}
-                  aria-label={`${Math.round(trainRatio * 100)}% Train / ${Math.round(testRatio * 100)}% Test`}
-                >
-                  {Math.round(trainRatio * 100)}% Train / {Math.round(testRatio * 100)}% Test
-                </span>
-              </div>
-              <input
-                type="range"
-                min={minSplit}
-                max={maxSplit}
-                step={0.01}
-                value={trainRatio}
-                onChange={(e) => handleSplitChange(parseFloat(e.target.value))}
-                disabled={!trainingConfig}
-                aria-label={`Train/test split: ${Math.round(trainRatio * 100)}% train`}
-                aria-valuemin={Math.round(minSplit * 100)}
-                aria-valuemax={Math.round(maxSplit * 100)}
-                aria-valuenow={Math.round(trainRatio * 100)}
-                style={{
-                  width: '100%',
-                  height: 6,
-                  borderRadius: 3,
-                  appearance: 'none',
-                  outline: 'none',
-                  accentColor: BB.maroonLight,
-                  cursor: trainingConfig ? 'pointer' : 'not-allowed',
-                  background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${
-                    maxSplit > minSplit ? Math.max(0, Math.min(100, ((trainRatio - minSplit) / (maxSplit - minSplit)) * 100)) : 50
-                  }%, rgba(107,92,166,0.25) ${
-                    maxSplit > minSplit ? Math.max(0, Math.min(100, ((trainRatio - minSplit) / (maxSplit - minSplit)) * 100)) : 50
-                  }%, rgba(107,92,166,0.25) 100%)`,
-                }}
-              />
-              {rawRowCount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: BB.muted, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-                  <span>~{Math.round(rawRowCount * trainRatio)} Train Samples</span>
-                  <span>~{rawRowCount - Math.round(rawRowCount * trainRatio)} Test Samples</span>
-                </div>
-              )}
-            </div>
-
-            {/* Cross-Validation Folds */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                <label style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: BB.disabled }}>
-                  Cross-Validation Folds
-                </label>
-                <span style={{ fontSize: 9, color: BB.muted, fontFamily: 'var(--font-mono)' }}>K-Fold Strategy</span>
-              </div>
-              <input
-                type="number"
-                min={2}
-                max={20}
-                value={canonicalCvFolds}
-                onChange={(e) => handleCvFoldsChange(parseInt(e.target.value, 10) || 5)}
-                disabled={!trainingConfig}
-                aria-label="Cross-validation folds"
-                style={{
-                  width: '100%',
-                  padding: '5px 8px',
-                  borderRadius: 6,
-                  border: `1px solid ${BB.border}`,
-                  background: BB.elevated,
-                  color: BB.text,
-                  fontSize: 10,
-                  fontFamily: 'var(--font-mono)',
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                  cursor: trainingConfig ? 'pointer' : 'not-allowed',
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Card 5: Pipeline Telemetry */}
-          <div
-            style={{
-              background: BB.surface,
-              border: `1px solid ${BB.border}`,
-              borderRadius: 10,
-              padding: '12px 14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <ShieldCheck style={{ width: 13, height: 13, color: BB.success }} />
-              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
-                Pipeline Telemetry
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
-              {[
-                {
-                  label: 'Est. Latency',
-                  value: rawRowCount > 0 ? `~${Math.max(1, Math.round(rawRowCount / 1000))}ms` : '—',
-                  sub: 'per 1k rows',
-                  hi: BB.gold,
-                },
-                {
-                  label: 'Memory Est.',
-                  value: (allFeatures.length > 0 && rawRowCount > 0) ? `~${(allFeatures.length * rawRowCount * 8 / 1048576).toFixed(1)}MB` : '—',
-                  sub: 'float64 matrix',
-                  hi: BB.gold,
-                },
-                {
-                  label: 'Determinism',
-                  value: trainingConfig?.random_seed != null ? '✓ Fixed Seed' : '⚠ No Seed',
-                  sub: trainingConfig?.random_seed != null ? `seed ${trainingConfig.random_seed}` : 'random state',
-                  hi: trainingConfig?.random_seed != null ? BB.success : BB.warning,
-                },
-                {
-                  label: 'Pipeline Depth',
-                  value: '3 stages',
-                  sub: 'imp → scale → fit',
-                  hi: BB.primaryLight,
-                },
-              ].map((s) => (
+                <div style={{ fontSize: 8, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Features (X)</div>
                 <div
-                  key={s.label}
+                  aria-label="Feature columns (read-only)"
                   style={{
-                    padding: '6px 8px',
-                    borderRadius: 6,
-                    background: BB.elevated,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 2,
+                    padding: '5px 8px', borderRadius: 5, border: `1px solid ${BB.border}`, background: BB.elevated,
+                    fontSize: 11, fontWeight: 700, color: BB.gold, fontFamily: 'var(--font-mono)',
                   }}
                 >
-                  <span style={{ fontSize: 8, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    {s.label}
-                  </span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: s.hi, fontFamily: 'var(--font-mono)' }}>
-                    {s.value}
-                  </span>
-                  <span style={{ fontSize: 8, color: BB.muted }}>{s.sub}</span>
+                  {allFeatures.length > 0 ? allFeatures.length : '—'}
                 </div>
-              ))}
+              </div>
+              <div>
+                <div style={{ fontSize: 8, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Split</div>
+                <div style={{
+                  padding: '5px 8px', borderRadius: 5, border: `1px solid ${BB.border}`, background: BB.elevated,
+                  fontSize: 10, fontWeight: 700, color: BB.text, fontFamily: 'var(--font-mono)',
+                }}>
+                  {Math.round(trainRatio * 100)}/{Math.round(testRatio * 100)}%
+                </div>
+              </div>
             </div>
+
+            {/* Algorithm */}
+            <div>
+              <div style={{ fontSize: 8, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Algorithm</div>
+              <div style={{
+                padding: '5px 8px', borderRadius: 5, border: `1px solid ${BB.border}`, background: BB.elevated,
+                fontSize: 10, fontWeight: 700, color: BB.primaryLight, fontFamily: 'var(--font-mono)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {canonicalAlgorithm
+                  ? trainingOptions.algorithms.find(a => a.key === canonicalAlgorithm)?.display_name
+                    ?? canonicalAlgorithm.replace(/_/g, ' ')
+                  : '—'}
+              </div>
+            </div>
+
+            <button
+              onClick={() => onNavigate?.('workspace')}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9,
+                color: BB.primaryLight, background: 'none', border: 'none', cursor: 'pointer',
+                padding: 0, fontWeight: 600, fontFamily: 'var(--font-ui)', alignSelf: 'flex-start',
+              }}
+            >
+              <ArrowLeft style={{ width: 9, height: 9 }} /> Edit in Dataset Setup
+            </button>
+          </div>
+
+          {/* ── Card B: Pipeline Steps (always visible, beginner-friendly) ─ */}
+          <div
+            style={{
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 10,
+              padding: '12px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <Workflow style={{ width: 12, height: 12, color: BB.primaryLight }} />
+              <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
+                Pipeline Steps
+              </span>
+            </div>
+            {[
+              { n: 1, label: 'Load dataset',     sub: activeDatasetName.length > 22 ? activeDatasetName.slice(0,20) + '…' : activeDatasetName, color: BB.gold },
+              { n: 2, label: 'Select features',  sub: `${allFeatures.length} columns → target: ${selectedTarget || trainingConfig?.target_column || '?'}`, color: BB.primaryLight },
+              { n: 3, label: 'Handle missing values', sub: `${canonicalImputer || 'median'} imputation`, color: BB.primaryLight },
+              { n: 4, label: 'Scale features',   sub: `${canonicalScaler || 'standard_scaler'} on X_train`, color: BB.primaryLight },
+              { n: 5, label: 'Split data',        sub: `${Math.round(trainRatio*100)}% train · ${Math.round(testRatio*100)}% test`, color: BB.maroonLight },
+              { n: 6, label: 'Train model',       sub: canonicalAlgorithm ? (trainingOptions.algorithms.find(a => a.key === canonicalAlgorithm)?.display_name ?? canonicalAlgorithm.replace(/_/g,' ')) : '—', color: BB.gold },
+              { n: 7, label: 'Evaluate',          sub: `${canonicalCvFolds}-fold CV · held-out test set`, color: BB.success },
+            ].map((step) => (
+              <div key={step.n} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                <span style={{
+                  flexShrink: 0, width: 18, height: 18, borderRadius: '50%',
+                  background: `${step.color}22`, border: `1px solid ${step.color}66`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 8, fontWeight: 700, color: step.color, fontFamily: 'var(--font-mono)',
+                }}>
+                  {step.n}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: BB.text, lineHeight: 1.3 }}>{step.label}</div>
+                  <div style={{ fontSize: 9, color: BB.disabled, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{step.sub}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Card C: Technical Details (collapsible) [§8.2] ─────── */}
+          <div
+            style={{
+              background: BB.surface,
+              border: `1px solid ${BB.border}`,
+              borderRadius: 10,
+              overflow: 'hidden',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={() => setTechDetailsOpen(v => !v)}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '10px 14px', background: 'transparent', border: 'none', cursor: 'pointer',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Settings2 style={{ width: 12, height: 12, color: BB.primaryLight }} />
+                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: BB.text }}>
+                  Technical Details
+                </span>
+              </div>
+              <span style={{
+                fontSize: 9, color: BB.muted, display: 'inline-block',
+                transform: techDetailsOpen ? 'rotate(90deg)' : 'none', transition: 'transform 150ms',
+              }}>▶</span>
+            </button>
+
+            {techDetailsOpen && (
+              <div style={{ padding: '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+                {/* Preprocessing Architecture */}
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Preprocessing</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Imputer</label>
+                      <select
+                        value={canonicalImputer}
+                        onChange={(e) => handleImputerChange(e.target.value)}
+                        disabled={!trainingConfig}
+                        aria-label="Missing value imputer"
+                        style={{ width: '100%', padding: '5px 7px', borderRadius: 5, border: `1px solid ${BB.border}`, background: BB.elevated, color: BB.text, fontSize: 10, fontWeight: 600, outline: 'none', cursor: trainingConfig ? 'pointer' : 'not-allowed' }}
+                      >
+                        {trainingOptions.imputers.map((imp) => <option key={imp.key} value={imp.key}>{imp.display_name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Scaler</label>
+                      <select
+                        value={canonicalScaler}
+                        onChange={(e) => handleScalerChange(e.target.value)}
+                        disabled={!trainingConfig}
+                        aria-label="Feature scaler"
+                        style={{ width: '100%', padding: '5px 7px', borderRadius: 5, border: `1px solid ${BB.border}`, background: BB.elevated, color: BB.text, fontSize: 10, fontWeight: 600, outline: 'none', cursor: trainingConfig ? 'pointer' : 'not-allowed' }}
+                      >
+                        {trainingOptions.scalers.map((sc) => <option key={sc.key} value={sc.key}>{sc.display_name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Algorithm */}
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Algorithm</div>
+                  <select
+                    value={canonicalAlgorithm}
+                    onChange={(e) => handleAlgorithmChange(e.target.value)}
+                    disabled={!trainingConfig}
+                    aria-label="ML estimator algorithm"
+                    style={{ width: '100%', padding: '6px 8px', borderRadius: 5, border: `1px solid ${BB.border}`, background: BB.elevated, color: BB.gold, fontSize: 10, fontWeight: 700, outline: 'none', cursor: trainingConfig ? 'pointer' : 'not-allowed' }}
+                  >
+                    {taskFilteredAlgorithms.map((algo) => <option key={algo.key} value={algo.key}>{algo.display_name}</option>)}
+                  </select>
+                  {inferredTaskType && (
+                    <div style={{ fontSize: 8, color: BB.muted, marginTop: 3, display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <Info style={{ width: 9, height: 9, flexShrink: 0 }} />
+                      <span>Filtered to {inferredTaskType} estimators.</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Validation & Partition */}
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Validation</div>
+
+                  {/* Split Slider */}
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginBottom: 3 }}>
+                      <span style={{ color: BB.disabled, fontWeight: 700, textTransform: 'uppercase' }}>Train / Test Split</span>
+                      <span style={{ color: BB.gold, fontFamily: 'var(--font-mono)', fontWeight: 700 }}
+                        aria-label={`${Math.round(trainRatio * 100)}% Train / ${Math.round(testRatio * 100)}% Test`}>
+                        {Math.round(trainRatio * 100)}% / {Math.round(testRatio * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={minSplit} max={maxSplit} step={0.01} value={trainRatio}
+                      onChange={(e) => handleSplitChange(parseFloat(e.target.value))}
+                      disabled={!trainingConfig}
+                      aria-label={`Train/test split: ${Math.round(trainRatio * 100)}% train`}
+                      style={{
+                        width: '100%', height: 5, borderRadius: 3, appearance: 'none', outline: 'none',
+                        accentColor: BB.maroonLight, cursor: trainingConfig ? 'pointer' : 'not-allowed',
+                        background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${
+                          maxSplit > minSplit ? Math.max(0, Math.min(100, ((trainRatio - minSplit) / (maxSplit - minSplit)) * 100)) : 50
+                        }%, rgba(107,92,166,0.25) ${
+                          maxSplit > minSplit ? Math.max(0, Math.min(100, ((trainRatio - minSplit) / (maxSplit - minSplit)) * 100)) : 50
+                        }%, rgba(107,92,166,0.25) 100%)`,
+                      }}
+                    />
+                    {rawRowCount > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: BB.muted, marginTop: 3, fontFamily: 'var(--font-mono)' }}>
+                        <span>~{Math.round(rawRowCount * trainRatio)} train</span>
+                        <span>~{rawRowCount - Math.round(rawRowCount * trainRatio)} test</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* CV Folds */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                      <label style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: BB.disabled }}>CV Folds</label>
+                      <span style={{ fontSize: 9, color: BB.muted, fontFamily: 'var(--font-mono)' }}>K-Fold</span>
+                    </div>
+                    <input
+                      type="number" min={2} max={20} value={canonicalCvFolds}
+                      onChange={(e) => handleCvFoldsChange(parseInt(e.target.value, 10) || 5)}
+                      disabled={!trainingConfig}
+                      aria-label="Cross-validation folds"
+                      style={{
+                        width: '100%', padding: '4px 7px', borderRadius: 5, border: `1px solid ${BB.border}`,
+                        background: BB.elevated, color: BB.text, fontSize: 10, fontFamily: 'var(--font-mono)',
+                        outline: 'none', boxSizing: 'border-box', cursor: trainingConfig ? 'pointer' : 'not-allowed',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Pipeline Telemetry */}
+                <div>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Telemetry</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    {[
+                      { label: 'Est. Latency', value: rawRowCount > 0 ? `~${Math.max(1, Math.round(rawRowCount / 1000))}ms` : '—', sub: 'per 1k rows', hi: BB.gold },
+                      { label: 'Memory', value: (allFeatures.length > 0 && rawRowCount > 0) ? `~${(allFeatures.length * rawRowCount * 8 / 1048576).toFixed(1)}MB` : '—', sub: 'float64 matrix', hi: BB.gold },
+                      { label: 'Seed', value: trainingConfig?.random_seed != null ? '✓ Fixed' : '⚠ None', sub: trainingConfig?.random_seed != null ? `seed ${trainingConfig.random_seed}` : 'random', hi: trainingConfig?.random_seed != null ? BB.success : BB.warning },
+                      { label: 'Depth', value: '3 stages', sub: 'imp→scale→fit', hi: BB.primaryLight },
+                    ].map((s) => (
+                      <div key={s.label} style={{ padding: '5px 7px', borderRadius: 5, background: BB.elevated, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span style={{ fontSize: 8, fontWeight: 700, color: BB.disabled, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.label}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: s.hi, fontFamily: 'var(--font-mono)' }}>{s.value}</span>
+                        <span style={{ fontSize: 8, color: BB.muted }}>{s.sub}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+            )}
           </div>
 
           {/* Validation Errors Panel */}

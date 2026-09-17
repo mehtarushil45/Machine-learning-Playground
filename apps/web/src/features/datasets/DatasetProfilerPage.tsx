@@ -56,7 +56,6 @@ import {
   createTrainingJob,
   fetchTrainingOptions,
 } from '../../services/jobService';
-import { TrainingJobCard } from '../jobs/TrainingJobCard';
 import {
   CANONICAL_TRAINING_OPTIONS,
   type TrainingOptions,
@@ -469,7 +468,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     setInferredTaskType,
     loadDataset,
     resetProject,
-    activeJob,
+    activeJob: _activeJob,
     setActiveJob,
     setLifecycleStage,
   } = useProject();
@@ -545,6 +544,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   );
   const [isLaunching, setIsLaunching] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+
+  /* ── Advanced Settings Toggle (collapsed by default) ────────── */
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   /* ── Column Schema Table State ──────────────────────────────────── */
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
@@ -1026,7 +1028,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
       const createdJob = await createTrainingJob(payload);
       setActiveJob(createdJob);
-      setLifecycleStage('pipeline');
+      setLifecycleStage('evaluate');
       onShowToast(
         'Training Job Started',
         `Running ${
@@ -1034,7 +1036,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         } on ${selectedFeatures.length} features → ${selectedTarget}`,
         'success',
       );
-      onNavigate('code-studio');
+      onNavigate('training-results');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to launch training job.';
       setLaunchError(msg);
@@ -1134,72 +1136,71 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
               gap: 3,
             }}
           >
+            {/* Workspace (4-Panel) — icon only with tooltip */}
             <button
               onClick={() => setActiveView('workspace')}
+              aria-label="Workspace — 4-panel grid layout"
+              title="Workspace (4-Panel layout)"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '4px 12px',
+                justifyContent: 'center',
+                width: 32,
+                height: 28,
                 borderRadius: '5px',
                 border: 'none',
                 background: activeView === 'workspace' ? BB.primary : 'transparent',
                 color: activeView === 'workspace' ? BB.text : BB.muted,
-                fontSize: 11,
-                fontWeight: activeView === 'workspace' ? 700 : 500,
                 cursor: 'pointer',
                 transition: 'all 150ms',
               }}
             >
-              <Layers style={{ width: 12, height: 12 }} />
-              <span>Workspace (4-Panel)</span>
+              <Layers style={{ width: 13, height: 13 }} />
             </button>
 
+            {/* Preview Data — icon only with tooltip showing row count */}
             <button
               onClick={() => setActiveView('preview')}
+              aria-label={`Preview Data — ${rowCount} rows`}
+              title={`Preview Data (${rowCount} rows)`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '4px 12px',
+                justifyContent: 'center',
+                width: 32,
+                height: 28,
                 borderRadius: '5px',
                 border: 'none',
                 background: activeView === 'preview' ? BB.primary : 'transparent',
                 color: activeView === 'preview' ? BB.text : BB.muted,
-                fontSize: 11,
-                fontWeight: activeView === 'preview' ? 700 : 500,
                 cursor: 'pointer',
                 transition: 'all 150ms',
               }}
             >
-              <TableIcon style={{ width: 12, height: 12 }} />
-              <span>Preview Data ({rowCount} rows)</span>
+              <TableIcon style={{ width: 13, height: 13 }} />
             </button>
           </div>
 
-          {/* Reset Layout button */}
+          {/* Reset Layout — icon only */}
           {activeView === 'workspace' && (
             <button
-              onClick={() => {
-                setSplitCol(50);
-                setSplitRow(46);
-              }}
-              title="Reset 4-Panel Grid Layout to 50/50"
+              onClick={() => { setSplitCol(50); setSplitRow(46); }}
+              aria-label="Reset panel layout to 50/50"
+              title="Reset panel layout to 50/50"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
-                padding: '4px 8px',
+                justifyContent: 'center',
+                width: 28,
+                height: 28,
                 borderRadius: 6,
                 border: `1px solid ${BB.border}`,
                 background: 'transparent',
                 color: BB.muted,
-                fontSize: 10,
                 cursor: 'pointer',
               }}
             >
-              <RotateCcw style={{ width: 10, height: 10 }} />
-              <span>Reset Layout</span>
+              <RotateCcw style={{ width: 11, height: 11 }} />
             </button>
           )}
         </div>
@@ -1821,18 +1822,43 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                     boxSizing: 'border-box',
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.08em',
-                      textTransform: 'uppercase',
-                      color: BB.muted,
-                      flexShrink: 0,
-                    }}
-                  >
-                    Training setup
-                  </span>
+                  {/* Panel 4 header with problem-type pill */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        textTransform: 'uppercase',
+                        color: BB.muted,
+                      }}
+                    >
+                      Training Setup
+                    </span>
+                    {/* Problem-type pill — derived from recommendations */}
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: 20,
+                        letterSpacing: '0.04em',
+                        background: selectedTaskType === 'regression'
+                          ? 'rgba(201,162,75,0.14)'
+                          : 'rgba(107,92,166,0.16)',
+                        color: selectedTaskType === 'regression' ? BB.gold : BB.primaryLight,
+                        border: `1px solid ${
+                          selectedTaskType === 'regression'
+                            ? 'rgba(201,162,75,0.4)'
+                            : 'rgba(107,92,166,0.4)'
+                        }`,
+                        textTransform: 'capitalize',
+                      }}
+                      title="Problem type detected from the target column"
+                    >
+                      {selectedTaskType === 'regression' ? 'Regression' : 'Classification'}
+                    </span>
+                  </div>
 
                   <div
                     style={{
@@ -1879,9 +1905,33 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         options={algorithmSelectOptions}
                         placeholder="Select algorithm..."
                       />
+                      {/* Beginner helper text */}
+                      <div style={{ fontSize: 9, color: BB.disabled, marginTop: 3 }}>
+                        The model that learns patterns from your data.
+                      </div>
                     </div>
 
-                    {/* Scaler & Imputer in 2 cols */}
+                    {/* ── Advanced Settings toggle ────────────────── */}
+                    <button
+                      onClick={() => setShowAdvanced((v) => !v)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 5, padding: '4px 0',
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        color: BB.muted, fontSize: 9, fontWeight: 700,
+                        textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'var(--font-ui)',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
+                    >
+                      <span style={{
+                        fontSize: 8, display: 'inline-block', transition: 'transform 150ms',
+                        transform: showAdvanced ? 'rotate(90deg)' : 'none',
+                      }}>&#9654;</span>
+                      Advanced Settings
+                    </button>
+
+                    {/* Scaler & Imputer in 2 cols — hidden until Advanced opened */}
+                    {showAdvanced && (
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       <div>
                         <label
@@ -1926,11 +1976,12 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           placeholder="Imputer..."
                         />
                       </div>
-                    </div>
+                    </div>)}
 
-                    {/* CV Folds & B2 Smooth Train/Test Split Slider */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '70px 1fr', gap: 8, alignItems: 'center' }}>
-                      <div>
+                    {/* CV Folds — hidden until Advanced opened */}
+                    {showAdvanced && (
+                    <div>
+                      <div style={{ flex: '0 0 70px' }}>
                         <label
                           style={{
                             display: 'block',
@@ -1964,105 +2015,109 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           }}
                         />
                       </div>
+                    </div>)}
 
-                      {/* B2: Enhanced Smooth Train / Test Slider */}
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                          <label
-                            htmlFor="dataset-split-slider"
-                            style={{
-                              fontSize: 9,
-                              fontWeight: 700,
-                              color: BB.disabled,
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.08em',
+                    {/* B2: Train / Test Split Slider — always visible */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                        <label
+                          htmlFor="dataset-split-slider"
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: BB.disabled,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.08em',
+                          }}
+                        >
+                          Split Ratio
+                        </label>
+                        <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: BB.text }}>
+                          <strong style={{ color: BB.maroonLight }}>{Math.round(trainTestSplit * 100)}%</strong> Train
+                          {(dataset?.rowCount || dataset?.rows?.length) ? ` (~${Math.round((dataset.rowCount || dataset.rows.length) * trainTestSplit)})` : ''} ·{' '}
+                          <strong style={{ color: BB.primaryLight }}>{Math.round((1 - trainTestSplit) * 100)}%</strong> Test
+                          {(dataset?.rowCount || dataset?.rows?.length) ? ` (~${(dataset.rowCount || dataset.rows.length) - Math.round((dataset.rowCount || dataset.rows.length) * trainTestSplit)})` : ''}
+                        </span>
+                      </div>
+                      {(() => {
+                        const trackPct = maxSplit > minSplit
+                          ? Math.max(0, Math.min(100, ((trainTestSplit - minSplit) / (maxSplit - minSplit)) * 100))
+                          : 50;
+                        return (
+                          <input
+                            id="dataset-split-slider"
+                            type="range"
+                            role="slider"
+                            aria-label="Train/Test Split Ratio"
+                            aria-valuemin={Math.round(minSplit * 100)}
+                            aria-valuemax={Math.round(maxSplit * 100)}
+                            aria-valuenow={Math.round(trainTestSplit * 100)}
+                            aria-valuetext={`${Math.round(trainTestSplit * 100)}% Train, ${Math.round((1 - trainTestSplit) * 100)}% Test`}
+                            tabIndex={0}
+                            min={minSplit}
+                            max={maxSplit}
+                            step={0.01}
+                            value={trainTestSplit}
+                            onPointerDown={() => {
+                              isInteractingWithSliderRef.current = true;
+                              hasUserModifiedSplitRef.current = true;
                             }}
-                          >
-                            Split Ratio
-                          </label>
-                          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: BB.text }}>
-                            <strong style={{ color: BB.maroonLight }}>{Math.round(trainTestSplit * 100)}%</strong> Train
-                            {(dataset?.rowCount || dataset?.rows?.length) ? ` (~${Math.round((dataset.rowCount || dataset.rows.length) * trainTestSplit)})` : ''} ·{' '}
-                            <strong style={{ color: BB.primaryLight }}>{Math.round((1 - trainTestSplit) * 100)}%</strong> Test
-                            {(dataset?.rowCount || dataset?.rows?.length) ? ` (~${(dataset.rowCount || dataset.rows.length) - Math.round((dataset.rowCount || dataset.rows.length) * trainTestSplit)})` : ''}
-                          </span>
-                        </div>
-                        {(() => {
-                          const trackPct = maxSplit > minSplit
-                            ? Math.max(0, Math.min(100, ((trainTestSplit - minSplit) / (maxSplit - minSplit)) * 100))
-                            : 50;
-                          return (
-                            <input
-                              id="dataset-split-slider"
-                              type="range"
-                              role="slider"
-                              aria-label="Train/Test Split Ratio"
-                              aria-valuemin={Math.round(minSplit * 100)}
-                              aria-valuemax={Math.round(maxSplit * 100)}
-                              aria-valuenow={Math.round(trainTestSplit * 100)}
-                              aria-valuetext={`${Math.round(trainTestSplit * 100)}% Train, ${Math.round((1 - trainTestSplit) * 100)}% Test`}
-                              tabIndex={0}
-                              min={minSplit}
-                              max={maxSplit}
-                              step={0.01}
-                              value={trainTestSplit}
-                              onPointerDown={() => {
-                                isInteractingWithSliderRef.current = true;
-                                hasUserModifiedSplitRef.current = true;
-                              }}
-                              onPointerUp={() => {
-                                isInteractingWithSliderRef.current = false;
-                                flushConfigSync();
-                              }}
-                              onBlur={() => {
-                                isInteractingWithSliderRef.current = false;
-                                flushConfigSync();
-                              }}
-                              onKeyDown={(e) => {
-                                hasUserModifiedSplitRef.current = true;
-                                let nextVal = trainTestSplit;
-                                if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-                                  e.preventDefault();
-                                  nextVal = Math.min(maxSplit, Math.round((trainTestSplit + 0.01) * 100) / 100);
-                                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-                                  e.preventDefault();
-                                  nextVal = Math.max(minSplit, Math.round((trainTestSplit - 0.01) * 100) / 100);
-                                } else if (e.key === 'PageUp') {
-                                  e.preventDefault();
-                                  nextVal = Math.min(maxSplit, Math.round((trainTestSplit + 0.05) * 100) / 100);
-                                } else if (e.key === 'PageDown') {
-                                  e.preventDefault();
-                                  nextVal = Math.max(minSplit, Math.round((trainTestSplit - 0.05) * 100) / 100);
-                                } else if (e.key === 'Home') {
-                                  e.preventDefault();
-                                  nextVal = minSplit;
-                                } else if (e.key === 'End') {
-                                  e.preventDefault();
-                                  nextVal = maxSplit;
-                                }
-                                if (nextVal !== trainTestSplit) {
-                                  setTrainTestSplit(nextVal);
-                                }
-                              }}
-                              onChange={(e) => {
-                                hasUserModifiedSplitRef.current = true;
-                                const raw = parseFloat(e.target.value);
-                                const val = Math.min(maxSplit, Math.max(minSplit, Math.round(raw * 100) / 100));
-                                setTrainTestSplit(val);
-                              }}
-                              style={{
-                                width: '100%',
-                                height: 6,
-                                borderRadius: 3,
-                                appearance: 'none',
-                                outline: 'none',
-                                cursor: 'pointer',
-                                accentColor: BB.maroonLight,
-                                background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${trackPct}%, rgba(107,92,166,0.25) ${trackPct}%, rgba(107,92,166,0.25) 100%)`,
-                              }}
-                            />
-                          );
-                        })()}
+                            onPointerUp={() => {
+                              isInteractingWithSliderRef.current = false;
+                              flushConfigSync();
+                            }}
+                            onBlur={() => {
+                              isInteractingWithSliderRef.current = false;
+                              flushConfigSync();
+                            }}
+                            onKeyDown={(e) => {
+                              hasUserModifiedSplitRef.current = true;
+                              let nextVal = trainTestSplit;
+                              if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                nextVal = Math.min(maxSplit, Math.round((trainTestSplit + 0.01) * 100) / 100);
+                              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                nextVal = Math.max(minSplit, Math.round((trainTestSplit - 0.01) * 100) / 100);
+                              } else if (e.key === 'PageUp') {
+                                e.preventDefault();
+                                nextVal = Math.min(maxSplit, Math.round((trainTestSplit + 0.05) * 100) / 100);
+                              } else if (e.key === 'PageDown') {
+                                e.preventDefault();
+                                nextVal = Math.max(minSplit, Math.round((trainTestSplit - 0.05) * 100) / 100);
+                              } else if (e.key === 'Home') {
+                                e.preventDefault();
+                                nextVal = minSplit;
+                              } else if (e.key === 'End') {
+                                e.preventDefault();
+                                nextVal = maxSplit;
+                              }
+                              if (nextVal !== trainTestSplit) {
+                                setTrainTestSplit(nextVal);
+                              }
+                            }}
+                            onChange={(e) => {
+                              hasUserModifiedSplitRef.current = true;
+                              const raw = parseFloat(e.target.value);
+                              const val = Math.min(maxSplit, Math.max(minSplit, Math.round(raw * 100) / 100));
+                              setTrainTestSplit(val);
+                            }}
+                            style={{
+                              width: '100%',
+                              height: 6,
+                              borderRadius: 3,
+                              appearance: 'none',
+                              outline: 'none',
+                              cursor: 'pointer',
+                              accentColor: BB.maroonLight,
+                              background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${trackPct}%, rgba(107,92,166,0.25) ${trackPct}%, rgba(107,92,166,0.25) 100%)`,
+                            }}
+                          />
+                        );
+                      })()}
+                      {/* Beginner helper text for split slider */}
+                      <div style={{ fontSize: 9, color: BB.disabled, marginTop: 3 }}>
+                        % of data used to train vs. test the model.
                       </div>
                     </div>
 
@@ -2085,16 +2140,49 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       </div>
                     )}
 
-                    {/* Active Training Job Live Telemetry Card INSIDE scrollable area */}
-                    {activeJob && (
-                      <div style={{ marginTop: 4, flexShrink: 0 }}>
-                        <TrainingJobCard
-                          job={activeJob}
-                          onJobUpdated={(updated) => setActiveJob(updated)}
-                          onJobRetried={(newJob) => setActiveJob(newJob)}
-                        />
+                    {/* ── Pre-launch summary — visible when ready [§6.1] ── */}
+                    {selectedTarget && selectedFeatures.length > 0 && (
+                      <div
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 6,
+                          background: 'rgba(107,92,166,0.10)',
+                          border: `1px solid rgba(107,92,166,0.25)`,
+                          fontSize: 10,
+                          color: BB.muted,
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: BB.text, fontSize: 10, marginBottom: 4 }}>Ready to train</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', fontSize: 9 }}>
+                          <span>
+                            <span style={{ color: BB.disabled }}>Target: </span>
+                            <span style={{ color: BB.maroonLight, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{selectedTarget}</span>
+                          </span>
+                          <span style={{ color: BB.border }}>·</span>
+                          <span>
+                            <span style={{ color: BB.disabled }}>Features: </span>
+                            <span style={{ color: BB.text, fontWeight: 700 }}>{selectedFeatures.length}</span>
+                          </span>
+                          <span style={{ color: BB.border }}>·</span>
+                          <span>
+                            <span style={{ color: BB.disabled }}>Algorithm: </span>
+                            <span style={{ color: BB.primaryLight, fontWeight: 700 }}>
+                              {(() => {
+                                const opt = trainingOptions.algorithms.find(o => o.key === effectiveAlgorithm);
+                                return opt?.display_name ?? effectiveAlgorithm.replace(/_/g,' ');
+                              })()}
+                            </span>
+                          </span>
+                          <span style={{ color: BB.border }}>·</span>
+                          <span>
+                            <span style={{ color: BB.disabled }}>Split: </span>
+                            <span style={{ color: BB.text, fontWeight: 700 }}>{Math.round(trainTestSplit * 100)}% / {Math.round((1 - trainTestSplit) * 100)}%</span>
+                          </span>
+                        </div>
                       </div>
                     )}
+
                   </div>
 
                   {/* Sticky Launch Button */}

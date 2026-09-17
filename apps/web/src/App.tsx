@@ -9,6 +9,7 @@ import {
   Rocket,
   Award,
   Search,
+  BarChart2,
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider } from './providers/AuthContext';
@@ -17,6 +18,7 @@ import { Toast } from './components/ui/Toast';
 import { useLatestModel } from './hooks/useLatestModel';
 import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
+import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { ExplainabilityHub } from './features/explainability/ExplainabilityHub';
 import { ClassroomHub } from './features/classrooms/ClassroomHub';
 import { DeploymentStudio } from './features/deployments/DeploymentStudio';
@@ -25,6 +27,7 @@ import { PortfolioViewer } from './features/portfolios/PortfolioViewer';
 export type PlatformTab =
   | 'workspace'
   | 'code-studio'
+  | 'training-results'
   | 'explainability'
   | 'classrooms'
   | 'deployments'
@@ -55,7 +58,7 @@ const BB = {
 
 function AppContent() {
   const latestModel = useLatestModel();
-  const { setLifecycleStage } = useProject();
+  const { setLifecycleStage, activeJob } = useProject();
 
   const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -78,27 +81,28 @@ function AppContent() {
 
   const handleNavigate = (tab: PlatformTab) => {
     setActiveTab(tab);
-    const tabToStage: Record<PlatformTab, LifecycleStage> = {
-      workspace:      'dataset',
-      'code-studio':  'pipeline',
-      explainability: 'evaluate',
-      classrooms:     'verify',
-      deployments:    'deploy',
-      portfolios:     'certify',
+    const tabToStage: Partial<Record<PlatformTab, LifecycleStage>> = {
+      workspace:          'dataset',
+      'code-studio':      'pipeline',
+      'training-results': 'evaluate',
+      explainability:     'evaluate',
+      classrooms:         'verify',
+      deployments:        'deploy',
+      portfolios:         'certify',
     };
-    if (tabToStage[tab]) {
-      setLifecycleStage(tabToStage[tab]);
-    }
+    const stage = tabToStage[tab];
+    if (stage) setLifecycleStage(stage);
   };
 
   const navItems = [
-    { id: 'workspace',      label: 'Dataset & Profiler',        icon: <Database className="w-5 h-5" /> },
-    { id: 'code-studio',    label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" /> },
-    { id: 'explainability', label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" /> },
-    { id: 'classrooms',     label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" /> },
-    { id: 'deployments',    label: 'Deployment Studio',         icon: <Rocket className="w-5 h-5" /> },
-    { id: 'portfolios',     label: 'Portfolios & Verification',  icon: <Award className="w-5 h-5" /> },
-  ];
+    { id: 'workspace',          label: 'Dataset & Profiler',        icon: <Database className="w-5 h-5" />,   alwaysShow: true  },
+    { id: 'code-studio',        label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />,     alwaysShow: true  },
+    { id: 'training-results',   label: 'Training Results',          icon: <BarChart2 className="w-5 h-5" />, alwaysShow: false },
+    { id: 'explainability',     label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" />,  alwaysShow: true  },
+    { id: 'classrooms',         label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" />, alwaysShow: true },
+    { id: 'deployments',        label: 'Deployment Studio',         icon: <Rocket className="w-5 h-5" />,    alwaysShow: true  },
+    { id: 'portfolios',         label: 'Portfolios & Verification',  icon: <Award className="w-5 h-5" />,     alwaysShow: true  },
+  ].filter(item => item.alwaysShow || !!activeJob);
 
   return (
     <div
@@ -438,6 +442,14 @@ function AppContent() {
                 onNavigate={(tab) => handleNavigate(tab as PlatformTab)}
                 isCopilotOpen={isCopilotOpen}
                 onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
+              />
+            </ErrorBoundary>
+          )}
+          {activeTab === 'training-results' && (
+            <ErrorBoundary key="training-results" onReset={() => handleNavigate('workspace')}>
+              <TrainingResultsPage
+                onNavigate={handleNavigate}
+                onShowToast={showToast}
               />
             </ErrorBoundary>
           )}
