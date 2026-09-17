@@ -6,7 +6,6 @@ import {
   Database,
   FileSpreadsheet,
   AlertCircle,
-  CheckCircle2,
   RefreshCw,
   Lock,
   ArrowLeft,
@@ -15,7 +14,6 @@ import {
   GitBranch,
   Settings2,
   Workflow,
-  BarChart2,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG } from '../../services/api';
@@ -359,7 +357,6 @@ export function ViewAsCodeStudio({
     setTrainingConfig,
     inferredTaskType,
     setLifecycleStage,
-    activeJob,
   } = useProject();
 
   /* ── Available training options (fetched list; NOT config values) ─── */
@@ -405,7 +402,6 @@ export function ViewAsCodeStudio({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
 
   /* ── Derived: canonical config values ───────────────────────────────── */
@@ -610,7 +606,7 @@ export function ViewAsCodeStudio({
       generatePipelineCode();
     }, 250);
     return () => clearTimeout(timer);
-  }, [generatePipelineCode, refreshTrigger]);
+  }, [generatePipelineCode]);
 
   /* ── Copy code to clipboard ─────────────────────────────────────────── */
   const handleCopyCode = async () => {
@@ -785,228 +781,9 @@ export function ViewAsCodeStudio({
         boxSizing: 'border-box',
         overflow: 'hidden',
         background: BB.base,
-        gap: 10,
+        gap: 0,
       }}
     >
-      {/* ── TOP STUDIO COMMAND STRIP ───────────────────────────────────── */}
-      <div
-        style={{
-          background: BB.surface,
-          border: `1px solid ${BB.border}`,
-          borderRadius: 10,
-          padding: '8px 14px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          flexShrink: 0,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-        }}
-      >
-        {/* Left: Status Pills — simplified [§8.1] */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-
-          {/* AST Syntax Validation Pill — small, not dominant */}
-          {isValidSyntax === true && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 8px',
-                borderRadius: 5,
-                background: 'rgba(34, 197, 94, 0.10)',
-                border: '1px solid rgba(34, 197, 94, 0.28)',
-                color: BB.success,
-                fontSize: 10,
-                fontWeight: 600,
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              <CheckCircle2 style={{ width: 11, height: 11 }} />
-              AST Valid
-            </span>
-          )}
-
-          {isGenerating && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 8px',
-                borderRadius: 5,
-                background: 'rgba(201, 162, 75, 0.1)',
-                border: '1px solid rgba(201, 162, 75, 0.25)',
-                color: BB.gold,
-                fontSize: 10,
-                fontWeight: 600,
-              }}
-            >
-              <RefreshCw style={{ width: 11, height: 11, animation: 'spin 1s linear infinite' }} />
-              Compiling…
-            </span>
-          )}
-
-          {/* Link to Training Results when a job exists */}
-          {activeJob && (
-            <button
-              onClick={() => onNavigate?.('training-results')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 8px',
-                borderRadius: 5,
-                background: 'rgba(107,92,166,0.12)',
-                border: `1px solid ${BB.border}`,
-                color: BB.primaryLight,
-                fontSize: 10,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'var(--font-ui)',
-              }}
-              title={`View training results — Job ${activeJob.job_id.slice(0, 8)}`}
-            >
-              <BarChart2 style={{ width: 11, height: 11 }} />
-              View Results →
-            </button>
-          )}
-        </div>
-
-        {/* Right: View Switcher & Action Tools */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* View Tab Switcher: Code vs DAG */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              background: BB.elevated,
-              border: `1px solid ${BB.border}`,
-              borderRadius: 6,
-              padding: 2,
-              gap: 2,
-            }}
-          >
-            <button
-              onClick={() => setActiveTab('code')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 10px',
-                borderRadius: 4,
-                border: 'none',
-                background: activeTab === 'code' ? BB.primary : 'transparent',
-                color: activeTab === 'code' ? BB.text : BB.muted,
-                fontSize: 11,
-                fontWeight: activeTab === 'code' ? 700 : 500,
-                cursor: 'pointer',
-                transition: 'all 120ms ease',
-              }}
-            >
-              <FileCode style={{ width: 12, height: 12 }} />
-              <span>Python Script</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('dag')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 10px',
-                borderRadius: 4,
-                border: 'none',
-                background: activeTab === 'dag' ? BB.primary : 'transparent',
-                color: activeTab === 'dag' ? BB.text : BB.muted,
-                fontSize: 11,
-                fontWeight: activeTab === 'dag' ? 700 : 500,
-                cursor: 'pointer',
-                transition: 'all 120ms ease',
-              }}
-            >
-              <GitBranch style={{ width: 12, height: 12 }} />
-              <span>Visual DAG Flow</span>
-            </button>
-          </div>
-
-          <div style={{ width: 1, height: 18, background: BB.border }} />
-
-          {/* Recompile Button */}
-          <button
-            onClick={() => setRefreshTrigger((prev) => prev + 1)}
-            disabled={!isConfigValid || isGenerating}
-            title="Recompile Python scikit-learn code"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '5px 9px',
-              borderRadius: 6,
-              background: BB.elevated,
-              border: `1px solid ${BB.border}`,
-              color: BB.muted,
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: isConfigValid && !isGenerating ? 'pointer' : 'not-allowed',
-              transition: 'all 120ms ease',
-            }}
-          >
-            <RefreshCw style={{ width: 12, height: 12, animation: isGenerating ? 'spin 1s linear infinite' : 'none' }} />
-            <span>Recompile</span>
-          </button>
-
-          {/* Copy Code */}
-          <button
-            onClick={handleCopyCode}
-            disabled={!generatedCode}
-            title={copied ? 'Copied to clipboard!' : 'Copy Python code to clipboard'}
-            aria-label="Copy Code"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '5px 9px',
-              borderRadius: 6,
-              background: copied ? 'rgba(34,197,94,0.18)' : BB.elevated,
-              border: `1px solid ${copied ? 'rgba(34,197,94,0.45)' : BB.border}`,
-              color: copied ? BB.success : BB.text,
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: generatedCode ? 'pointer' : 'not-allowed',
-              transition: 'all 120ms ease',
-            }}
-          >
-            {copied ? <Check style={{ width: 12, height: 12 }} /> : <Copy style={{ width: 12, height: 12 }} />}
-            <span>{copied ? 'Copied!' : 'Copy'}</span>
-          </button>
-
-          {/* Download Script */}
-          <button
-            onClick={handleDownloadScript}
-            disabled={!generatedCode}
-            title="Download standalone Python script"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '5px 9px',
-              borderRadius: 6,
-              background: BB.elevated,
-              border: `1px solid ${BB.border}`,
-              color: BB.text,
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: generatedCode ? 'pointer' : 'not-allowed',
-              transition: 'all 120ms ease',
-            }}
-          >
-            <Download style={{ width: 12, height: 12 }} />
-            <span>Export .py</span>
-          </button>
-        </div>
-      </div>
-
       {/* ── WORKSPACE BODY: INSPECTOR (LEFT) + CODE/DAG VIEW (RIGHT) ─── */}
       <div
         style={{
@@ -1422,10 +1199,108 @@ export function ViewAsCodeStudio({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: BB.muted }}>
-                  <span>Python 3.10 / scikit-learn 1.4</span>
-                  <span>•</span>
-                  <span>{codeLines.length} lines</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {/* Symbol Switchers: Python Script & Visual DAG Flow */}
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      background: 'rgba(0,0,0,0.25)',
+                      border: `1px solid ${BB.border}`,
+                      borderRadius: 5,
+                      padding: 2,
+                      gap: 2,
+                    }}
+                  >
+                    <button
+                      onClick={() => setActiveTab('code')}
+                      aria-label="Python Script"
+                      title="Python Script"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 24,
+                        height: 22,
+                        borderRadius: 4,
+                        border: 'none',
+                        background: BB.primary,
+                        color: BB.text,
+                        cursor: 'pointer',
+                        transition: 'all 120ms ease',
+                      }}
+                    >
+                      <FileCode style={{ width: 12, height: 12 }} />
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('dag')}
+                      aria-label="Visual DAG Flow"
+                      title="Visual DAG Flow"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 24,
+                        height: 22,
+                        borderRadius: 4,
+                        border: 'none',
+                        background: 'transparent',
+                        color: BB.muted,
+                        cursor: 'pointer',
+                        transition: 'all 120ms ease',
+                      }}
+                    >
+                      <GitBranch style={{ width: 12, height: 12 }} />
+                    </button>
+                  </div>
+
+                  <div style={{ width: 1, height: 14, background: BB.border, margin: '0 2px' }} />
+
+                  {/* Copy Code (symbol) */}
+                  <button
+                    onClick={handleCopyCode}
+                    disabled={!generatedCode}
+                    title={copied ? 'Copied to clipboard!' : 'Copy Python code'}
+                    aria-label="Copy code"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 24,
+                      height: 22,
+                      borderRadius: 4,
+                      border: `1px solid ${copied ? 'rgba(34,197,94,0.45)' : BB.border}`,
+                      background: copied ? 'rgba(34,197,94,0.18)' : 'transparent',
+                      color: copied ? BB.success : BB.muted,
+                      cursor: generatedCode ? 'pointer' : 'not-allowed',
+                      transition: 'all 120ms ease',
+                    }}
+                  >
+                    {copied ? <Check style={{ width: 12, height: 12 }} /> : <Copy style={{ width: 12, height: 12 }} />}
+                  </button>
+
+                  {/* Export .py Script (symbol) */}
+                  <button
+                    onClick={handleDownloadScript}
+                    disabled={!generatedCode}
+                    title="Download standalone Python script"
+                    aria-label="Export .py script"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 24,
+                      height: 22,
+                      borderRadius: 4,
+                      border: `1px solid ${BB.border}`,
+                      background: 'transparent',
+                      color: generatedCode ? BB.text : BB.disabled,
+                      cursor: generatedCode ? 'pointer' : 'not-allowed',
+                      transition: 'all 120ms ease',
+                    }}
+                  >
+                    <Download style={{ width: 12, height: 12 }} />
+                  </button>
                 </div>
               </div>
 
@@ -1438,6 +1313,7 @@ export function ViewAsCodeStudio({
                   background: BB.codeBg,
                   display: 'flex',
                   flexDirection: 'column',
+                  overscrollBehavior: 'contain',
                 }}
               >
                 {/* Auth Error */}
@@ -1574,6 +1450,7 @@ export function ViewAsCodeStudio({
                         padding: '12px 16px',
                         flex: 1,
                         overflowX: 'auto',
+                        overflowY: 'hidden',
                         whiteSpace: 'pre',
                         fontFamily: 'inherit',
                       }}
@@ -1637,10 +1514,108 @@ export function ViewAsCodeStudio({
                     </span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontFamily: 'var(--font-mono)', color: BB.muted }}>
-                  <span>Hover a node to inspect</span>
-                  <span>•</span>
-                  <span>8 pipeline stages</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {/* Symbol Switchers: Python Script & Visual DAG Flow */}
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      background: 'rgba(0,0,0,0.25)',
+                      border: `1px solid ${BB.border}`,
+                      borderRadius: 5,
+                      padding: 2,
+                      gap: 2,
+                    }}
+                  >
+                    <button
+                      onClick={() => setActiveTab('code')}
+                      aria-label="Python Script"
+                      title="Python Script"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 24,
+                        height: 22,
+                        borderRadius: 4,
+                        border: 'none',
+                        background: 'transparent',
+                        color: BB.muted,
+                        cursor: 'pointer',
+                        transition: 'all 120ms ease',
+                      }}
+                    >
+                      <FileCode style={{ width: 12, height: 12 }} />
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('dag')}
+                      aria-label="Visual DAG Flow"
+                      title="Visual DAG Flow"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 24,
+                        height: 22,
+                        borderRadius: 4,
+                        border: 'none',
+                        background: BB.primary,
+                        color: BB.text,
+                        cursor: 'pointer',
+                        transition: 'all 120ms ease',
+                      }}
+                    >
+                      <GitBranch style={{ width: 12, height: 12 }} />
+                    </button>
+                  </div>
+
+                  <div style={{ width: 1, height: 14, background: BB.border, margin: '0 2px' }} />
+
+                  {/* Copy Code (symbol) */}
+                  <button
+                    onClick={handleCopyCode}
+                    disabled={!generatedCode}
+                    title={copied ? 'Copied to clipboard!' : 'Copy Python code'}
+                    aria-label="Copy code"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 24,
+                      height: 22,
+                      borderRadius: 4,
+                      border: `1px solid ${copied ? 'rgba(34,197,94,0.45)' : BB.border}`,
+                      background: copied ? 'rgba(34,197,94,0.18)' : 'transparent',
+                      color: copied ? BB.success : BB.muted,
+                      cursor: generatedCode ? 'pointer' : 'not-allowed',
+                      transition: 'all 120ms ease',
+                    }}
+                  >
+                    {copied ? <Check style={{ width: 12, height: 12 }} /> : <Copy style={{ width: 12, height: 12 }} />}
+                  </button>
+
+                  {/* Export .py Script (symbol) */}
+                  <button
+                    onClick={handleDownloadScript}
+                    disabled={!generatedCode}
+                    title="Download standalone Python script"
+                    aria-label="Export .py script"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 24,
+                      height: 22,
+                      borderRadius: 4,
+                      border: `1px solid ${BB.border}`,
+                      background: 'transparent',
+                      color: generatedCode ? BB.text : BB.disabled,
+                      cursor: generatedCode ? 'pointer' : 'not-allowed',
+                      transition: 'all 120ms ease',
+                    }}
+                  >
+                    <Download style={{ width: 12, height: 12 }} />
+                  </button>
                 </div>
               </div>
 

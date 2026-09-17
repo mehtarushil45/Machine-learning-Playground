@@ -167,4 +167,44 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
     const copilotAside = screen.getByRole('complementary', { name: /ai copilot agent drawer/i });
     expect(copilotAside).toBeInTheDocument();
   });
+
+  it('renders symbol-only buttons in code header and permanently omits AST Valid, View Results, and Recompile', async () => {
+    const Initializer = () => {
+      const { setTrainingConfig, setSelectedTarget } = useProject();
+      React.useEffect(() => {
+        setSelectedTarget('target');
+        setTrainingConfig({
+          dataset_id: 'ds-123',
+          dataset_name: 'data.csv',
+          target_column: 'target',
+          feature_columns: ['f1'],
+          algorithm: 'logistic_regression',
+          scaler: 'standard_scaler',
+          imputer: 'median',
+          train_test_split: 0.8,
+          cv_folds: 5,
+          random_seed: 42,
+          selection_source: 'manual',
+        });
+      }, [setTrainingConfig, setSelectedTarget]);
+      return <ViewAsCodeStudio />;
+    };
+
+    render(
+      <ProjectProvider>
+        <Initializer />
+      </ProjectProvider>,
+    );
+
+    // Verify removed buttons are NOT present
+    expect(screen.queryByText(/AST Valid/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/View Results/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /recompile/i })).not.toBeInTheDocument();
+
+    // Verify symbol-only buttons are present via aria-label
+    expect(await screen.findByRole('button', { name: 'Python Script' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Visual DAG Flow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /copy code/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /export \.py/i })).toBeInTheDocument();
+  });
 });

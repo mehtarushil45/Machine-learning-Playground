@@ -179,7 +179,7 @@ describe('TrainingResultsPage (Page 3)', () => {
     expect(screen.getByText('standard scaler')).toBeInTheDocument();
     expect(screen.getByText('mean')).toBeInTheDocument();
     expect(screen.getByText('5-fold')).toBeInTheDocument();
-    expect(screen.getByText('student_grades.csv')).toBeInTheDocument();
+    expect(screen.getAllByText('student_grades.csv').length).toBeGreaterThanOrEqual(1);
   });
 
   it('formats regression error metrics as raw floats without percentage signs', () => {

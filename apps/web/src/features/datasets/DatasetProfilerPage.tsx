@@ -1101,7 +1101,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 0,
         fontFamily: 'var(--font-ui)',
         color: BB.text,
         height: '100%',
@@ -1110,118 +1110,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         overflow: 'hidden',
       }}
     >
-      {/* ─────────────────────────────────────────────────────────────
-          TOP CONTROL BAR: View Toggle (Workspace / Preview) & Actions
-          ───────────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 2px',
-          gap: 12,
-          flexShrink: 0,
-        }}
-      >
-        {/* Segmented View Switcher */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              background: BB.surface,
-              border: `1px solid ${BB.border}`,
-              borderRadius: '7px',
-              padding: 3,
-              gap: 3,
-            }}
-          >
-            {/* Workspace (4-Panel) — icon only with tooltip */}
-            <button
-              onClick={() => setActiveView('workspace')}
-              aria-label="Workspace — 4-panel grid layout"
-              title="Workspace (4-Panel layout)"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 28,
-                borderRadius: '5px',
-                border: 'none',
-                background: activeView === 'workspace' ? BB.primary : 'transparent',
-                color: activeView === 'workspace' ? BB.text : BB.muted,
-                cursor: 'pointer',
-                transition: 'all 150ms',
-              }}
-            >
-              <Layers style={{ width: 13, height: 13 }} />
-            </button>
-
-            {/* Preview Data — icon only with tooltip showing row count */}
-            <button
-              onClick={() => setActiveView('preview')}
-              aria-label={`Preview Data — ${rowCount} rows`}
-              title={`Preview Data (${rowCount} rows)`}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 28,
-                borderRadius: '5px',
-                border: 'none',
-                background: activeView === 'preview' ? BB.primary : 'transparent',
-                color: activeView === 'preview' ? BB.text : BB.muted,
-                cursor: 'pointer',
-                transition: 'all 150ms',
-              }}
-            >
-              <TableIcon style={{ width: 13, height: 13 }} />
-            </button>
-          </div>
-
-          {/* Reset Layout — icon only */}
-          {activeView === 'workspace' && (
-            <button
-              onClick={() => { setSplitCol(50); setSplitRow(46); }}
-              aria-label="Reset panel layout to 50/50"
-              title="Reset panel layout to 50/50"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 28,
-                height: 28,
-                borderRadius: 6,
-                border: `1px solid ${BB.border}`,
-                background: 'transparent',
-                color: BB.muted,
-                cursor: 'pointer',
-              }}
-            >
-              <RotateCcw style={{ width: 11, height: 11 }} />
-            </button>
-          )}
-        </div>
-
-        {/* Right Status */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {isAnalyzing && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: BB.muted }}>
-              <Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
-              <span>Analyzing…</span>
-            </div>
-          )}
-          {analyzeError && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: BB.maroonLight }}>
-              <AlertCircle style={{ width: 12, height: 12 }} />
-              <span>{analyzeError}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* ─────────────────────────────────────────────────────────────
           STUDIO CANVAS (Main Left Content + Dedicated Right AI Panel)
           ───────────────────────────────────────────────────────────── */}
@@ -1280,7 +1168,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <span
                           style={{
                             fontSize: 10,
@@ -1293,7 +1181,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           Overview &amp; quality
                         </span>
 
-                        {/* C2: "Upload new" button moved inside Panel 1 Header */}
+                        {/* C2: "Upload new" button inside Panel 1 Header */}
                         <button
                           onClick={() => resetProject()}
                           title="Upload a new dataset file"
@@ -1323,6 +1211,93 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           <Upload style={{ width: 10, height: 10 }} />
                           <span>Upload new</span>
                         </button>
+
+                        {/* Segmented symbols: Workspace, Review/Preview, Reset Layout */}
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            background: 'rgba(0,0,0,0.25)',
+                            border: `1px solid ${BB.border}`,
+                            borderRadius: 6,
+                            padding: 2,
+                            gap: 2,
+                          }}
+                        >
+                          <button
+                            onClick={() => setActiveView('workspace')}
+                            aria-label="Workspace — 4-panel grid layout"
+                            title="Workspace (4-Panel layout)"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 24,
+                              height: 22,
+                              borderRadius: 4,
+                              border: 'none',
+                              background: BB.primary,
+                              color: BB.text,
+                              cursor: 'pointer',
+                              transition: 'all 150ms',
+                            }}
+                          >
+                            <Layers style={{ width: 12, height: 12 }} />
+                          </button>
+                          <button
+                            onClick={() => setActiveView('preview')}
+                            aria-label={`Preview Data — ${rowCount} rows`}
+                            title={`Preview Data (${rowCount} rows)`}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 24,
+                              height: 22,
+                              borderRadius: 4,
+                              border: 'none',
+                              background: 'transparent',
+                              color: BB.muted,
+                              cursor: 'pointer',
+                              transition: 'all 150ms',
+                            }}
+                          >
+                            <TableIcon style={{ width: 12, height: 12 }} />
+                          </button>
+                          <button
+                            onClick={() => { setSplitCol(50); setSplitRow(46); }}
+                            aria-label="Reset panel layout to 50/50"
+                            title="Reset panel layout to 50/50"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 24,
+                              height: 22,
+                              borderRadius: 4,
+                              border: 'none',
+                              background: 'transparent',
+                              color: BB.muted,
+                              cursor: 'pointer',
+                              transition: 'all 150ms',
+                            }}
+                          >
+                            <RotateCcw style={{ width: 11, height: 11 }} />
+                          </button>
+                        </div>
+
+                        {isAnalyzing && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: BB.muted }}>
+                            <Loader2 style={{ width: 10, height: 10, animation: 'spin 1s linear infinite' }} />
+                            <span>Analyzing…</span>
+                          </span>
+                        )}
+                        {analyzeError && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, color: BB.maroonLight }}>
+                            <AlertCircle style={{ width: 10, height: 10 }} />
+                            <span>{analyzeError}</span>
+                          </span>
+                        )}
                       </div>
 
                       <div
@@ -2256,6 +2231,26 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    onClick={() => setActiveView('workspace')}
+                    title="Return to 4-panel workspace"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '4px 10px',
+                      borderRadius: 5,
+                      border: `1px solid ${BB.border}`,
+                      background: BB.surface,
+                      color: BB.text,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Layers style={{ width: 12, height: 12 }} />
+                    <span>Workspace</span>
+                  </button>
                   <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                     <Search
                       style={{
