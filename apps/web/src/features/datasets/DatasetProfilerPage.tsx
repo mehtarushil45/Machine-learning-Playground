@@ -559,6 +559,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
   const abortRef = useRef<AbortController | null>(null);
   const lastEmittedConfigRef = useRef<ActiveTrainingConfiguration | null>(null);
+  const isInteractingWithSliderRef = useRef<boolean>(false);
+  const hasUserModifiedSplitRef = useRef<boolean>(false);
+  const pendingConfigRef = useRef<ActiveTrainingConfiguration | null>(null);
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ── Fetch Real Training Options from Backend API ───────────────── */
   useEffect(() => {
@@ -567,10 +571,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       .then((data) => {
         if (data && data.algorithms?.length > 0) {
           setTrainingOptions(data);
-          // Only apply backend defaults when no prior canonical config exists.
-          // If trainingConfig is set (e.g. user navigated back from Page 2),
+          // Only apply backend defaults when no prior canonical config exists and user has not interacted.
+          // If trainingConfig is set (e.g. user navigated back from Page 2) or user moved slider,
           // preserve the user-chosen values instead of overwriting.
-          if (!trainingConfig) {
+          if (!trainingConfig && !hasUserModifiedSplitRef.current) {
             if (data.default_cv_folds) setCvFolds(data.default_cv_folds);
             if (data.default_train_test_split) setTrainTestSplit(data.default_train_test_split);
           }
@@ -584,6 +588,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
               data.imputers.some((option) => option.key === current) ? current : data.imputers[0].key,
             );
           }
+          // Enforce bounds if backend returns min/max
+          const minSplit = data.min_train_test_split ?? 0.5;
+          const maxSplit = data.max_train_test_split ?? 0.95;
+          setTrainTestSplit((current) => Math.min(maxSplit, Math.max(minSplit, Math.round(current * 100) / 100)));
         }
       })
       .catch(() => {});
@@ -787,9 +795,21 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
   /* ── Live-sync: write canonical trainingConfig whenever local config changes ──────
    * Fires on every algorithm/scaler/imputer/split/cv change when prerequisites exist.
-   * This is the "Page 1 → canonical" direction.
-   * Page 2 reads trainingConfig directly from context (no duplication).
+   * Debounced (150ms when dragging slider, 50ms otherwise) to guarantee 60fps responsiveness
+   * and avoid saturated React re-renders during rapid slider movement.
    */
+  const flushConfigSync = useCallback(() => {
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
+    }
+    if (pendingConfigRef.current) {
+      lastEmittedConfigRef.current = pendingConfigRef.current;
+      setTrainingConfig(pendingConfigRef.current);
+      pendingConfigRef.current = null;
+    }
+  }, [setTrainingConfig]);
+
   useEffect(() => {
     if (!dataset || !selectedTarget || selectedFeatures.length === 0) return;
 
@@ -824,8 +844,24 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
           : 'default',
     };
 
-    lastEmittedConfigRef.current = nextConfig;
-    setTrainingConfig(nextConfig);
+    pendingConfigRef.current = nextConfig;
+
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+    }
+    const delay = isInteractingWithSliderRef.current ? 150 : 50;
+    syncTimeoutRef.current = setTimeout(() => {
+      lastEmittedConfigRef.current = nextConfig;
+      setTrainingConfig(nextConfig);
+      pendingConfigRef.current = null;
+      syncTimeoutRef.current = null;
+    }, delay);
+
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
   }, [
     dataset,
     selectedTarget,
@@ -845,15 +881,19 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   /* ── Back-navigation sync: when trainingConfig changes from outside (Page 2 edits)
    * update local state so Page 1 UI reflects the change.
    * If trainingConfig is the exact object reference Page 1 just emitted, skip back-sync.
+   * If user is currently dragging slider, do not interrupt interaction.
    */
   useEffect(() => {
     if (!trainingConfig) return;
     if (trainingConfig === lastEmittedConfigRef.current) return;
+    if (isInteractingWithSliderRef.current) return;
 
     if (trainingConfig.algorithm !== algorithm) setAlgorithm(trainingConfig.algorithm);
     if (trainingConfig.scaler !== scaler) setScaler(trainingConfig.scaler);
     if (trainingConfig.imputer !== imputer) setImputer(trainingConfig.imputer);
-    if (trainingConfig.train_test_split !== trainTestSplit) setTrainTestSplit(trainingConfig.train_test_split);
+    if (trainingConfig.train_test_split !== trainTestSplit) {
+      setTrainTestSplit(Math.round(trainingConfig.train_test_split * 100) / 100);
+    }
     if (trainingConfig.cv_folds !== cvFolds) setCvFolds(trainingConfig.cv_folds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trainingConfig]);
@@ -865,6 +905,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const effectiveImputer = trainingOptions.imputers.some((option) => option.key === imputer)
     ? imputer
     : trainingOptions.imputers[0]?.key || 'median';
+
+  const minSplit = trainingOptions.min_train_test_split ?? 0.5;
+  const maxSplit = trainingOptions.max_train_test_split ?? 0.95;
 
   /* ── Dynamic Dropdown Options from Backend ──────────────────────── */
   const algorithmSelectOptions = useMemo(() => {
@@ -960,7 +1003,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         selection_source: selectionSource,
       };
 
+      flushConfigSync();
       setTrainingConfig(activeConfig);
+      lastEmittedConfigRef.current = activeConfig;
 
       const payload: TrainingRequestPayload = {
         dataset_id: dataset.datasetId || `client-${dataset.fileName}`,
@@ -1763,6 +1808,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   style={{
                     flex: 1,
                     minWidth: 200,
+                    height: '100%',
+                    minHeight: 0,
                     background: BB.surface,
                     border: `1px solid ${BB.border}`,
                     borderRadius: '10px',
@@ -1781,12 +1828,23 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       letterSpacing: '0.08em',
                       textTransform: 'uppercase',
                       color: BB.muted,
+                      flexShrink: 0,
                     }}
                   >
                     Training setup
                   </span>
 
-                  <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div
+                    style={{
+                      overflowY: 'auto',
+                      flex: 1,
+                      minHeight: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      paddingRight: 2,
+                    }}
+                  >
                     {/* Evidence-Based Algorithm Recommendation Sub-Panel */}
                     <AlgorithmRecommendationPanel
                       dataset={dataset}
@@ -1911,6 +1969,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       <div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
                           <label
+                            htmlFor="dataset-split-slider"
                             style={{
                               fontSize: 9,
                               fontWeight: 700,
@@ -1928,31 +1987,82 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                             {(dataset?.rowCount || dataset?.rows?.length) ? ` (~${(dataset.rowCount || dataset.rows.length) - Math.round((dataset.rowCount || dataset.rows.length) * trainTestSplit)})` : ''}
                           </span>
                         </div>
-                        <input
-                          type="range"
-                          min={0.5}
-                          max={0.95}
-                          step={0.01}
-                          value={trainTestSplit}
-                          onChange={(e) => {
-                            const val = Math.round(parseFloat(e.target.value) * 100) / 100;
-                            setTrainTestSplit(val);
-                          }}
-                          style={{
-                            width: '100%',
-                            height: 6,
-                            borderRadius: 3,
-                            appearance: 'none',
-                            outline: 'none',
-                            cursor: 'pointer',
-                            accentColor: BB.maroonLight,
-                            background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${
-                              Math.max(0, Math.min(100, ((trainTestSplit - 0.5) / 0.45) * 100))
-                            }%, rgba(107,92,166,0.25) ${
-                              Math.max(0, Math.min(100, ((trainTestSplit - 0.5) / 0.45) * 100))
-                            }%, rgba(107,92,166,0.25) 100%)`,
-                          }}
-                        />
+                        {(() => {
+                          const trackPct = maxSplit > minSplit
+                            ? Math.max(0, Math.min(100, ((trainTestSplit - minSplit) / (maxSplit - minSplit)) * 100))
+                            : 50;
+                          return (
+                            <input
+                              id="dataset-split-slider"
+                              type="range"
+                              role="slider"
+                              aria-label="Train/Test Split Ratio"
+                              aria-valuemin={Math.round(minSplit * 100)}
+                              aria-valuemax={Math.round(maxSplit * 100)}
+                              aria-valuenow={Math.round(trainTestSplit * 100)}
+                              aria-valuetext={`${Math.round(trainTestSplit * 100)}% Train, ${Math.round((1 - trainTestSplit) * 100)}% Test`}
+                              tabIndex={0}
+                              min={minSplit}
+                              max={maxSplit}
+                              step={0.01}
+                              value={trainTestSplit}
+                              onPointerDown={() => {
+                                isInteractingWithSliderRef.current = true;
+                                hasUserModifiedSplitRef.current = true;
+                              }}
+                              onPointerUp={() => {
+                                isInteractingWithSliderRef.current = false;
+                                flushConfigSync();
+                              }}
+                              onBlur={() => {
+                                isInteractingWithSliderRef.current = false;
+                                flushConfigSync();
+                              }}
+                              onKeyDown={(e) => {
+                                hasUserModifiedSplitRef.current = true;
+                                let nextVal = trainTestSplit;
+                                if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+                                  e.preventDefault();
+                                  nextVal = Math.min(maxSplit, Math.round((trainTestSplit + 0.01) * 100) / 100);
+                                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+                                  e.preventDefault();
+                                  nextVal = Math.max(minSplit, Math.round((trainTestSplit - 0.01) * 100) / 100);
+                                } else if (e.key === 'PageUp') {
+                                  e.preventDefault();
+                                  nextVal = Math.min(maxSplit, Math.round((trainTestSplit + 0.05) * 100) / 100);
+                                } else if (e.key === 'PageDown') {
+                                  e.preventDefault();
+                                  nextVal = Math.max(minSplit, Math.round((trainTestSplit - 0.05) * 100) / 100);
+                                } else if (e.key === 'Home') {
+                                  e.preventDefault();
+                                  nextVal = minSplit;
+                                } else if (e.key === 'End') {
+                                  e.preventDefault();
+                                  nextVal = maxSplit;
+                                }
+                                if (nextVal !== trainTestSplit) {
+                                  setTrainTestSplit(nextVal);
+                                }
+                              }}
+                              onChange={(e) => {
+                                hasUserModifiedSplitRef.current = true;
+                                const raw = parseFloat(e.target.value);
+                                const val = Math.min(maxSplit, Math.max(minSplit, Math.round(raw * 100) / 100));
+                                setTrainTestSplit(val);
+                              }}
+                              style={{
+                                width: '100%',
+                                height: 6,
+                                borderRadius: 3,
+                                appearance: 'none',
+                                outline: 'none',
+                                cursor: 'pointer',
+                                accentColor: BB.maroonLight,
+                                background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${trackPct}%, rgba(107,92,166,0.25) ${trackPct}%, rgba(107,92,166,0.25) 100%)`,
+                              }}
+                            />
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -1974,6 +2084,17 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         <span>{launchError}</span>
                       </div>
                     )}
+
+                    {/* Active Training Job Live Telemetry Card INSIDE scrollable area */}
+                    {activeJob && (
+                      <div style={{ marginTop: 4, flexShrink: 0 }}>
+                        <TrainingJobCard
+                          job={activeJob}
+                          onJobUpdated={(updated) => setActiveJob(updated)}
+                          onJobRetried={(newJob) => setActiveJob(newJob)}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Sticky Launch Button */}
@@ -1985,6 +2106,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       padding: '9px 0',
                       borderRadius: '6px',
                       border: 'none',
+                      flexShrink: 0,
                       background:
                         isLaunching || !selectedTarget || selectedFeatures.length === 0
                           ? BB.disabled
@@ -2017,17 +2139,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       </>
                     )}
                   </button>
-
-                  {/* Active Training Job Live Telemetry Card */}
-                  {activeJob && (
-                    <div style={{ marginTop: 8 }}>
-                      <TrainingJobCard
-                        job={activeJob}
-                        onJobUpdated={(updated) => setActiveJob(updated)}
-                        onJobRetried={(newJob) => setActiveJob(newJob)}
-                      />
-                    </div>
-                  )}
                 </div>
               </div>
             </div>

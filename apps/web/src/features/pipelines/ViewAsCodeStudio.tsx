@@ -414,12 +414,15 @@ export function ViewAsCodeStudio({
   const [featureSearch, setFeatureSearch] = useState('');
 
   /* ── Derived: canonical config values ───────────────────────────────── */
-  const trainRatio         = trainingConfig?.train_test_split ?? 0.8;
-  const testRatio          = 1 - trainRatio;
+  const trainRatio         = Math.round((trainingConfig?.train_test_split ?? 0.8) * 100) / 100;
+  const testRatio          = Math.round((1 - trainRatio) * 100) / 100;
   const canonicalAlgorithm = trainingConfig?.algorithm ?? '';
   const canonicalScaler    = trainingConfig?.scaler    ?? '';
   const canonicalImputer   = trainingConfig?.imputer   ?? '';
   const canonicalCvFolds   = trainingConfig?.cv_folds  ?? 5;
+
+  const minSplit = trainingOptions.min_train_test_split ?? 0.5;
+  const maxSplit = trainingOptions.max_train_test_split ?? 0.95;
 
   /* ── Derived: dataset display info ─────────────────────────────────── */
   const activeDatasetName = useMemo(
@@ -443,9 +446,19 @@ export function ViewAsCodeStudio({
 
   /* ── Derived: algorithm list filtered to task-compatible options only ─ */
   const taskFilteredAlgorithms = useMemo(() => {
-    if (!inferredTaskType) return trainingOptions.algorithms;
-    return trainingOptions.algorithms.filter((a) => a.task_type === inferredTaskType);
-  }, [trainingOptions.algorithms, inferredTaskType]);
+    let algos = trainingOptions.algorithms;
+    if (inferredTaskType) {
+      algos = algos.filter((a) => a.task_type === inferredTaskType);
+    }
+    // If canonicalAlgorithm exists but isn't in taskFilteredAlgorithms, ensure it's still selectable
+    if (canonicalAlgorithm && !algos.some((a) => a.key === canonicalAlgorithm)) {
+      const match = trainingOptions.algorithms.find((a) => a.key === canonicalAlgorithm);
+      if (match) {
+        algos = [match, ...algos];
+      }
+    }
+    return algos;
+  }, [trainingOptions.algorithms, inferredTaskType, canonicalAlgorithm]);
 
   /* ── Pipeline validation guard (pre-generation) ─────────────────────── */
   const validationErrors = useMemo<string[]>(() => {
@@ -503,9 +516,12 @@ export function ViewAsCodeStudio({
   const handleSplitChange = useCallback(
     (newTrainRatio: number) => {
       if (!trainingConfig) return;
-      setTrainingConfig({ ...trainingConfig, train_test_split: newTrainRatio });
+      const minS = trainingOptions.min_train_test_split ?? 0.5;
+      const maxS = trainingOptions.max_train_test_split ?? 0.95;
+      const rounded = Math.min(maxS, Math.max(minS, Math.round(newTrainRatio * 100) / 100));
+      setTrainingConfig({ ...trainingConfig, train_test_split: rounded });
     },
-    [trainingConfig, setTrainingConfig],
+    [trainingConfig, setTrainingConfig, trainingOptions.min_train_test_split, trainingOptions.max_train_test_split],
   );
 
   const handleCvFoldsChange = useCallback(
@@ -599,7 +615,10 @@ export function ViewAsCodeStudio({
   ]);
 
   useEffect(() => {
-    generatePipelineCode();
+    const timer = setTimeout(() => {
+      generatePipelineCode();
+    }, 250);
+    return () => clearTimeout(timer);
   }, [generatePipelineCode, refreshTrigger]);
 
   /* ── Copy code to clipboard ─────────────────────────────────────────── */
@@ -1070,8 +1089,11 @@ export function ViewAsCodeStudio({
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
+            height: '100%',
+            minHeight: 0,
             overflowY: 'auto',
             paddingRight: 4,
+            boxSizing: 'border-box',
           }}
         >
           {/* Active Training Job Live Telemetry Card */}
@@ -1435,15 +1457,15 @@ export function ViewAsCodeStudio({
               </div>
               <input
                 type="range"
-                min={trainingOptions.min_train_test_split ?? 0.5}
-                max={trainingOptions.max_train_test_split ?? 0.95}
-                step={0.05}
+                min={minSplit}
+                max={maxSplit}
+                step={0.01}
                 value={trainRatio}
                 onChange={(e) => handleSplitChange(parseFloat(e.target.value))}
                 disabled={!trainingConfig}
                 aria-label={`Train/test split: ${Math.round(trainRatio * 100)}% train`}
-                aria-valuemin={50}
-                aria-valuemax={95}
+                aria-valuemin={Math.round(minSplit * 100)}
+                aria-valuemax={Math.round(maxSplit * 100)}
                 aria-valuenow={Math.round(trainRatio * 100)}
                 style={{
                   width: '100%',
@@ -1454,9 +1476,9 @@ export function ViewAsCodeStudio({
                   accentColor: BB.maroonLight,
                   cursor: trainingConfig ? 'pointer' : 'not-allowed',
                   background: `linear-gradient(to right, ${BB.maroon} 0%, ${BB.maroon} ${
-                    Math.max(0, Math.min(100, ((trainRatio - 0.5) / 0.45) * 100))
+                    maxSplit > minSplit ? Math.max(0, Math.min(100, ((trainRatio - minSplit) / (maxSplit - minSplit)) * 100)) : 50
                   }%, rgba(107,92,166,0.25) ${
-                    Math.max(0, Math.min(100, ((trainRatio - 0.5) / 0.45) * 100))
+                    maxSplit > minSplit ? Math.max(0, Math.min(100, ((trainRatio - minSplit) / (maxSplit - minSplit)) * 100)) : 50
                   }%, rgba(107,92,166,0.25) 100%)`,
                 }}
               />
@@ -1885,15 +1907,15 @@ export function ViewAsCodeStudio({
             </div>
           )}
         </div>
-      </div>
 
-      {/* AI Copilot Drawer */}
-      <AICopilotDrawer
-        isOpen={isCopilotOpen}
-        onToggle={onToggleCopilot || (() => {})}
-        messages={copilotMessages}
-        placeholder="Ask about this pipeline configuration…"
-      />
+        {/* AI Copilot Drawer docked on the right side of the workspace */}
+        <AICopilotDrawer
+          isOpen={isCopilotOpen}
+          onToggle={onToggleCopilot || (() => {})}
+          messages={copilotMessages}
+          placeholder="Ask about this pipeline configuration…"
+        />
+      </div>
     </div>
   );
 }

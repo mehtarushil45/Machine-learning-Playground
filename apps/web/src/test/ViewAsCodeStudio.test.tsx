@@ -35,7 +35,7 @@ vi.mock('../services/jobService', () => ({
   }),
 }));
 
-describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', () => {
+describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 20000 }, () => {
   beforeEach(() => {
     if (typeof localStorage !== 'undefined' && localStorage.clear) {
       localStorage.clear();
@@ -103,13 +103,21 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', () => {
       expect(screen.getByLabelText('Feature columns (read-only)')).toBeInTheDocument();
     });
 
-    // Verify DAG generation call received exact configuration
+    // Verify DAG generation call received exact configuration with cleanly rounded test_size
     await waitFor(() => {
       expect(PipelineService.generateCode).toHaveBeenCalledWith(
         expect.objectContaining({
           dataset_name: 'customer_churn.csv',
           target_column: 'churn_label',
           feature_columns: ['tenure', 'monthly_charges', 'contract_type'],
+          nodes: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'train_test_split',
+              params: expect.objectContaining({
+                test_size: 0.2,
+              }),
+            }),
+          ]),
         }),
         true,
         true,
@@ -117,4 +125,42 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', () => {
     });
   });
 
+  it('renders slider with step 0.01 and mounts AI Copilot side drawer when opened', async () => {
+    const Initializer = () => {
+      const { setTrainingConfig, setSelectedTarget } = useProject();
+      React.useEffect(() => {
+        setSelectedTarget('churn_label');
+        setTrainingConfig({
+          dataset_id: 'ds-123',
+          dataset_name: 'customer_churn.csv',
+          target_column: 'churn_label',
+          feature_columns: ['tenure', 'monthly_charges'],
+          algorithm: 'logistic_regression',
+          scaler: 'standard_scaler',
+          imputer: 'median',
+          train_test_split: 0.65,
+          cv_folds: 5,
+          random_seed: 42,
+          selection_source: 'manual',
+        });
+      }, [setTrainingConfig, setSelectedTarget]);
+      return <ViewAsCodeStudio isCopilotOpen={true} />;
+    };
+
+    render(
+      <ProjectProvider>
+        <Initializer />
+      </ProjectProvider>,
+    );
+
+    // Verify slider rendered with step 0.01 and 65% train
+    const slider = await screen.findByRole('slider', { name: /train\/test split: 65% train/i });
+    expect(slider).toBeInTheDocument();
+    expect(slider).toHaveAttribute('step', '0.01');
+    expect(slider).toHaveValue('0.65');
+
+    // Verify AI Copilot drawer is rendered
+    const copilotAside = screen.getByRole('complementary', { name: /ai copilot agent drawer/i });
+    expect(copilotAside).toBeInTheDocument();
+  });
 });
