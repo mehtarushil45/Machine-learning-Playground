@@ -59,16 +59,19 @@ type StudioTab = 'code' | 'dag';
 
 /* ── Simple Fast Python Syntax Highlighter Tokenizer ─────────────────── */
 function highlightPythonLine(line: string) {
-  const commentIdx = line.indexOf('#');
-  let codePart = line;
+  const cleanLine = line.replace(/\r$/, '');
+  if (!cleanLine.trim()) return null;
+
+  const commentIdx = cleanLine.indexOf('#');
+  let codePart = cleanLine;
   let commentPart = '';
   if (commentIdx !== -1) {
-    codePart = line.substring(0, commentIdx);
-    commentPart = line.substring(commentIdx);
+    codePart = cleanLine.substring(0, commentIdx);
+    commentPart = cleanLine.substring(commentIdx);
   }
 
   const tokenRegex =
-    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:import|from|as|def|return|class|if|else|elif|try|except|with|in|for|while|pass|break|continue|lambda|yield|None|True|False|and|or|not|is)\b|\b(?:Pipeline|StandardScaler|MinMaxScaler|RobustScaler|SimpleImputer|train_test_split|mean_squared_error|mean_absolute_error|r2_score|accuracy_score|f1_score|fit|predict|transform|score|print|len|range)\b|\b\d+(?:\.\d+)?\b|[=()[\],:{}+*/-])/g;
+    /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:import|from|as|def|return|class|if|else|elif|try|except|with|in|for|while|pass|break|continue|lambda|yield|None|True|False|and|or|not|is)\b|\b(?:Pipeline|ColumnTransformer|StandardScaler|MinMaxScaler|RobustScaler|SimpleImputer|KNNImputer|train_test_split|mean_squared_error|mean_absolute_error|r2_score|accuracy_score|classification_report|f1_score|RandomForestClassifier|LogisticRegression|DecisionTreeClassifier|XGBClassifier|LGBMClassifier|LinearRegression|RandomForestRegressor|DecisionTreeRegressor|SVC|SVR|KNeighborsClassifier|KNeighborsRegressor|GaussianNB|Ridge|Lasso|joblib|fit|predict|transform|score|print|len|range)\b|\b\d+(?:\.\d+)?\b|[=()[\],:{}+*/-])/g;
 
   const parts: { text: string; type: string }[] = [];
   let lastIndex = 0;
@@ -85,7 +88,7 @@ function highlightPythonLine(line: string) {
       type = 'string';
     } else if (/^(import|from|as|def|return|class|if|else|elif|try|except|with|in|for|while|pass|break|continue|lambda|yield|None|True|False|and|or|not|is)$/.test(token)) {
       type = 'keyword';
-    } else if (/^(Pipeline|StandardScaler|MinMaxScaler|RobustScaler|SimpleImputer|train_test_split|mean_squared_error|mean_absolute_error|r2_score|accuracy_score|f1_score|fit|predict|transform|score|print|len|range)$/.test(token)) {
+    } else if (/^(Pipeline|ColumnTransformer|StandardScaler|MinMaxScaler|RobustScaler|SimpleImputer|KNNImputer|train_test_split|mean_squared_error|mean_absolute_error|r2_score|accuracy_score|classification_report|f1_score|RandomForestClassifier|LogisticRegression|DecisionTreeClassifier|XGBClassifier|LGBMClassifier|LinearRegression|RandomForestRegressor|DecisionTreeRegressor|SVC|SVR|KNeighborsClassifier|KNeighborsRegressor|GaussianNB|Ridge|Lasso|joblib|fit|predict|transform|score|print|len|range)$/.test(token)) {
       type = 'builtin';
     } else if (/^\d+(?:\.\d+)?$/.test(token)) {
       type = 'number';
@@ -104,21 +107,21 @@ function highlightPythonLine(line: string) {
   return (
     <>
       {parts.map((p, i) => {
-        let color = '#E2E8F0';
+        let color = '#F5F1EC';
         let fontWeight = 400;
 
         if (p.type === 'keyword') {
-          color = '#C792EA';
+          color = '#D47AFF';
           fontWeight = 600;
         } else if (p.type === 'builtin') {
-          color = '#82AAFF';
+          color = '#6EE7B7';
           fontWeight = 600;
         } else if (p.type === 'string') {
-          color = '#C3E88D';
+          color = '#FDE047';
         } else if (p.type === 'number') {
-          color = '#F78C6C';
+          color = '#FB923C';
         } else if (p.type === 'operator') {
-          color = '#89DDFF';
+          color = '#93C5FD';
         }
 
         return (
@@ -128,7 +131,7 @@ function highlightPythonLine(line: string) {
         );
       })}
       {commentPart && (
-        <span style={{ color: '#697098', fontStyle: 'italic' }}>{commentPart}</span>
+        <span style={{ color: '#9D94BA', fontStyle: 'italic' }}>{commentPart}</span>
       )}
     </>
   );
@@ -644,7 +647,7 @@ export function ViewAsCodeStudio({
   /* ── Code Lines for Editor View ─────────────────────────────────────── */
   const codeLines = useMemo(() => {
     if (!generatedCode) return [];
-    return generatedCode.split('\n');
+    return generatedCode.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   }, [generatedCode]);
 
   /* ── AI Copilot messages ─────────────────────────────────────────────── */
@@ -1176,27 +1179,37 @@ export function ViewAsCodeStudio({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#FF4D6D' }} />
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F5A623' }} />
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00F5A0' }} />
-                  </div>
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
-                      padding: '2px 8px',
-                      borderRadius: 4,
+                      padding: '3px 10px',
+                      borderRadius: 5,
                       background: 'rgba(201, 162, 75, 0.12)',
-                      border: `1px solid rgba(201, 162, 75, 0.25)`,
+                      border: '1px solid rgba(201, 162, 75, 0.28)',
                     }}
                   >
-                    <FileCode style={{ width: 12, height: 12, color: BB.gold }} />
-                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: BB.gold }}>
+                    <FileCode style={{ width: 13, height: 13, color: BB.gold }} />
+                    <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: BB.gold }}>
                       pipeline_generated.py
                     </span>
                   </div>
+                  {generatedCode && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontFamily: 'var(--font-mono)',
+                        color: BB.muted,
+                        background: 'rgba(107, 92, 166, 0.15)',
+                        padding: '2px 7px',
+                        borderRadius: 4,
+                        border: `1px solid ${BB.border}`,
+                      }}
+                    >
+                      {codeLines.length} lines
+                    </span>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -1422,48 +1435,108 @@ export function ViewAsCodeStudio({
                   </div>
                 )}
 
-                {/* Synthesized Python Code with Line Numbers & Syntax Highlighting */}
+                {/* Synthesized Python Code with Unified Row Architecture */}
                 {!isGenerating && !generationError && !authError && generatedCode && (
-                  <div style={{ display: 'flex', minHeight: '100%', fontFamily: 'var(--font-mono)', fontSize: 11, lineHeight: 1.6 }}>
-                    {/* Line Numbers Gutter */}
-                    <div
-                      style={{
-                        userSelect: 'none',
-                        padding: '12px 10px',
-                        textAlign: 'right',
-                        color: '#433B62',
-                        background: 'rgba(0,0,0,0.25)',
-                        borderRight: `1px solid ${BB.border}`,
-                        minWidth: 42,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {codeLines.map((_, i) => (
-                        <div key={i}>{i + 1}</div>
-                      ))}
-                    </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      minWidth: '100%',
+                      width: 'max-content',
+                      padding: '10px 0',
+                      fontFamily: 'var(--font-mono)',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    {codeLines.map((line, idx) => {
+                      const renderedContent = highlightPythonLine(line);
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            minHeight: 22,
+                            lineHeight: '22px',
+                            fontSize: 12.5,
+                            transition: 'background 80ms ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'rgba(107, 92, 166, 0.09)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          {/* Unified Line Number Gutter */}
+                          <div
+                            style={{
+                              width: 52,
+                              minWidth: 52,
+                              userSelect: 'none',
+                              textAlign: 'right',
+                              paddingRight: 16,
+                              color: '#766D94',
+                              fontSize: 11,
+                              fontFamily: 'var(--font-mono)',
+                              borderRight: `1px solid ${BB.border}`,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {idx + 1}
+                          </div>
 
-                    {/* Syntax Highlighted Lines */}
-                    <pre
-                      style={{
-                        margin: 0,
-                        padding: '12px 16px',
-                        flex: 1,
-                        overflowX: 'auto',
-                        overflowY: 'hidden',
-                        whiteSpace: 'pre',
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      <code>
-                        {codeLines.map((line, idx) => (
-                          <div key={idx}>{highlightPythonLine(line)}</div>
-                        ))}
-                      </code>
-                    </pre>
+                          {/* Code Content */}
+                          <div
+                            style={{
+                              flex: 1,
+                              paddingLeft: 16,
+                              paddingRight: 24,
+                              whiteSpace: 'pre',
+                              color: '#F5F1EC',
+                            }}
+                          >
+                            {renderedContent ?? '\u00A0'}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
+
+              {/* Integrated IDE Status Bar */}
+              {generatedCode && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '4px 14px',
+                    background: BB.elevated,
+                    borderTop: `1px solid ${BB.border}`,
+                    fontSize: 10.5,
+                    color: BB.muted,
+                    fontFamily: 'var(--font-mono)',
+                    flexShrink: 0,
+                    userSelect: 'none',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: BB.success }} />
+                      <span>Python 3.10</span>
+                    </span>
+                    <span>UTF-8</span>
+                    <span>Spaces: 4</span>
+                    <span>scikit-learn 1.4</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <span>{codeLines.length} lines</span>
+                    <span style={{ color: BB.gold, fontWeight: 600 }}>Standalone Pipeline</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1492,27 +1565,35 @@ export function ViewAsCodeStudio({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#FF4D6D' }} />
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#F5A623' }} />
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00F5A0' }} />
-                  </div>
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
-                      padding: '2px 8px',
-                      borderRadius: 4,
-                      background: 'rgba(107,92,166,0.12)',
+                      padding: '3px 10px',
+                      borderRadius: 5,
+                      background: 'rgba(107,92,166,0.14)',
                       border: `1px solid ${BB.border}`,
                     }}
                   >
-                    <GitBranch style={{ width: 12, height: 12, color: BB.primaryLight }} />
-                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: BB.primaryLight }}>
+                    <GitBranch style={{ width: 13, height: 13, color: BB.primaryLight }} />
+                    <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: BB.text }}>
                       pipeline_dag.svg
                     </span>
                   </div>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontFamily: 'var(--font-mono)',
+                      color: BB.muted,
+                      background: 'rgba(107, 92, 166, 0.15)',
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      border: `1px solid ${BB.border}`,
+                    }}
+                  >
+                    5 stages
+                  </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   {/* Symbol Switchers: Python Script & Visual DAG Flow */}
