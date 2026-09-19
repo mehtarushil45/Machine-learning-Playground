@@ -91,17 +91,13 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
       </ProjectProvider>,
     );
 
-    // Target and feature columns are now read-only display divs (not inputs).
-    // They are accessible via aria-label.
-    await waitFor(() => {
-      const targetDiv = screen.getByLabelText('Target column (read-only)');
-      expect(targetDiv).toHaveTextContent('churn_label');
-    });
+    // Verify Pipeline Summary, Pipeline Steps, and Technical Details are removed from Page 2
+    expect(screen.queryByText(/Pipeline Summary/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Pipeline Steps/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Technical Details/i)).not.toBeInTheDocument();
 
-    // Feature columns strip shows badges for up to 6 features
-    await waitFor(() => {
-      expect(screen.getByLabelText('Feature columns (read-only)')).toBeInTheDocument();
-    });
+    // Verify code lines count badge is removed from Page 2 (Task 2)
+    expect(screen.queryByText(/lines/i)).not.toBeInTheDocument();
 
     // Verify DAG generation call received exact configuration with cleanly rounded test_size
     await waitFor(() => {
@@ -125,7 +121,7 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
     });
   });
 
-  it('renders slider with step 0.01 and mounts AI Copilot side drawer when opened', async () => {
+  it('renders full-width studio workspace and mounts AI Copilot side drawer when opened', async () => {
     const Initializer = () => {
       const { setTrainingConfig, setSelectedTarget } = useProject();
       React.useEffect(() => {
@@ -153,15 +149,9 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
       </ProjectProvider>,
     );
 
-    // Expand Technical Details to access the train/test split slider
-    const techDetailsBtn = await screen.findByRole('button', { name: /technical details/i });
-    fireEvent.click(techDetailsBtn);
-
-    // Verify slider rendered with step 0.01 and 65% train
-    const slider = await screen.findByRole('slider', { name: /train\/test split: 65% train/i });
-    expect(slider).toBeInTheDocument();
-    expect(slider).toHaveAttribute('step', '0.01');
-    expect(slider).toHaveValue('0.65');
+    // Verify full-width editor renders code without technical details sidebar
+    expect(screen.queryByRole('button', { name: /technical details/i })).not.toBeInTheDocument();
+    expect(screen.getByText('pipeline_generated.py')).toBeInTheDocument();
 
     // Verify AI Copilot drawer is rendered
     const copilotAside = screen.getByRole('complementary', { name: /ai copilot agent drawer/i });

@@ -15,7 +15,6 @@ import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider } from './providers/AuthContext';
 import { ProjectProvider, useProject, type LifecycleStage } from './providers/ProjectContext';
 import { Toast } from './components/ui/Toast';
-import { useLatestModel } from './hooks/useLatestModel';
 import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
@@ -57,7 +56,6 @@ const BB = {
 } as const;
 
 function AppContent() {
-  const latestModel = useLatestModel();
   const { setLifecycleStage, activeJob } = useProject();
 
   const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
@@ -339,43 +337,8 @@ function AppContent() {
             </span>
           </div>
 
-          {/* Header Right: Active Model Pill + A4 AI Copilot Symbol */}
+          {/* Header Right: AI Copilot Symbol */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-            {/* Latest model pill */}
-            {latestModel.hasModel && latestModel.displayText ? (
-              <button
-                onClick={() => latestModel.refetch()}
-                title={`Active model: ${latestModel.displayText} — click to refresh`}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  padding: '4px 10px',
-                  background: 'transparent',
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: '6px',
-                  color: BB.muted,
-                  fontFamily: 'var(--font-ui)',
-                  fontSize: 11,
-                  cursor: 'pointer',
-                  transition: 'all 150ms',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = BB.primaryLight;
-                  e.currentTarget.style.color = BB.text;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = BB.border;
-                  e.currentTarget.style.color = BB.muted;
-                }}
-              >
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ background: BB.gold, boxShadow: `0 0 6px ${BB.gold}99`, flexShrink: 0 }}
-                />
-                <span>{latestModel.displayText}</span>
-              </button>
-            ) : null}
 
             {/* A4: AI Copilot on top of right side — Symbol only */}
             <button

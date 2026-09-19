@@ -539,6 +539,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const [cvFolds, setCvFolds] = useState<number>(
     () => trainingConfig?.cv_folds ?? 5,
   );
+  const [randomSeed, setRandomSeed] = useState<number>(
+    () => trainingConfig?.random_seed ?? 42,
+  );
   const [trainTestSplit, setTrainTestSplit] = useState<number>(
     () => trainingConfig?.train_test_split ?? 0.8,  // TRAIN RATIO: 0.8 = 80% train
   );
@@ -835,7 +838,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       imputer: imputerToUse,
       train_test_split: trainTestSplit,  // TRAIN RATIO: 0.8 = 80% train
       cv_folds: cvFolds,
-      random_seed: 42,
+      random_seed: randomSeed,
       recommendation_job_id: recommendationProvenance.recommendationJobId,
       selection_source:
         recommendationProvenance.isRecommended &&
@@ -873,6 +876,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     imputer,
     trainTestSplit,
     cvFolds,
+    randomSeed,
     taskAlgorithms,
     trainingOptions.scalers,
     trainingOptions.imputers,
@@ -897,6 +901,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       setTrainTestSplit(Math.round(trainingConfig.train_test_split * 100) / 100);
     }
     if (trainingConfig.cv_folds !== cvFolds) setCvFolds(trainingConfig.cv_folds);
+    if (trainingConfig.random_seed !== undefined && trainingConfig.random_seed !== randomSeed) {
+      setRandomSeed(trainingConfig.random_seed);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trainingConfig]);
 
@@ -1000,7 +1007,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         imputer: launchImputer,
         train_test_split: trainTestSplit,
         cv_folds: cvFolds,
-        random_seed: 42,
+        random_seed: randomSeed,
         recommendation_job_id: recommendationJobId,
         selection_source: selectionSource,
       };
@@ -1017,7 +1024,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         scaler: launchScaler,
         imputer: launchImputer,
         train_test_split: trainTestSplit,
-        random_seed: 42,
+        random_seed: randomSeed,
         cross_validation: cvFolds,
         normalization: true,
         feature_selection: 'all',
@@ -1953,10 +1960,10 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       </div>
                     </div>)}
 
-                    {/* CV Folds — hidden until Advanced opened */}
+                    {/* CV Folds & Random Seed — hidden until Advanced opened */}
                     {showAdvanced && (
-                    <div>
-                      <div style={{ flex: '0 0 70px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div>
                         <label
                           style={{
                             display: 'block',
@@ -1976,6 +1983,41 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           max={20}
                           value={cvFolds}
                           onChange={(e) => setCvFolds(parseInt(e.target.value) || 5)}
+                          aria-label="Cross-validation folds"
+                          style={{
+                            width: '100%',
+                            padding: '5px 6px',
+                            borderRadius: 6,
+                            border: `1px solid ${BB.border}`,
+                            background: BB.elevated,
+                            color: BB.text,
+                            fontSize: 10,
+                            fontFamily: 'var(--font-mono)',
+                            outline: 'none',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label
+                          style={{
+                            display: 'block',
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: BB.disabled,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.08em',
+                            marginBottom: 3,
+                          }}
+                        >
+                          Random Seed
+                        </label>
+                        <input
+                          type="number"
+                          value={randomSeed}
+                          onChange={(e) => setRandomSeed(parseInt(e.target.value) || 0)}
+                          aria-label="Random seed"
+                          placeholder="42"
                           style={{
                             width: '100%',
                             padding: '5px 6px',
@@ -2153,6 +2195,11 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           <span>
                             <span style={{ color: BB.disabled }}>Split: </span>
                             <span style={{ color: BB.text, fontWeight: 700 }}>{Math.round(trainTestSplit * 100)}% / {Math.round((1 - trainTestSplit) * 100)}%</span>
+                          </span>
+                          <span style={{ color: BB.border }}>·</span>
+                          <span>
+                            <span style={{ color: BB.disabled }}>Seed: </span>
+                            <span style={{ color: BB.gold, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{randomSeed}</span>
                           </span>
                         </div>
                       </div>
