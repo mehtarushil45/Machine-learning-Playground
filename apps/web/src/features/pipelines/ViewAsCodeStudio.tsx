@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   FileCode,
   Copy,
@@ -10,6 +10,12 @@ import {
   Download,
   GitBranch,
   Workflow,
+  ChevronRight,
+  ChevronDown,
+  Trash2,
+  Plus,
+  FileDiff,
+  FolderOpen,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG } from '../../services/api';
@@ -339,6 +345,360 @@ function PipelineDAGGraph({
   );
 }
 
+/* ── Experiment File Explorer ─────────────────────────────────────────── */
+interface ExperimentExplorerProps {
+  csvName: string;
+  files: { name: string; code: string }[];
+  activeFile: string;
+  diffSlot1: string | null;
+  diffSlot2: string | null;
+  onSelectFile: (name: string) => void;
+  onNewFile: () => void;
+  onDeleteFile: (name: string) => void;
+  onSetDiffSlot: (slot: 1 | 2, name: string | null) => void;
+  onCompare: () => void;
+  diffMode: boolean;
+}
+
+function ExperimentExplorer({
+  csvName,
+  files,
+  activeFile,
+  diffSlot1,
+  diffSlot2,
+  onSelectFile,
+  onNewFile,
+  onDeleteFile,
+  onSetDiffSlot,
+  onCompare,
+  diffMode,
+}: ExperimentExplorerProps) {
+  const [folderOpen, setFolderOpen] = useState(true);
+  const [hoveredFile, setHoveredFile] = useState<string | null>(null);
+
+  const shortCsv = csvName.length > 22 ? csvName.slice(0, 20) + '…' : csvName;
+
+  return (
+    <div
+      style={{
+        width: 230,
+        minWidth: 230,
+        flexShrink: 0,
+        background: BB.surfaceSubtle,
+        borderRight: `1px solid ${BB.border}`,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        userSelect: 'none',
+      }}
+    >
+      {/* Explorer Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 10px 6px',
+          borderBottom: `1px solid ${BB.border}`,
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: BB.muted, letterSpacing: '0.08em' }}>EXPERIMENTS</span>
+        <button
+          onClick={onNewFile}
+          title="New pipeline file"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 20,
+            height: 20,
+            borderRadius: 4,
+            border: `1px solid ${BB.border}`,
+            background: 'transparent',
+            color: BB.muted,
+            cursor: 'pointer',
+            transition: 'all 120ms',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(107,92,166,0.18)';
+            e.currentTarget.style.color = BB.text;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = BB.muted;
+          }}
+        >
+          <Plus style={{ width: 11, height: 11 }} />
+        </button>
+      </div>
+
+      {/* File Tree */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+        {/* CSV Folder Row */}
+        <div
+          onClick={() => setFolderOpen((o) => !o)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '4px 10px',
+            cursor: 'pointer',
+            color: BB.gold,
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {folderOpen
+            ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
+            : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
+          <FolderOpen style={{ width: 13, height: 13, flexShrink: 0 }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>
+            {shortCsv}
+          </span>
+        </div>
+
+        {/* File Rows */}
+        {folderOpen && files.map((f) => {
+          const isActive = f.name === activeFile;
+          const isHovered = hoveredFile === f.name;
+          const isDiff1 = diffSlot1 === f.name;
+          const isDiff2 = diffSlot2 === f.name;
+          return (
+            <div
+              key={f.name}
+              onClick={() => onSelectFile(f.name)}
+              onMouseEnter={() => setHoveredFile(f.name)}
+              onMouseLeave={() => setHoveredFile(null)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px 4px 26px',
+                cursor: 'pointer',
+                background: isActive ? 'rgba(107,92,166,0.14)' : isHovered ? 'rgba(107,92,166,0.07)' : 'transparent',
+                borderLeft: isActive ? `2px solid ${BB.primaryLight}` : '2px solid transparent',
+                transition: 'all 80ms',
+                position: 'relative',
+              }}
+            >
+              <FileCode style={{ width: 12, height: 12, color: isActive ? BB.gold : BB.muted, flexShrink: 0 }} />
+              <span
+                style={{
+                  fontSize: 11,
+                  color: isActive ? BB.text : BB.muted,
+                  fontFamily: 'var(--font-mono)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                  fontWeight: isActive ? 600 : 400,
+                }}
+              >
+                {f.name}
+              </span>
+
+              {/* Diff slot indicators */}
+              {isDiff1 && (
+                <span style={{ fontSize: 8, color: BB.primaryLight, fontWeight: 700, background: 'rgba(107,92,166,0.2)', padding: '1px 4px', borderRadius: 3 }}>A</span>
+              )}
+              {isDiff2 && (
+                <span style={{ fontSize: 8, color: BB.gold, fontWeight: 700, background: 'rgba(201,162,75,0.18)', padding: '1px 4px', borderRadius: 3 }}>B</span>
+              )}
+
+              {/* Delete button on hover */}
+              {isHovered && !isActive && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onDeleteFile(f.name); }}
+                  title="Remove file"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    background: 'transparent',
+                    border: 'none',
+                    color: BB.muted,
+                    cursor: 'pointer',
+                    padding: 2,
+                    borderRadius: 3,
+                    flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = BB.error; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
+                >
+                  <Trash2 style={{ width: 10, height: 10 }} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Empty drop hint when no files */}
+        {folderOpen && files.length === 0 && (
+          <div style={{ padding: '10px 26px', fontSize: 10, color: BB.disabled, fontStyle: 'italic' }}>
+            No files yet. Click + to generate.
+          </div>
+        )}
+      </div>
+
+      {/* Diff Compare Dock */}
+      <div
+        style={{
+          borderTop: `1px solid ${BB.border}`,
+          padding: '8px 10px',
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 9.5, fontWeight: 700, color: BB.muted, letterSpacing: '0.08em' }}>DIFF COMPARE</span>
+          <FileDiff style={{ width: 11, height: 11, color: BB.muted }} />
+        </div>
+        <div style={{ display: 'flex', gap: 5 }}>
+          {/* Slot A */}
+          <div
+            onClick={() => { if (diffSlot1) onSetDiffSlot(1, null); }}
+            style={{
+              flex: 1,
+              padding: '4px 6px',
+              borderRadius: 4,
+              border: `1px solid ${diffSlot1 ? BB.primaryLight : BB.border}`,
+              background: diffSlot1 ? 'rgba(107,92,166,0.14)' : 'transparent',
+              cursor: diffSlot1 ? 'pointer' : 'default',
+              minWidth: 0,
+            }}
+            title={diffSlot1 ? `Slot A: ${diffSlot1} (click to clear)` : 'Right-click a file to set Slot A'}
+          >
+            <div style={{ fontSize: 8, color: BB.primaryLight, fontWeight: 700, letterSpacing: '0.06em' }}>A</div>
+            <div style={{ fontSize: 9, color: diffSlot1 ? BB.text : BB.disabled, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {diffSlot1 ? diffSlot1.replace('.py', '') : '—'}
+            </div>
+          </div>
+          {/* Slot B */}
+          <div
+            onClick={() => { if (diffSlot2) onSetDiffSlot(2, null); }}
+            style={{
+              flex: 1,
+              padding: '4px 6px',
+              borderRadius: 4,
+              border: `1px dashed ${diffSlot2 ? BB.gold : BB.border}`,
+              background: diffSlot2 ? 'rgba(201,162,75,0.10)' : 'transparent',
+              cursor: diffSlot2 ? 'pointer' : 'default',
+              minWidth: 0,
+            }}
+            title={diffSlot2 ? `Slot B: ${diffSlot2} (click to clear)` : 'Right-click a file to set Slot B'}
+          >
+            <div style={{ fontSize: 8, color: BB.gold, fontWeight: 700, letterSpacing: '0.06em' }}>B</div>
+            <div style={{ fontSize: 9, color: diffSlot2 ? BB.text : BB.disabled, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {diffSlot2 ? diffSlot2.replace('.py', '') : '—'}
+            </div>
+          </div>
+        </div>
+        {/* Compare button — only shown when both slots filled */}
+        {diffSlot1 && diffSlot2 && (
+          <button
+            onClick={onCompare}
+            style={{
+              width: '100%',
+              padding: '5px 0',
+              borderRadius: 5,
+              border: `1px solid ${diffMode ? BB.gold : BB.border}`,
+              background: diffMode ? 'rgba(201,162,75,0.18)' : 'rgba(107,92,166,0.12)',
+              color: diffMode ? BB.gold : BB.text,
+              fontSize: 10,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 120ms',
+              letterSpacing: '0.04em',
+            }}
+          >
+            {diffMode ? '✕ Close Diff' : 'Compare →'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Side-by-Side Code Diff View ─────────────────────────────────────── */
+interface CodeDiffViewProps {
+  nameA: string;
+  nameB: string;
+  codeA: string;
+  codeB: string;
+}
+
+function CodeDiffView({ nameA, nameB, codeA, codeB }: CodeDiffViewProps) {
+  const linesA = codeA.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const linesB = codeB.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const maxLen = Math.max(linesA.length, linesB.length);
+
+  const renderDiffCol = (lines: string[], otherLines: string[], name: string, accentColor: string) => (
+    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Column header */}
+      <div
+        style={{
+          padding: '6px 14px',
+          background: BB.elevated,
+          borderBottom: `1px solid ${BB.border}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexShrink: 0,
+        }}
+      >
+        <FileCode style={{ width: 12, height: 12, color: accentColor }} />
+        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: accentColor }}>{name}</span>
+      </div>
+      {/* Code lines */}
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', background: BB.codeBg }}>
+        <div style={{ display: 'flex', flexDirection: 'column', padding: '8px 0', fontFamily: 'var(--font-mono)', minWidth: 'max-content', width: '100%' }}>
+          {Array.from({ length: maxLen }).map((_, idx) => {
+            const line = lines[idx] ?? '';
+            const other = otherLines[idx] ?? '';
+            const isDiff = line !== other;
+            const isEmpty = line === '';
+            const rendered = highlightPythonLine(line);
+            return (
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  minHeight: 22,
+                  lineHeight: '22px',
+                  fontSize: 12.5,
+                  background: isDiff ? (accentColor === BB.primaryLight ? 'rgba(107,92,166,0.14)' : 'rgba(201,162,75,0.10)') : 'transparent',
+                }}
+              >
+                <div style={{ width: 44, minWidth: 44, textAlign: 'right', paddingRight: 12, color: '#766D94', fontSize: 10, borderRight: `1px solid ${BB.border}`, flexShrink: 0 }}>
+                  {idx + 1}
+                </div>
+                {isDiff && (
+                  <div style={{ width: 12, minWidth: 12, textAlign: 'center', fontSize: 9, color: accentColor, flexShrink: 0 }}>●</div>
+                )}
+                {!isDiff && <div style={{ width: 12, minWidth: 12 }} />}
+                <div style={{ flex: 1, paddingLeft: 8, paddingRight: 20, whiteSpace: 'pre', color: '#F5F1EC' }}>
+                  {isEmpty ? '\u00A0' : (rendered ?? '\u00A0')}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', gap: 1 }}>
+      {renderDiffCol(linesA, linesB, nameA, BB.primaryLight)}
+      <div style={{ width: 1, background: BB.border, flexShrink: 0 }} />
+      {renderDiffCol(linesB, linesA, nameB, BB.gold)}
+    </div>
+  );
+}
+
 export function ViewAsCodeStudio({
   onShowToast,
   onNavigate,
@@ -366,6 +726,16 @@ export function ViewAsCodeStudio({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  /* ── Experiment File Explorer state ─────────────────────────────────── */
+  // Map of filename → python code
+  const [experimentFiles, setExperimentFiles] = useState<Map<string, string>>(new Map());
+  const [activeFile, setActiveFile] = useState<string>('pipeline_generated.py');
+  const [diffSlot1, setDiffSlot1] = useState<string | null>(null);
+  const [diffSlot2, setDiffSlot2] = useState<string | null>(null);
+  const [diffMode, setDiffMode] = useState(false);
+  // Counter for naming new files per algorithm
+  const fileCounterRef = useRef<Map<string, number>>(new Map());
 
   /* ── Derived: canonical config values ───────────────────────────────── */
   const trainRatio         = Math.round((trainingConfig?.train_test_split ?? 0.8) * 100) / 100;
@@ -467,6 +837,12 @@ export function ViewAsCodeStudio({
       setGeneratedCode(resp.python_code);
       setStepExplanations(resp.steps_explanation || []);
       setIsValidSyntax(resp.is_valid_syntax);
+      // Store in experiment files map under activeFile
+      setExperimentFiles((prev) => {
+        const next = new Map(prev);
+        next.set(activeFile, resp.python_code);
+        return next;
+      });
     } catch (err: unknown) {
       setIsValidSyntax(false);
       setGeneratedCode('');
@@ -537,10 +913,97 @@ export function ViewAsCodeStudio({
   };
 
   /* ── Code Lines for Editor View ─────────────────────────────────────── */
+  // The displayed code is either the active experiment file's code or the latest generated code
+  const displayedCode = useMemo(() => {
+    return experimentFiles.get(activeFile) ?? generatedCode;
+  }, [experimentFiles, activeFile, generatedCode]);
+
   const codeLines = useMemo(() => {
-    if (!generatedCode) return [];
-    return generatedCode.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  }, [generatedCode]);
+    if (!displayedCode) return [];
+    return displayedCode.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  }, [displayedCode]);
+
+  /* ── Experiment file helpers ────────────────────────────────────────── */
+  const experimentFileList = useMemo(() => {
+    const result: { name: string; code: string }[] = [];
+    experimentFiles.forEach((code, name) => result.push({ name, code }));
+    return result;
+  }, [experimentFiles]);
+
+  const handleSelectFile = useCallback((name: string) => {
+    setActiveFile(name);
+    setDiffMode(false);
+  }, []);
+
+  const handleNewFile = useCallback(async () => {
+    // Build a name like random_forest_v2.py
+    const algoBase = (canonicalAlgorithm || 'pipeline').replace(/_/g, '_');
+    const counter = (fileCounterRef.current.get(algoBase) ?? 0) + 1;
+    fileCounterRef.current.set(algoBase, counter);
+    const newName = `${algoBase}_v${counter}.py`;
+    setActiveFile(newName);
+    // Auto-generate code for the new file
+    setIsGenerating(true);
+    setGenerationError(null);
+    const target   = selectedTarget || trainingConfig?.target_column;
+    const features = (
+      selectedFeatures.length > 0 ? selectedFeatures : (trainingConfig?.feature_columns ?? [])
+    ).filter((f) => f !== target && !isColumnIdentifier(f));
+    const dag: PipelineDAG = {
+      dataset_name:    dataset?.fileName || trainingConfig?.dataset_name || 'dataset.csv',
+      target_column:   target || 'target',
+      feature_columns: features.length > 0 ? features : ['feature1', 'feature2'],
+      nodes: [
+        { node_id: 'n1', type: 'missing_value_handler', name: 'Simple Imputer', params: { strategy: canonicalImputer || 'median' } },
+        { node_id: 'n2', type: 'scaler', name: 'Feature Scaler', params: { scaler_type: canonicalScaler || 'standard_scaler', type: canonicalScaler || 'standard_scaler' } },
+        { node_id: 'n3', type: 'train_test_split', name: 'Train-Test Split', params: { test_size: testRatio, random_seed: trainingConfig?.random_seed ?? 42 } },
+        { node_id: 'n4', type: 'algorithm', name: 'ML Estimator', params: { algorithm: canonicalAlgorithm || 'random_forest_classifier', type: canonicalAlgorithm || 'random_forest_classifier' } },
+      ],
+    };
+    try {
+      const resp = await PipelineService.generateCode(dag, true, true);
+      setExperimentFiles((prev) => {
+        const next = new Map(prev);
+        next.set(newName, resp.python_code);
+        return next;
+      });
+    } catch {
+      setExperimentFiles((prev) => {
+        const next = new Map(prev);
+        next.set(newName, '# Code generation failed. Check pipeline configuration.');
+        return next;
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [canonicalAlgorithm, canonicalImputer, canonicalScaler, testRatio, selectedTarget, selectedFeatures, trainingConfig, dataset, isColumnIdentifier]);
+
+  const handleDeleteFile = useCallback((name: string) => {
+    setExperimentFiles((prev) => {
+      const next = new Map(prev);
+      next.delete(name);
+      return next;
+    });
+    if (diffSlot1 === name) setDiffSlot1(null);
+    if (diffSlot2 === name) setDiffSlot2(null);
+    setExperimentFiles((prev) => {
+      if (activeFile === name) {
+        const remaining = Array.from(prev.keys()).filter((k) => k !== name);
+        setActiveFile(remaining[0] ?? 'pipeline_generated.py');
+      }
+      return prev;
+    });
+  }, [activeFile, diffSlot1, diffSlot2]);
+
+  const handleSetDiffSlot = useCallback((slot: 1 | 2, name: string | null) => {
+    if (slot === 1) setDiffSlot1(name);
+    else setDiffSlot2(name);
+    setDiffMode(false);
+  }, []);
+
+  const handleCompare = useCallback(() => {
+    setDiffMode((d) => !d);
+  }, []);
 
   /* ── AI Copilot messages ─────────────────────────────────────────────── */
   const copilotMessages = useMemo<CopilotMsg[]>(() => {
@@ -676,7 +1139,7 @@ export function ViewAsCodeStudio({
         gap: 0,
       }}
     >
-      {/* ── WORKSPACE BODY: STUDIO WORKSPACE (FULL WIDTH) + COPILOT DRAWER ─── */}
+      {/* ── WORKSPACE BODY: EXPLORER + STUDIO + COPILOT ─── */}
       <div
         style={{
           display: 'flex',
@@ -686,6 +1149,20 @@ export function ViewAsCodeStudio({
           overflow: 'hidden',
         }}
       >
+        {/* ── LEFT: Experiment Explorer ─── */}
+        <ExperimentExplorer
+          csvName={activeDatasetName}
+          files={experimentFileList}
+          activeFile={activeFile}
+          diffSlot1={diffSlot1}
+          diffSlot2={diffSlot2}
+          onSelectFile={handleSelectFile}
+          onNewFile={handleNewFile}
+          onDeleteFile={handleDeleteFile}
+          onSetDiffSlot={handleSetDiffSlot}
+          onCompare={handleCompare}
+          diffMode={diffMode}
+        />
         {/* ── STUDIO WORKSPACE (CODE OR DAG VIEW) ─────── */}
         <div
           style={{
@@ -727,6 +1204,17 @@ export function ViewAsCodeStudio({
           {/* TAB 1: CODE EDITOR VIEW */}
           {activeTab === 'code' && (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+              {/* Diff view override */}
+              {diffMode && diffSlot1 && diffSlot2 && (
+                <CodeDiffView
+                  nameA={diffSlot1}
+                  nameB={diffSlot2}
+                  codeA={experimentFiles.get(diffSlot1) ?? ''}
+                  codeB={experimentFiles.get(diffSlot2) ?? ''}
+                />
+              )}
+              {/* Main editor — hidden when diff is active */}
+              {!diffMode && (<>
               {/* Terminal Window Top Bar */}
               <div
                 style={{
@@ -1082,6 +1570,7 @@ export function ViewAsCodeStudio({
                   </div>
                 </div>
               )}
+              </>)}
             </div>
           )}
 
