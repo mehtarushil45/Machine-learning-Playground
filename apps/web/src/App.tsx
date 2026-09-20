@@ -382,13 +382,16 @@ function AppContent() {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            padding: 12,
+            padding: 6,
             width: '100%',
             height: 'calc(100vh - 48px)',
             boxSizing: 'border-box',
           }}
         >
-          {activeTab === 'workspace' && (
+          {/* Pages: always mounted, CSS-hidden when not active.
+               Preserves all local state across navigation — no unmounting. */}
+
+          <div style={{ display: activeTab === 'workspace' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <ErrorBoundary key="workspace" onReset={() => handleNavigate('workspace')}>
               <DatasetProfilerPage
                 onShowToast={showToast}
@@ -397,45 +400,52 @@ function AppContent() {
                 onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
               />
             </ErrorBoundary>
-          )}
-          {activeTab === 'code-studio' && (
+          </div>
+
+          <div style={{ display: activeTab === 'code-studio' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <ErrorBoundary key="code-studio" onReset={() => handleNavigate('workspace')}>
               <ViewAsCodeStudio
+                isActive={activeTab === 'code-studio'}
                 onShowToast={showToast}
                 onNavigate={(tab) => handleNavigate(tab as PlatformTab)}
                 isCopilotOpen={isCopilotOpen}
                 onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
               />
             </ErrorBoundary>
-          )}
-          {activeTab === 'training-results' && (
+          </div>
+
+          <div style={{ display: activeTab === 'training-results' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <ErrorBoundary key="training-results" onReset={() => handleNavigate('workspace')}>
               <TrainingResultsPage
                 onNavigate={handleNavigate}
                 onShowToast={showToast}
               />
             </ErrorBoundary>
-          )}
-          {activeTab === 'explainability' && (
+          </div>
+
+          <div style={{ display: activeTab === 'explainability' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <ErrorBoundary key="explainability" onReset={() => setActiveTab('workspace')}>
               <ExplainabilityHub />
             </ErrorBoundary>
-          )}
-          {activeTab === 'classrooms' && (
+          </div>
+
+          <div style={{ display: activeTab === 'classrooms' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <ErrorBoundary key="classrooms" onReset={() => setActiveTab('workspace')}>
               <ClassroomHub />
             </ErrorBoundary>
-          )}
-          {activeTab === 'deployments' && (
+          </div>
+
+          <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
               <DeploymentStudio />
             </ErrorBoundary>
-          )}
-          {activeTab === 'portfolios' && (
+          </div>
+
+          <div style={{ display: activeTab === 'portfolios' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <ErrorBoundary key="portfolios" onReset={() => setActiveTab('workspace')}>
               <PortfolioViewer />
             </ErrorBoundary>
-          )}
+          </div>
         </main>
       </div>
 

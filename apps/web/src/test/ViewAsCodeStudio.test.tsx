@@ -151,7 +151,7 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
 
     // Verify full-width editor renders code without technical details sidebar
     expect(screen.queryByRole('button', { name: /technical details/i })).not.toBeInTheDocument();
-    expect(screen.getByText('pipeline_generated.py')).toBeInTheDocument();
+    expect(screen.getAllByText('pipeline_generated.py').length).toBeGreaterThanOrEqual(1);
 
     // Verify AI Copilot drawer is rendered
     const copilotAside = screen.getByRole('complementary', { name: /ai copilot agent drawer/i });

@@ -43,6 +43,14 @@ export interface ProjectState {
   activeJob:        JobEntity | null;
   /** Which lifecycle stage is "current" for the rail */
   lifecycleStage:   LifecycleStage;
+  /** Which experiment file is currently active in Pipeline Code Studio */
+  activeExperimentFile: string;
+  /** Map of filename -> generated/written python code */
+  experimentFiles:  Record<string, string>;
+  /** Ordered list of open tab file names */
+  openTabs:         string[];
+  /** Map of filename -> JobEntity for multi-file experiment result tracking */
+  fileJobs:         Record<string, JobEntity>;
 }
 
 export type LifecycleStage =
@@ -61,6 +69,13 @@ interface ProjectContextValue extends ProjectState {
   setInferredTaskType:   (t: 'classification' | 'regression' | null) => void;
   setActiveJob:          (j: JobEntity | null) => void;
   setLifecycleStage:     (s: LifecycleStage)   => void;
+  setActiveExperimentFile: (f: string)         => void;
+  setExperimentFiles:    React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setOpenTabs:           React.Dispatch<React.SetStateAction<string[]>>;
+  updateExperimentFileCode: (fileName: string, code: string) => void;
+  createExperimentFile:  (fileName: string, initialCode?: string) => void;
+  deleteExperimentFile:  (fileName: string) => void;
+  setFileJob:            (fileName: string, job: JobEntity) => void;
   /** Convenience: load a new dataset and reset selection */
   loadDataset:           (d: Dataset)          => void;
   /** Convenience: reset everything (new project) */
@@ -86,6 +101,21 @@ function loadPersistedState(): Partial<ProjectState> {
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const initial = loadPersistedState();
 
+  const initialFiles: Record<string, string> =
+    initial.experimentFiles && Object.keys(initial.experimentFiles).length > 0
+      ? initial.experimentFiles
+      : { 'pipeline_generated.py': '' };
+
+  const initialActiveFile: string =
+    initial.activeExperimentFile && initialFiles[initial.activeExperimentFile] !== undefined
+      ? initial.activeExperimentFile
+      : Object.keys(initialFiles)[0] || 'pipeline_generated.py';
+
+  const initialTabs: string[] =
+    Array.isArray(initial.openTabs) && initial.openTabs.length > 0
+      ? initial.openTabs.filter((t) => initialFiles[t] !== undefined)
+      : [initialActiveFile];
+
   const [dataset,           setDataset]           = useState<Dataset | null>(initial.dataset ?? null);
   const [selectedFeatures,  setSelectedFeatures]  = useState<string[]>(initial.selectedFeatures ?? []);
   const [selectedTarget,    setSelectedTarget]    = useState<string | null>(initial.selectedTarget ?? null);
@@ -93,8 +123,59 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [inferredTaskType,  setInferredTaskType]  = useState<'classification' | 'regression' | null>(
     (initial as any).inferredTaskType ?? null,
   );
-  const [activeJob,         setActiveJob]         = useState<JobEntity | null>(initial.activeJob ?? null);
+  const [activeJob,         setActiveJobState]    = useState<JobEntity | null>(initial.activeJob ?? null);
+  const [fileJobs,          setFileJobs]          = useState<Record<string, JobEntity>>(initial.fileJobs ?? {});
   const [lifecycleStage,    setLifecycleStage]    = useState<LifecycleStage>(initial.lifecycleStage ?? 'dataset');
+  const [activeExperimentFile, setActiveExperimentFile] = useState<string>(initialActiveFile);
+  const [experimentFiles, setExperimentFiles]     = useState<Record<string, string>>(initialFiles);
+  const [openTabs, setOpenTabs]                   = useState<string[]>(initialTabs);
+
+  const setActiveJob = useCallback((j: JobEntity | null) => {
+    setActiveJobState(j);
+    if (j && activeExperimentFile) {
+      setFileJobs((prev) => ({ ...prev, [activeExperimentFile]: j }));
+    }
+  }, [activeExperimentFile]);
+
+  const setFileJob = useCallback((fileName: string, job: JobEntity) => {
+    setFileJobs((prev) => ({
+      ...prev,
+      [fileName]: job,
+    }));
+  }, []);
+
+  const updateExperimentFileCode = useCallback((fileName: string, code: string) => {
+    setExperimentFiles((prev) => ({
+      ...prev,
+      [fileName]: code,
+    }));
+  }, []);
+
+  const createExperimentFile = useCallback((fileName: string, initialCode: string = '') => {
+    setExperimentFiles((prev) => ({
+      ...prev,
+      [fileName]: initialCode,
+    }));
+    setOpenTabs((prev) => (prev.includes(fileName) ? prev : [...prev, fileName]));
+    setActiveExperimentFile(fileName);
+  }, []);
+
+  const deleteExperimentFile = useCallback((fileName: string) => {
+    setExperimentFiles((prev) => {
+      const next = { ...prev };
+      delete next[fileName];
+      return next;
+    });
+    setOpenTabs((prev) => {
+      const nextTabs = prev.filter((t) => t !== fileName);
+      if (activeExperimentFile === fileName && nextTabs.length > 0) {
+        const idx = prev.indexOf(fileName);
+        const fallback = nextTabs[Math.min(idx, nextTabs.length - 1)];
+        if (fallback) setActiveExperimentFile(fallback);
+      }
+      return nextTabs;
+    });
+  }, [activeExperimentFile]);
 
   // Persist state updates to localStorage (debounced to avoid blocking UI during fast slider changes)
   useEffect(() => {
@@ -107,7 +188,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           trainingConfig,
           inferredTaskType,
           activeJob,
+          fileJobs,
           lifecycleStage,
+          activeExperimentFile,
+          experimentFiles,
+          openTabs,
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
       } catch (err) {
@@ -116,7 +201,19 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [dataset, selectedFeatures, selectedTarget, trainingConfig, inferredTaskType, activeJob, lifecycleStage]);
+  }, [
+    dataset,
+    selectedFeatures,
+    selectedTarget,
+    trainingConfig,
+    inferredTaskType,
+    activeJob,
+    fileJobs,
+    lifecycleStage,
+    activeExperimentFile,
+    experimentFiles,
+    openTabs,
+  ]);
 
   const loadDataset = useCallback((d: Dataset) => {
     setDataset(d);
@@ -126,7 +223,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setInferredTaskType(null);
     setActiveJob(null);
     setLifecycleStage('dataset');
-  }, []);
+  }, [setActiveJob]);
 
   const resetProject = useCallback(() => {
     setDataset(null);
@@ -136,12 +233,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setInferredTaskType(null);
     setActiveJob(null);
     setLifecycleStage('dataset');
+    setExperimentFiles({ 'pipeline_generated.py': '' });
+    setOpenTabs(['pipeline_generated.py']);
+    setActiveExperimentFile('pipeline_generated.py');
+    setFileJobs({});
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [setActiveJob]);
 
   return (
     <ProjectContext.Provider
@@ -152,14 +253,25 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         trainingConfig,
         inferredTaskType,
         activeJob,
+        fileJobs,
         lifecycleStage,
+        activeExperimentFile,
+        experimentFiles,
+        openTabs,
         setDataset,
         setSelectedFeatures,
         setSelectedTarget,
         setTrainingConfig,
         setInferredTaskType,
         setActiveJob,
+        setFileJob,
         setLifecycleStage,
+        setActiveExperimentFile,
+        setExperimentFiles,
+        setOpenTabs,
+        updateExperimentFileCode,
+        createExperimentFile,
+        deleteExperimentFile,
         loadDataset,
         resetProject,
       }}

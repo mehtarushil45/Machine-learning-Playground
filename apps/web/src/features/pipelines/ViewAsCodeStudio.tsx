@@ -14,8 +14,8 @@ import {
   ChevronDown,
   Trash2,
   Plus,
-  FileDiff,
   FolderOpen,
+  X,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG } from '../../services/api';
@@ -49,6 +49,7 @@ const BB = {
 } as const;
 
 export interface ViewAsCodeStudioProps {
+  isActive?: boolean;
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
   onNavigate?: (tab: string) => void;
   isCopilotOpen?: boolean;
@@ -348,41 +349,47 @@ function PipelineDAGGraph({
 /* ── Experiment File Explorer ─────────────────────────────────────────── */
 interface ExperimentExplorerProps {
   csvName: string;
-  files: { name: string; code: string }[];
+  files: { name: string }[];
   activeFile: string;
-  diffSlot1: string | null;
-  diffSlot2: string | null;
+  pendingNewFileName: string | null;
   onSelectFile: (name: string) => void;
   onNewFile: () => void;
   onDeleteFile: (name: string) => void;
-  onSetDiffSlot: (slot: 1 | 2, name: string | null) => void;
-  onCompare: () => void;
-  diffMode: boolean;
+  onPendingNameChange: (v: string) => void;
+  onPendingNameCommit: () => void;
+  onPendingNameCancel: () => void;
 }
 
 function ExperimentExplorer({
   csvName,
   files,
   activeFile,
-  diffSlot1,
-  diffSlot2,
+  pendingNewFileName,
   onSelectFile,
   onNewFile,
   onDeleteFile,
-  onSetDiffSlot,
-  onCompare,
-  diffMode,
+  onPendingNameChange,
+  onPendingNameCommit,
+  onPendingNameCancel,
 }: ExperimentExplorerProps) {
   const [folderOpen, setFolderOpen] = useState(true);
   const [hoveredFile, setHoveredFile] = useState<string | null>(null);
+  const newFileInputRef = useRef<HTMLInputElement>(null);
 
-  const shortCsv = csvName.length > 22 ? csvName.slice(0, 20) + '…' : csvName;
+  const shortCsv = csvName.length > 24 ? csvName.slice(0, 22) + '…' : csvName;
+
+  // Auto-focus the inline input when it appears
+  useEffect(() => {
+    if (pendingNewFileName !== null) {
+      setTimeout(() => newFileInputRef.current?.focus(), 50);
+    }
+  }, [pendingNewFileName]);
 
   return (
     <div
       style={{
-        width: 230,
-        minWidth: 230,
+        width: 220,
+        minWidth: 220,
         flexShrink: 0,
         background: BB.surfaceSubtle,
         borderRight: `1px solid ${BB.border}`,
@@ -398,7 +405,7 @@ function ExperimentExplorer({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '8px 10px 6px',
+          padding: '7px 10px 5px',
           borderBottom: `1px solid ${BB.border}`,
           flexShrink: 0,
         }}
@@ -406,14 +413,14 @@ function ExperimentExplorer({
         <span style={{ fontSize: 9.5, fontWeight: 700, color: BB.muted, letterSpacing: '0.08em' }}>EXPERIMENTS</span>
         <button
           onClick={onNewFile}
-          title="New pipeline file"
+          title="New experiment file"
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 20,
-            height: 20,
-            borderRadius: 4,
+            width: 18,
+            height: 18,
+            borderRadius: 3,
             border: `1px solid ${BB.border}`,
             background: 'transparent',
             color: BB.muted,
@@ -429,20 +436,20 @@ function ExperimentExplorer({
             e.currentTarget.style.color = BB.muted;
           }}
         >
-          <Plus style={{ width: 11, height: 11 }} />
+          <Plus style={{ width: 10, height: 10 }} />
         </button>
       </div>
 
       {/* File Tree */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
         {/* CSV Folder Row */}
         <div
           onClick={() => setFolderOpen((o) => !o)}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 5,
-            padding: '4px 10px',
+            gap: 4,
+            padding: '3px 8px',
             cursor: 'pointer',
             color: BB.gold,
             fontSize: 11,
@@ -450,10 +457,10 @@ function ExperimentExplorer({
           }}
         >
           {folderOpen
-            ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
-            : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
-          <FolderOpen style={{ width: 13, height: 13, flexShrink: 0 }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>
+            ? <ChevronDown style={{ width: 10, height: 10, flexShrink: 0 }} />
+            : <ChevronRight style={{ width: 10, height: 10, flexShrink: 0 }} />}
+          <FolderOpen style={{ width: 12, height: 12, flexShrink: 0 }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5 }}>
             {shortCsv}
           </span>
         </div>
@@ -462,8 +469,6 @@ function ExperimentExplorer({
         {folderOpen && files.map((f) => {
           const isActive = f.name === activeFile;
           const isHovered = hoveredFile === f.name;
-          const isDiff1 = diffSlot1 === f.name;
-          const isDiff2 = diffSlot2 === f.name;
           return (
             <div
               key={f.name}
@@ -473,19 +478,18 @@ function ExperimentExplorer({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '4px 10px 4px 26px',
+                gap: 5,
+                padding: '3px 8px 3px 22px',
                 cursor: 'pointer',
                 background: isActive ? 'rgba(107,92,166,0.14)' : isHovered ? 'rgba(107,92,166,0.07)' : 'transparent',
                 borderLeft: isActive ? `2px solid ${BB.primaryLight}` : '2px solid transparent',
                 transition: 'all 80ms',
-                position: 'relative',
               }}
             >
-              <FileCode style={{ width: 12, height: 12, color: isActive ? BB.gold : BB.muted, flexShrink: 0 }} />
+              <FileCode style={{ width: 11, height: 11, color: isActive ? BB.gold : BB.muted, flexShrink: 0 }} />
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 10.5,
                   color: isActive ? BB.text : BB.muted,
                   fontFamily: 'var(--font-mono)',
                   overflow: 'hidden',
@@ -498,19 +502,11 @@ function ExperimentExplorer({
                 {f.name}
               </span>
 
-              {/* Diff slot indicators */}
-              {isDiff1 && (
-                <span style={{ fontSize: 8, color: BB.primaryLight, fontWeight: 700, background: 'rgba(107,92,166,0.2)', padding: '1px 4px', borderRadius: 3 }}>A</span>
-              )}
-              {isDiff2 && (
-                <span style={{ fontSize: 8, color: BB.gold, fontWeight: 700, background: 'rgba(201,162,75,0.18)', padding: '1px 4px', borderRadius: 3 }}>B</span>
-              )}
-
-              {/* Delete button on hover */}
+              {/* Delete on hover (non-active only) */}
               {isHovered && !isActive && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onDeleteFile(f.name); }}
-                  title="Remove file"
+                  title="Remove"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -518,188 +514,62 @@ function ExperimentExplorer({
                     border: 'none',
                     color: BB.muted,
                     cursor: 'pointer',
-                    padding: 2,
-                    borderRadius: 3,
+                    padding: 1,
+                    borderRadius: 2,
                     flexShrink: 0,
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = BB.error; }}
                   onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
                 >
-                  <Trash2 style={{ width: 10, height: 10 }} />
+                  <Trash2 style={{ width: 9, height: 9 }} />
                 </button>
               )}
             </div>
           );
         })}
 
-        {/* Empty drop hint when no files */}
-        {folderOpen && files.length === 0 && (
-          <div style={{ padding: '10px 26px', fontSize: 10, color: BB.disabled, fontStyle: 'italic' }}>
-            No files yet. Click + to generate.
+        {/* Inline new file input */}
+        {folderOpen && pendingNewFileName !== null && (
+          <div style={{ padding: '3px 8px 3px 22px' }}>
+            <input
+              ref={newFileInputRef}
+              value={pendingNewFileName}
+              onChange={(e) => onPendingNameChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onPendingNameCommit();
+                if (e.key === 'Escape') onPendingNameCancel();
+              }}
+              onBlur={onPendingNameCommit}
+              placeholder="filename.py"
+              style={{
+                width: '100%',
+                background: BB.elevated,
+                border: `1px solid ${BB.primaryLight}`,
+                borderRadius: 3,
+                color: BB.text,
+                fontSize: 10.5,
+                fontFamily: 'var(--font-mono)',
+                padding: '2px 5px',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Empty hint */}
+        {folderOpen && files.length === 0 && pendingNewFileName === null && (
+          <div style={{ padding: '8px 22px', fontSize: 10, color: BB.disabled, fontStyle: 'italic' }}>
+            Click + to create a file
           </div>
         )}
       </div>
-
-      {/* Diff Compare Dock */}
-      <div
-        style={{
-          borderTop: `1px solid ${BB.border}`,
-          padding: '8px 10px',
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 9.5, fontWeight: 700, color: BB.muted, letterSpacing: '0.08em' }}>DIFF COMPARE</span>
-          <FileDiff style={{ width: 11, height: 11, color: BB.muted }} />
-        </div>
-        <div style={{ display: 'flex', gap: 5 }}>
-          {/* Slot A */}
-          <div
-            onClick={() => { if (diffSlot1) onSetDiffSlot(1, null); }}
-            style={{
-              flex: 1,
-              padding: '4px 6px',
-              borderRadius: 4,
-              border: `1px solid ${diffSlot1 ? BB.primaryLight : BB.border}`,
-              background: diffSlot1 ? 'rgba(107,92,166,0.14)' : 'transparent',
-              cursor: diffSlot1 ? 'pointer' : 'default',
-              minWidth: 0,
-            }}
-            title={diffSlot1 ? `Slot A: ${diffSlot1} (click to clear)` : 'Right-click a file to set Slot A'}
-          >
-            <div style={{ fontSize: 8, color: BB.primaryLight, fontWeight: 700, letterSpacing: '0.06em' }}>A</div>
-            <div style={{ fontSize: 9, color: diffSlot1 ? BB.text : BB.disabled, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {diffSlot1 ? diffSlot1.replace('.py', '') : '—'}
-            </div>
-          </div>
-          {/* Slot B */}
-          <div
-            onClick={() => { if (diffSlot2) onSetDiffSlot(2, null); }}
-            style={{
-              flex: 1,
-              padding: '4px 6px',
-              borderRadius: 4,
-              border: `1px dashed ${diffSlot2 ? BB.gold : BB.border}`,
-              background: diffSlot2 ? 'rgba(201,162,75,0.10)' : 'transparent',
-              cursor: diffSlot2 ? 'pointer' : 'default',
-              minWidth: 0,
-            }}
-            title={diffSlot2 ? `Slot B: ${diffSlot2} (click to clear)` : 'Right-click a file to set Slot B'}
-          >
-            <div style={{ fontSize: 8, color: BB.gold, fontWeight: 700, letterSpacing: '0.06em' }}>B</div>
-            <div style={{ fontSize: 9, color: diffSlot2 ? BB.text : BB.disabled, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {diffSlot2 ? diffSlot2.replace('.py', '') : '—'}
-            </div>
-          </div>
-        </div>
-        {/* Compare button — only shown when both slots filled */}
-        {diffSlot1 && diffSlot2 && (
-          <button
-            onClick={onCompare}
-            style={{
-              width: '100%',
-              padding: '5px 0',
-              borderRadius: 5,
-              border: `1px solid ${diffMode ? BB.gold : BB.border}`,
-              background: diffMode ? 'rgba(201,162,75,0.18)' : 'rgba(107,92,166,0.12)',
-              color: diffMode ? BB.gold : BB.text,
-              fontSize: 10,
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 120ms',
-              letterSpacing: '0.04em',
-            }}
-          >
-            {diffMode ? '✕ Close Diff' : 'Compare →'}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ── Side-by-Side Code Diff View ─────────────────────────────────────── */
-interface CodeDiffViewProps {
-  nameA: string;
-  nameB: string;
-  codeA: string;
-  codeB: string;
-}
-
-function CodeDiffView({ nameA, nameB, codeA, codeB }: CodeDiffViewProps) {
-  const linesA = codeA.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const linesB = codeB.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const maxLen = Math.max(linesA.length, linesB.length);
-
-  const renderDiffCol = (lines: string[], otherLines: string[], name: string, accentColor: string) => (
-    <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Column header */}
-      <div
-        style={{
-          padding: '6px 14px',
-          background: BB.elevated,
-          borderBottom: `1px solid ${BB.border}`,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          flexShrink: 0,
-        }}
-      >
-        <FileCode style={{ width: 12, height: 12, color: accentColor }} />
-        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 700, color: accentColor }}>{name}</span>
-      </div>
-      {/* Code lines */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', background: BB.codeBg }}>
-        <div style={{ display: 'flex', flexDirection: 'column', padding: '8px 0', fontFamily: 'var(--font-mono)', minWidth: 'max-content', width: '100%' }}>
-          {Array.from({ length: maxLen }).map((_, idx) => {
-            const line = lines[idx] ?? '';
-            const other = otherLines[idx] ?? '';
-            const isDiff = line !== other;
-            const isEmpty = line === '';
-            const rendered = highlightPythonLine(line);
-            return (
-              <div
-                key={idx}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  minHeight: 22,
-                  lineHeight: '22px',
-                  fontSize: 12.5,
-                  background: isDiff ? (accentColor === BB.primaryLight ? 'rgba(107,92,166,0.14)' : 'rgba(201,162,75,0.10)') : 'transparent',
-                }}
-              >
-                <div style={{ width: 44, minWidth: 44, textAlign: 'right', paddingRight: 12, color: '#766D94', fontSize: 10, borderRight: `1px solid ${BB.border}`, flexShrink: 0 }}>
-                  {idx + 1}
-                </div>
-                {isDiff && (
-                  <div style={{ width: 12, minWidth: 12, textAlign: 'center', fontSize: 9, color: accentColor, flexShrink: 0 }}>●</div>
-                )}
-                {!isDiff && <div style={{ width: 12, minWidth: 12 }} />}
-                <div style={{ flex: 1, paddingLeft: 8, paddingRight: 20, whiteSpace: 'pre', color: '#F5F1EC' }}>
-                  {isEmpty ? '\u00A0' : (rendered ?? '\u00A0')}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', gap: 1 }}>
-      {renderDiffCol(linesA, linesB, nameA, BB.primaryLight)}
-      <div style={{ width: 1, background: BB.border, flexShrink: 0 }} />
-      {renderDiffCol(linesB, linesA, nameB, BB.gold)}
     </div>
   );
 }
 
 export function ViewAsCodeStudio({
+  isActive = true,
   onShowToast,
   onNavigate,
   isCopilotOpen = false,
@@ -712,7 +582,16 @@ export function ViewAsCodeStudio({
     selectedFeatures,
     trainingConfig,
     inferredTaskType,
+    activeJob,
     setLifecycleStage,
+    activeExperimentFile,
+    setActiveExperimentFile,
+    experimentFiles,
+    openTabs,
+    setOpenTabs,
+    updateExperimentFileCode,
+    createExperimentFile,
+    deleteExperimentFile,
   } = useProject();
 
   /* ── Studio view mode: 'code' (Python Editor) or 'dag' (Visual Pipeline Flow) ─ */
@@ -727,15 +606,11 @@ export function ViewAsCodeStudio({
   const [authError, setAuthError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  /* ── Experiment File Explorer state ─────────────────────────────────── */
-  // Map of filename → python code
-  const [experimentFiles, setExperimentFiles] = useState<Map<string, string>>(new Map());
-  const [activeFile, setActiveFile] = useState<string>('pipeline_generated.py');
-  const [diffSlot1, setDiffSlot1] = useState<string | null>(null);
-  const [diffSlot2, setDiffSlot2] = useState<string | null>(null);
-  const [diffMode, setDiffMode] = useState(false);
-  // Counter for naming new files per algorithm
-  const fileCounterRef = useRef<Map<string, number>>(new Map());
+  /* ── Inline new-file input: null = hidden, string = current typed value ── */
+  const [pendingNewFileName, setPendingNewFileName] = useState<string | null>(null);
+
+  /* ── Ref to track the last handled job launch from Page 1 ── */
+  const lastJobIdRef = useRef<string | null>(activeJob?.job_id ?? null);
 
   /* ── Derived: canonical config values ───────────────────────────────── */
   const trainRatio         = Math.round((trainingConfig?.train_test_split ?? 0.8) * 100) / 100;
@@ -785,8 +660,9 @@ export function ViewAsCodeStudio({
   }, [setLifecycleStage]);
 
   /* ── Code generation – reads ONLY from canonical context state ───────── */
-  const generatePipelineCode = useCallback(async () => {
+  const generatePipelineCode = useCallback(async (targetFileName?: string) => {
     if (!isConfigValid) return;
+    const fileToWrite = targetFileName || activeExperimentFile || 'pipeline_generated.py';
 
     setIsGenerating(true);
     setGenerationError(null);
@@ -837,12 +713,7 @@ export function ViewAsCodeStudio({
       setGeneratedCode(resp.python_code);
       setStepExplanations(resp.steps_explanation || []);
       setIsValidSyntax(resp.is_valid_syntax);
-      // Store in experiment files map under activeFile
-      setExperimentFiles((prev) => {
-        const next = new Map(prev);
-        next.set(activeFile, resp.python_code);
-        return next;
-      });
+      updateExperimentFileCode(fileToWrite, resp.python_code);
     } catch (err: unknown) {
       setIsValidSyntax(false);
       setGeneratedCode('');
@@ -870,20 +741,31 @@ export function ViewAsCodeStudio({
     canonicalScaler,
     canonicalImputer,
     testRatio,
+    activeExperimentFile,
+    updateExperimentFileCode,
   ]);
 
+  // Initial bootstrap: generate code if active file is currently empty and page is active
   useEffect(() => {
-    const timer = setTimeout(() => {
-      generatePipelineCode();
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [generatePipelineCode]);
+    if (isActive && isConfigValid && (!experimentFiles[activeExperimentFile] || experimentFiles[activeExperimentFile].trim() === '')) {
+      generatePipelineCode(activeExperimentFile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive, isConfigValid, activeExperimentFile]);
 
-  /* ── Copy code to clipboard ─────────────────────────────────────────── */
+  // Launch sync: when a training job is launched from Page 1, apply changes directly to activeExperimentFile
+  useEffect(() => {
+    if (activeJob?.job_id && activeJob.job_id !== lastJobIdRef.current) {
+      lastJobIdRef.current = activeJob.job_id;
+      generatePipelineCode(activeExperimentFile);
+    }
+  }, [activeJob?.job_id, generatePipelineCode, activeExperimentFile]);
+
+  /* ── Copy code to clipboard ─────────────────────────────────────── */
   const handleCopyCode = async () => {
-    if (!generatedCode) return;
+    if (!displayedCode) return;
     try {
-      await navigator.clipboard.writeText(generatedCode);
+      await navigator.clipboard.writeText(displayedCode);
       setCopied(true);
       onShowToast?.('Code Copied', 'Scikit-learn pipeline script copied to clipboard.', 'success');
       setTimeout(() => setCopied(false), 2000);
@@ -892,31 +774,31 @@ export function ViewAsCodeStudio({
     }
   };
 
-  /* ── Download Python script (.py) ────────────────────────────────────── */
+  /* ── Download Python script (.py) ────────────────────────────────── */
   const handleDownloadScript = () => {
-    if (!generatedCode) return;
+    if (!displayedCode) return;
     try {
-      const blob = new Blob([generatedCode], { type: 'text/x-python;charset=utf-8' });
+      const blob = new Blob([displayedCode], { type: 'text/x-python;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const safeName = activeDatasetName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeName = (activeExperimentFile || activeDatasetName).replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
       a.href = url;
-      a.download = `pipeline_${safeName}.py`;
+      a.download = safeName.endsWith('.py') ? safeName : `${safeName}.py`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      onShowToast?.('Download Complete', `Saved pipeline_${safeName}.py`, 'success');
+      onShowToast?.('Download Complete', `Saved ${a.download}`, 'success');
     } catch {
       onShowToast?.('Download Error', 'Could not export Python script file.', 'error');
     }
   };
 
-  /* ── Code Lines for Editor View ─────────────────────────────────────── */
-  // The displayed code is either the active experiment file's code or the latest generated code
+  /* ── Displayed code ─────────────────────────────────────────────── */
+  // Each file has its own independent code in ProjectContext experimentFiles.
   const displayedCode = useMemo(() => {
-    return experimentFiles.get(activeFile) ?? generatedCode;
-  }, [experimentFiles, activeFile, generatedCode]);
+    return experimentFiles[activeExperimentFile] ?? '';
+  }, [experimentFiles, activeExperimentFile]);
 
   const codeLines = useMemo(() => {
     if (!displayedCode) return [];
@@ -924,28 +806,47 @@ export function ViewAsCodeStudio({
   }, [displayedCode]);
 
   /* ── Experiment file helpers ────────────────────────────────────────── */
+  // Ordered list for the explorer tree
   const experimentFileList = useMemo(() => {
-    const result: { name: string; code: string }[] = [];
-    experimentFiles.forEach((code, name) => result.push({ name, code }));
-    return result;
+    return Object.keys(experimentFiles).map((name) => ({ name }));
   }, [experimentFiles]);
 
   const handleSelectFile = useCallback((name: string) => {
-    setActiveFile(name);
-    setDiffMode(false);
+    setActiveExperimentFile(name);
+    // Add to open tabs if not already present
+    setOpenTabs((prev) => (prev.includes(name) ? prev : [...prev, name]));
+  }, [setActiveExperimentFile, setOpenTabs]);
+
+  const handleCloseTab = useCallback((name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenTabs((prev) => {
+      const next = prev.filter((t) => t !== name);
+      if (activeExperimentFile === name && next.length > 0) {
+        const idx = prev.indexOf(name);
+        const fallback = next[Math.min(idx, next.length - 1)];
+        if (fallback) setActiveExperimentFile(fallback);
+      }
+      return next;
+    });
+  }, [activeExperimentFile, setActiveExperimentFile, setOpenTabs]);
+
+  // Start inline rename: show the input
+  const handleNewFile = useCallback(() => {
+    setPendingNewFileName('');
   }, []);
 
-  const handleNewFile = useCallback(async () => {
-    // Build a name like random_forest_v2.py
-    const algoBase = (canonicalAlgorithm || 'pipeline').replace(/_/g, '_');
-    const counter = (fileCounterRef.current.get(algoBase) ?? 0) + 1;
-    fileCounterRef.current.set(algoBase, counter);
-    const newName = `${algoBase}_v${counter}.py`;
-    setActiveFile(newName);
-    // Auto-generate code for the new file
+  // User pressed Enter or blurred: create the file
+  const handleConfirmNewFile = useCallback(async () => {
+    if (pendingNewFileName === null) return;
+    const raw = pendingNewFileName.trim();
+    if (!raw) { setPendingNewFileName(null); return; }
+    const name = raw.endsWith('.py') ? raw : raw + '.py';
+    setPendingNewFileName(null);
+
+    // Auto-generate code
     setIsGenerating(true);
     setGenerationError(null);
-    const target   = selectedTarget || trainingConfig?.target_column;
+    const target = selectedTarget || trainingConfig?.target_column;
     const features = (
       selectedFeatures.length > 0 ? selectedFeatures : (trainingConfig?.feature_columns ?? [])
     ).filter((f) => f !== target && !isColumnIdentifier(f));
@@ -962,48 +863,21 @@ export function ViewAsCodeStudio({
     };
     try {
       const resp = await PipelineService.generateCode(dag, true, true);
-      setExperimentFiles((prev) => {
-        const next = new Map(prev);
-        next.set(newName, resp.python_code);
-        return next;
-      });
+      createExperimentFile(name, resp.python_code);
     } catch {
-      setExperimentFiles((prev) => {
-        const next = new Map(prev);
-        next.set(newName, '# Code generation failed. Check pipeline configuration.');
-        return next;
-      });
+      createExperimentFile(name, '# Code generation failed.');
     } finally {
       setIsGenerating(false);
     }
-  }, [canonicalAlgorithm, canonicalImputer, canonicalScaler, testRatio, selectedTarget, selectedFeatures, trainingConfig, dataset, isColumnIdentifier]);
+  }, [pendingNewFileName, createExperimentFile, selectedTarget, selectedFeatures, trainingConfig, dataset, canonicalImputer, canonicalScaler, testRatio, canonicalAlgorithm]);
+
+  const handleCancelNewFile = useCallback(() => {
+    setPendingNewFileName(null);
+  }, []);
 
   const handleDeleteFile = useCallback((name: string) => {
-    setExperimentFiles((prev) => {
-      const next = new Map(prev);
-      next.delete(name);
-      return next;
-    });
-    if (diffSlot1 === name) setDiffSlot1(null);
-    if (diffSlot2 === name) setDiffSlot2(null);
-    setExperimentFiles((prev) => {
-      if (activeFile === name) {
-        const remaining = Array.from(prev.keys()).filter((k) => k !== name);
-        setActiveFile(remaining[0] ?? 'pipeline_generated.py');
-      }
-      return prev;
-    });
-  }, [activeFile, diffSlot1, diffSlot2]);
-
-  const handleSetDiffSlot = useCallback((slot: 1 | 2, name: string | null) => {
-    if (slot === 1) setDiffSlot1(name);
-    else setDiffSlot2(name);
-    setDiffMode(false);
-  }, []);
-
-  const handleCompare = useCallback(() => {
-    setDiffMode((d) => !d);
-  }, []);
+    deleteExperimentFile(name);
+  }, [deleteExperimentFile]);
 
   /* ── AI Copilot messages ─────────────────────────────────────────────── */
   const copilotMessages = useMemo<CopilotMsg[]>(() => {
@@ -1145,7 +1019,7 @@ export function ViewAsCodeStudio({
           display: 'flex',
           flex: 1,
           minHeight: 0,
-          gap: 12,
+          gap: 4,
           overflow: 'hidden',
         }}
       >
@@ -1153,15 +1027,14 @@ export function ViewAsCodeStudio({
         <ExperimentExplorer
           csvName={activeDatasetName}
           files={experimentFileList}
-          activeFile={activeFile}
-          diffSlot1={diffSlot1}
-          diffSlot2={diffSlot2}
+          activeFile={activeExperimentFile}
+          pendingNewFileName={pendingNewFileName}
           onSelectFile={handleSelectFile}
           onNewFile={handleNewFile}
           onDeleteFile={handleDeleteFile}
-          onSetDiffSlot={handleSetDiffSlot}
-          onCompare={handleCompare}
-          diffMode={diffMode}
+          onPendingNameChange={setPendingNewFileName}
+          onPendingNameCommit={handleConfirmNewFile}
+          onPendingNameCancel={handleCancelNewFile}
         />
         {/* ── STUDIO WORKSPACE (CODE OR DAG VIEW) ─────── */}
         <div
@@ -1172,9 +1045,9 @@ export function ViewAsCodeStudio({
             flexDirection: 'column',
             background: BB.surface,
             border: `1px solid ${BB.border}`,
-            borderRadius: 10,
+            borderRadius: 6,
             overflow: 'hidden',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
           }}
         >
           {/* Validation Errors Panel (if any) */}
@@ -1204,57 +1077,83 @@ export function ViewAsCodeStudio({
           {/* TAB 1: CODE EDITOR VIEW */}
           {activeTab === 'code' && (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-              {/* Diff view override */}
-              {diffMode && diffSlot1 && diffSlot2 && (
-                <CodeDiffView
-                  nameA={diffSlot1}
-                  nameB={diffSlot2}
-                  codeA={experimentFiles.get(diffSlot1) ?? ''}
-                  codeB={experimentFiles.get(diffSlot2) ?? ''}
-                />
-              )}
-              {/* Main editor — hidden when diff is active */}
-              {!diffMode && (<>
-              {/* Terminal Window Top Bar */}
+              {/* VS Code-style File Tab Bar */}
               <div
                 style={{
-                  padding: '8px 14px',
-                  background: BB.elevated,
-                  borderBottom: `1px solid ${BB.border}`,
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
+                  alignItems: 'stretch',
+                  background: BB.base,
+                  borderBottom: `1px solid ${BB.border}`,
                   flexShrink: 0,
+                  overflowX: 'auto',
+                  overflowY: 'hidden',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '3px 10px',
-                      borderRadius: 5,
-                      background: 'rgba(201, 162, 75, 0.12)',
-                      border: '1px solid rgba(201, 162, 75, 0.28)',
-                    }}
-                  >
-                    <FileCode style={{ width: 13, height: 13, color: BB.gold }} />
-                    <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 700, color: BB.gold }}>
-                      pipeline_generated.py
-                    </span>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  {/* Symbol Switchers: Python Script & Visual DAG Flow */}
+                {openTabs.map((tab) => {
+                  const isActive = tab === activeExperimentFile;
+                  return (
+                    <div
+                      key={tab}
+                      onClick={() => handleSelectFile(tab)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '0 10px 0 12px',
+                        height: 32,
+                        cursor: 'pointer',
+                        background: isActive ? BB.elevated : 'transparent',
+                        borderRight: `1px solid ${BB.border}`,
+                        borderBottom: isActive ? `2px solid ${BB.gold}` : '2px solid transparent',
+                        color: isActive ? BB.text : BB.muted,
+                        fontSize: 11.5,
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: isActive ? 600 : 400,
+                        flexShrink: 0,
+                        whiteSpace: 'nowrap',
+                        transition: 'color 80ms',
+                        userSelect: 'none',
+                      }}
+                    >
+                      <FileCode style={{ width: 11, height: 11, color: isActive ? BB.gold : BB.muted, flexShrink: 0 }} />
+                      <span>{tab}</span>
+                      <button
+                        onClick={(e) => handleCloseTab(tab, e)}
+                        title={`Close ${tab}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 14,
+                          height: 14,
+                          borderRadius: 2,
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'inherit',
+                          cursor: 'pointer',
+                          opacity: isActive ? 0.7 : 0,
+                          transition: 'opacity 100ms',
+                          padding: 0,
+                          marginLeft: 2,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = BB.error; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = isActive ? '0.7' : '0'; e.currentTarget.style.color = 'inherit'; }}
+                      >
+                        <X style={{ width: 10, height: 10 }} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {/* Right-side action row: view switchers + regenerate + copy + export */}
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, padding: '0 8px', flexShrink: 0 }}>
+                  {/* View Switchers */}
                   <div
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       background: 'rgba(0,0,0,0.25)',
                       border: `1px solid ${BB.border}`,
-                      borderRadius: 5,
+                      borderRadius: 4,
                       padding: 2,
                       gap: 2,
                     }}
@@ -1303,10 +1202,33 @@ export function ViewAsCodeStudio({
 
                   <div style={{ width: 1, height: 14, background: BB.border, margin: '0 2px' }} />
 
+                  {/* Regenerate Code (symbol) */}
+                  <button
+                    onClick={() => generatePipelineCode(activeExperimentFile)}
+                    disabled={isGenerating || !isConfigValid}
+                    title="Regenerate Python code for active file"
+                    aria-label="Regenerate code"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 24,
+                      height: 22,
+                      borderRadius: 4,
+                      border: `1px solid ${BB.border}`,
+                      background: 'transparent',
+                      color: isGenerating ? BB.gold : BB.muted,
+                      cursor: isGenerating || !isConfigValid ? 'not-allowed' : 'pointer',
+                      transition: 'all 120ms ease',
+                    }}
+                  >
+                    <RefreshCw style={{ width: 12, height: 12, animation: isGenerating ? 'spin 1s linear infinite' : 'none' }} />
+                  </button>
+
                   {/* Copy Code (symbol) */}
                   <button
                     onClick={handleCopyCode}
-                    disabled={!generatedCode}
+                    disabled={!displayedCode}
                     title={copied ? 'Copied to clipboard!' : 'Copy Python code'}
                     aria-label="Copy code"
                     style={{
@@ -1319,7 +1241,7 @@ export function ViewAsCodeStudio({
                       border: `1px solid ${copied ? 'rgba(34,197,94,0.45)' : BB.border}`,
                       background: copied ? 'rgba(34,197,94,0.18)' : 'transparent',
                       color: copied ? BB.success : BB.muted,
-                      cursor: generatedCode ? 'pointer' : 'not-allowed',
+                      cursor: displayedCode ? 'pointer' : 'not-allowed',
                       transition: 'all 120ms ease',
                     }}
                   >
@@ -1329,7 +1251,7 @@ export function ViewAsCodeStudio({
                   {/* Export .py Script (symbol) */}
                   <button
                     onClick={handleDownloadScript}
-                    disabled={!generatedCode}
+                    disabled={!displayedCode}
                     title="Download standalone Python script"
                     aria-label="Export .py script"
                     style={{
@@ -1341,8 +1263,8 @@ export function ViewAsCodeStudio({
                       borderRadius: 4,
                       border: `1px solid ${BB.border}`,
                       background: 'transparent',
-                      color: generatedCode ? BB.text : BB.disabled,
-                      cursor: generatedCode ? 'pointer' : 'not-allowed',
+                      color: displayedCode ? BB.text : BB.disabled,
+                      cursor: displayedCode ? 'pointer' : 'not-allowed',
                       transition: 'all 120ms ease',
                     }}
                   >
@@ -1470,7 +1392,7 @@ export function ViewAsCodeStudio({
                 )}
 
                 {/* Synthesized Python Code with Unified Row Architecture */}
-                {!isGenerating && !generationError && !authError && generatedCode && (
+                {!isGenerating && !generationError && !authError && displayedCode && (
                   <div
                     style={{
                       display: 'flex',
@@ -1537,10 +1459,45 @@ export function ViewAsCodeStudio({
                     })}
                   </div>
                 )}
+
+                {/* Empty File State */}
+                {!isGenerating && !generationError && !authError && !displayedCode && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flex: 1,
+                      padding: 40,
+                      gap: 12,
+                      color: BB.muted,
+                      fontSize: 12,
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    <FileCode style={{ width: 28, height: 28, color: BB.disabled }} />
+                    <span>File is empty. Click Regenerate to synthesize pipeline code.</span>
+                    <button
+                      onClick={() => generatePipelineCode(activeExperimentFile)}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: 5,
+                        background: BB.elevated,
+                        border: `1px solid ${BB.primaryLight}`,
+                        color: BB.text,
+                        fontSize: 11,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Generate Code
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Integrated IDE Status Bar */}
-              {generatedCode && (
+              {displayedCode && (
                 <div
                   style={{
                     display: 'flex',
@@ -1570,7 +1527,6 @@ export function ViewAsCodeStudio({
                   </div>
                 </div>
               )}
-              </>)}
             </div>
           )}
 
@@ -1689,7 +1645,7 @@ export function ViewAsCodeStudio({
                   {/* Copy Code (symbol) */}
                   <button
                     onClick={handleCopyCode}
-                    disabled={!generatedCode}
+                    disabled={!displayedCode}
                     title={copied ? 'Copied to clipboard!' : 'Copy Python code'}
                     aria-label="Copy code"
                     style={{
@@ -1702,7 +1658,7 @@ export function ViewAsCodeStudio({
                       border: `1px solid ${copied ? 'rgba(34,197,94,0.45)' : BB.border}`,
                       background: copied ? 'rgba(34,197,94,0.18)' : 'transparent',
                       color: copied ? BB.success : BB.muted,
-                      cursor: generatedCode ? 'pointer' : 'not-allowed',
+                      cursor: displayedCode ? 'pointer' : 'not-allowed',
                       transition: 'all 120ms ease',
                     }}
                   >

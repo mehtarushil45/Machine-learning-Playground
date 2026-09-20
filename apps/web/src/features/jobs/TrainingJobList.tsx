@@ -38,7 +38,6 @@ export const TrainingJobList = memo(function TrainingJobList({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Job ID</TableHead>
           <TableHead>Algorithm</TableHead>
           <TableHead>Target</TableHead>
           <TableHead>Status</TableHead>
@@ -54,14 +53,11 @@ export const TrainingJobList = memo(function TrainingJobList({
           const isTerminal = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status)
 
           return (
-            <TableRow key={job.job_id} className="cursor-pointer hover:bg-muted/40">
-              <TableCell
-                className="font-mono text-xs font-semibold text-primary"
-                onClick={() => onSelectJob && onSelectJob(job)}
-              >
-                {job.job_id.slice(0, 8)}
-              </TableCell>
-
+            <TableRow
+              key={job.job_id}
+              className="cursor-pointer hover:bg-muted/40"
+              onClick={() => onSelectJob && onSelectJob(job)}
+            >
               <TableCell className="text-xs font-semibold text-foreground">
                 {job.algorithm}
               </TableCell>
