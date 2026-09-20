@@ -216,9 +216,32 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
           {/* Left Column: Algorithm Choice & Split */}
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
-                Algorithm Architecture
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Algorithm Architecture
+                </label>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 9px',
+                    borderRadius: 20,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.05em',
+                    background: taskType === 'regression'
+                      ? 'rgba(245, 158, 11, 0.14)'
+                      : 'rgba(138, 121, 202, 0.14)',
+                    color: taskType === 'regression' ? '#F59E0B' : '#8A79CA',
+                    border: taskType === 'regression'
+                      ? '1px solid rgba(245, 158, 11, 0.35)'
+                      : '1px solid rgba(138, 121, 202, 0.35)',
+                  }}
+                >
+                  {taskType === 'regression' ? '📈 Regression Task' : '🔍 Classification Task'}
+                </span>
+              </div>
               <Select
                 value={effectiveAlgorithm}
                 onChange={setAlgorithm}

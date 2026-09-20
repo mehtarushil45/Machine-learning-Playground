@@ -59,6 +59,7 @@ def evaluate_regression(y_true: Any, y_pred: Any) -> Dict[str, float]:
 
     return {
         "mae": round(mae, 4),
+        "mse": round(float(mse), 4),
         "rmse": round(float(rmse), 4),
         "r2_score": round(r2, 4),
     }
