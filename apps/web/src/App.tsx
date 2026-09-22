@@ -10,12 +10,14 @@ import {
   Award,
   Search,
   BarChart2,
+  FolderOpen,
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider } from './providers/AuthContext';
 import { ProjectProvider, useProject, type LifecycleStage } from './providers/ProjectContext';
 import { Toast } from './components/ui/Toast';
 import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
+import { ProjectGatekeeper } from './features/datasets/ProjectGatekeeper';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { ExplainabilityHub } from './features/explainability/ExplainabilityHub';
@@ -56,7 +58,7 @@ const BB = {
 } as const;
 
 function AppContent() {
-  const { setLifecycleStage, activeJob } = useProject();
+  const { setLifecycleStage, activeJob, isProjectInitialized, dataset, activeExperimentFile, resetProject } = useProject();
 
   const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -273,8 +275,40 @@ function AppContent() {
             gap: 16,
           }}
         >
-          {/* Header left: Clean brand spacer (Timeline permanently removed) */}
-          <div style={{ width: 120, flexShrink: 0 }} />
+          {/* Header left: dataset + experiment context pill (shown when project initialized) */}
+          <div style={{ width: 220, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {isProjectInitialized && dataset && (
+              <>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '4px 10px', borderRadius: 6,
+                  background: 'rgba(138, 121, 202, 0.1)',
+                  border: `1px solid ${BB.border}`,
+                  maxWidth: 180, overflow: 'hidden',
+                }}
+                title={`Dataset: ${dataset.fileName} • Experiment: ${activeExperimentFile}`}
+                >
+                  <FolderOpen style={{ width: 11, height: 11, color: BB.primaryLight, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: BB.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeExperimentFile}
+                  </span>
+                </div>
+                <button
+                  onClick={resetProject}
+                  title="New Project — reset to dataset upload"
+                  style={{
+                    padding: '4px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                    border: `1px solid ${BB.border}`, background: 'transparent',
+                    color: BB.disabled, cursor: 'pointer', transition: 'all 150ms', flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = BB.muted; e.currentTarget.style.borderColor = BB.borderHover; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = BB.disabled; e.currentTarget.style.borderColor = BB.border; }}
+                >
+                  New Project
+                </button>
+              </>
+            )}
+          </div>
 
           {/* Header Center: C3 Global Search Bar */}
           <div
@@ -388,64 +422,74 @@ function AppContent() {
             boxSizing: 'border-box',
           }}
         >
-          {/* Pages: always mounted, CSS-hidden when not active.
-               Preserves all local state across navigation — no unmounting. */}
+          {/* ── GATEKEEPER WALL ─────────────────────────────────────────────────
+               When no dataset+file is initialized (cold start, after reset, or
+               when the user navigates to any tab without a project), we render
+               the ProjectGatekeeper full-screen regardless of activeTab.
+               Once initializeProject() is called, isProjectInitialized becomes
+               true and we drop through to the studio pages below.
+          ─────────────────────────────────────────────────────────────────── */}
+          {!isProjectInitialized ? (
+            <ProjectGatekeeper />
+          ) : (
+            <>
+              <div style={{ display: activeTab === 'workspace' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <ErrorBoundary key="workspace" onReset={() => handleNavigate('workspace')}>
+                  <DatasetProfilerPage
+                    onShowToast={showToast}
+                    onNavigate={handleNavigate}
+                    isCopilotOpen={isCopilotOpen}
+                    onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
+                  />
+                </ErrorBoundary>
+              </div>
 
-          <div style={{ display: activeTab === 'workspace' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <ErrorBoundary key="workspace" onReset={() => handleNavigate('workspace')}>
-              <DatasetProfilerPage
-                onShowToast={showToast}
-                onNavigate={handleNavigate}
-                isCopilotOpen={isCopilotOpen}
-                onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
-              />
-            </ErrorBoundary>
-          </div>
+              <div style={{ display: activeTab === 'code-studio' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <ErrorBoundary key="code-studio" onReset={() => handleNavigate('workspace')}>
+                  <ViewAsCodeStudio
+                    isActive={activeTab === 'code-studio'}
+                    onShowToast={showToast}
+                    onNavigate={(tab) => handleNavigate(tab as PlatformTab)}
+                    isCopilotOpen={isCopilotOpen}
+                    onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
+                  />
+                </ErrorBoundary>
+              </div>
 
-          <div style={{ display: activeTab === 'code-studio' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <ErrorBoundary key="code-studio" onReset={() => handleNavigate('workspace')}>
-              <ViewAsCodeStudio
-                isActive={activeTab === 'code-studio'}
-                onShowToast={showToast}
-                onNavigate={(tab) => handleNavigate(tab as PlatformTab)}
-                isCopilotOpen={isCopilotOpen}
-                onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
-              />
-            </ErrorBoundary>
-          </div>
+              <div style={{ display: activeTab === 'training-results' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <ErrorBoundary key="training-results" onReset={() => handleNavigate('workspace')}>
+                  <TrainingResultsPage
+                    onNavigate={handleNavigate}
+                    onShowToast={showToast}
+                  />
+                </ErrorBoundary>
+              </div>
 
-          <div style={{ display: activeTab === 'training-results' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <ErrorBoundary key="training-results" onReset={() => handleNavigate('workspace')}>
-              <TrainingResultsPage
-                onNavigate={handleNavigate}
-                onShowToast={showToast}
-              />
-            </ErrorBoundary>
-          </div>
+              <div style={{ display: activeTab === 'explainability' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <ErrorBoundary key="explainability" onReset={() => setActiveTab('workspace')}>
+                  <ExplainabilityHub />
+                </ErrorBoundary>
+              </div>
 
-          <div style={{ display: activeTab === 'explainability' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <ErrorBoundary key="explainability" onReset={() => setActiveTab('workspace')}>
-              <ExplainabilityHub />
-            </ErrorBoundary>
-          </div>
+              <div style={{ display: activeTab === 'classrooms' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <ErrorBoundary key="classrooms" onReset={() => setActiveTab('workspace')}>
+                  <ClassroomHub />
+                </ErrorBoundary>
+              </div>
 
-          <div style={{ display: activeTab === 'classrooms' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <ErrorBoundary key="classrooms" onReset={() => setActiveTab('workspace')}>
-              <ClassroomHub />
-            </ErrorBoundary>
-          </div>
+              <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
+                  <DeploymentStudio />
+                </ErrorBoundary>
+              </div>
 
-          <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
-              <DeploymentStudio />
-            </ErrorBoundary>
-          </div>
-
-          <div style={{ display: activeTab === 'portfolios' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            <ErrorBoundary key="portfolios" onReset={() => setActiveTab('workspace')}>
-              <PortfolioViewer />
-            </ErrorBoundary>
-          </div>
+              <div style={{ display: activeTab === 'portfolios' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+                <ErrorBoundary key="portfolios" onReset={() => setActiveTab('workspace')}>
+                  <PortfolioViewer />
+                </ErrorBoundary>
+              </div>
+            </>
+          )}
         </main>
       </div>
 

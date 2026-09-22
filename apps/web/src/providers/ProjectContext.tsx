@@ -4,13 +4,19 @@
  * Carries the "current project" (active dataset, selection, trained model)
  * so navigating between pages or refreshing the browser doesn't lose context.
  * Persisted to localStorage with automatic hydration.
+ *
+ * Gatekeeper rule:
+ * - `isProjectInitialized` is true only when BOTH a dataset is loaded AND
+ *   an experiment file has been explicitly named by the user.
+ * - App.tsx uses this flag to decide whether to show the ProjectGatekeeper
+ *   or the studio pages.
  */
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Dataset } from '../types/dataset';
 import type { JobEntity } from '../types/job';
 
-const STORAGE_KEY = 'ml_playground_project_state_v2';
+const STORAGE_KEY = 'ml_playground_project_state_v3';
 
 export interface ActiveTrainingConfiguration {
   dataset_id: string;
@@ -62,6 +68,8 @@ export type LifecycleStage =
   | 'certify';
 
 interface ProjectContextValue extends ProjectState {
+  /** True when both dataset and experiment file are set — gatekeeper check */
+  isProjectInitialized:  boolean;
   setDataset:            (d: Dataset | null)  => void;
   setSelectedFeatures:   (f: string[])         => void;
   setSelectedTarget:     (t: string | null)    => void;
@@ -76,9 +84,15 @@ interface ProjectContextValue extends ProjectState {
   createExperimentFile:  (fileName: string, initialCode?: string) => void;
   deleteExperimentFile:  (fileName: string) => void;
   setFileJob:            (fileName: string, job: JobEntity) => void;
+  /**
+   * 2-step gatekeeper initializer — called when user completes Step 2.
+   * Atomically sets the dataset, creates the first experiment file,
+   * and unlocks the studio pages.
+   */
+  initializeProject:     (dataset: Dataset, fileName: string) => void;
   /** Convenience: load a new dataset and reset selection */
   loadDataset:           (d: Dataset)          => void;
-  /** Convenience: reset everything (new project) */
+  /** Convenience: reset everything and return to gatekeeper */
   resetProject:          ()                    => void;
 }
 
@@ -101,20 +115,29 @@ function loadPersistedState(): Partial<ProjectState> {
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const initial = loadPersistedState();
 
+  // Only restore files if dataset was also persisted — prevents phantom state
+  // where files exist but no dataset was loaded (gatekeeper should show).
+  const hasPersistedDataset = Boolean(initial.dataset);
+  const hasPersistedFile    = Boolean(
+    initial.activeExperimentFile &&
+    initial.experimentFiles &&
+    initial.experimentFiles[initial.activeExperimentFile] !== undefined
+  );
+
   const initialFiles: Record<string, string> =
-    initial.experimentFiles && Object.keys(initial.experimentFiles).length > 0
+    hasPersistedDataset && initial.experimentFiles && Object.keys(initial.experimentFiles).length > 0
       ? initial.experimentFiles
-      : { 'pipeline_generated.py': '' };
+      : {};
 
   const initialActiveFile: string =
-    initial.activeExperimentFile && initialFiles[initial.activeExperimentFile] !== undefined
-      ? initial.activeExperimentFile
-      : Object.keys(initialFiles)[0] || 'pipeline_generated.py';
+    hasPersistedDataset && hasPersistedFile
+      ? initial.activeExperimentFile!
+      : '';
 
   const initialTabs: string[] =
-    Array.isArray(initial.openTabs) && initial.openTabs.length > 0
+    hasPersistedDataset && Array.isArray(initial.openTabs) && initial.openTabs.length > 0
       ? initial.openTabs.filter((t) => initialFiles[t] !== undefined)
-      : [initialActiveFile];
+      : [];
 
   const [dataset,           setDataset]           = useState<Dataset | null>(initial.dataset ?? null);
   const [selectedFeatures,  setSelectedFeatures]  = useState<string[]>(initial.selectedFeatures ?? []);
@@ -215,6 +238,27 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     openTabs,
   ]);
 
+  /**
+   * initializeProject — 2-step gatekeeper completion handler.
+   * Called when user confirms their dataset upload AND experiment filename.
+   * Atomically sets dataset, creates the experiment file entry, and unlocks
+   * the studio pages by setting activeExperimentFile.
+   */
+  const initializeProject = useCallback((d: Dataset, fileName: string) => {
+    const safeName = fileName.trim().endsWith('.py') ? fileName.trim() : `${fileName.trim()}.py`;
+    setDataset(d);
+    setSelectedFeatures([]);
+    setSelectedTarget(null);
+    setTrainingConfig(null);
+    setInferredTaskType(null);
+    setActiveJobState(null);
+    setFileJobs({});
+    setLifecycleStage('dataset');
+    setExperimentFiles({ [safeName]: '' });
+    setOpenTabs([safeName]);
+    setActiveExperimentFile(safeName);
+  }, []);
+
   const loadDataset = useCallback((d: Dataset) => {
     setDataset(d);
     setSelectedFeatures([]);
@@ -231,22 +275,27 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSelectedTarget(null);
     setTrainingConfig(null);
     setInferredTaskType(null);
-    setActiveJob(null);
-    setLifecycleStage('dataset');
-    setExperimentFiles({ 'pipeline_generated.py': '' });
-    setOpenTabs(['pipeline_generated.py']);
-    setActiveExperimentFile('pipeline_generated.py');
+    setActiveJobState(null);
     setFileJobs({});
+    setLifecycleStage('dataset');
+    // Clear all experiment state so gatekeeper re-appears
+    setExperimentFiles({});
+    setOpenTabs([]);
+    setActiveExperimentFile('');
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
       /* ignore */
     }
-  }, [setActiveJob]);
+  }, []);
+
+  // Derived flag: true only when both dataset AND a named experiment file are present.
+  const isProjectInitialized = Boolean(dataset && activeExperimentFile && activeExperimentFile.length > 0);
 
   return (
     <ProjectContext.Provider
       value={{
+        isProjectInitialized,
         dataset,
         selectedFeatures,
         selectedTarget,
@@ -272,6 +321,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         updateExperimentFileCode,
         createExperimentFile,
         deleteExperimentFile,
+        initializeProject,
         loadDataset,
         resetProject,
       }}
