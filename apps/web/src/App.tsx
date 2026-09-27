@@ -9,7 +9,6 @@ import {
   Rocket,
   Award,
   Search,
-  BarChart2,
   FolderOpen,
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
@@ -58,7 +57,7 @@ const BB = {
 } as const;
 
 function AppContent() {
-  const { setLifecycleStage, activeJob, isProjectInitialized, dataset, activeExperimentFile, resetProject } = useProject();
+  const { setLifecycleStage, isProjectInitialized, dataset, activeExperimentFile, resetProject } = useProject();
 
   const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -95,14 +94,15 @@ function AppContent() {
   };
 
   const navItems = [
-    { id: 'workspace',          label: 'Dataset & Profiler',        icon: <Database className="w-5 h-5" />,   alwaysShow: true  },
-    { id: 'code-studio',        label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />,     alwaysShow: true  },
-    { id: 'training-results',   label: 'Training Results',          icon: <BarChart2 className="w-5 h-5" />, alwaysShow: false },
-    { id: 'explainability',     label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" />,  alwaysShow: true  },
-    { id: 'classrooms',         label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" />, alwaysShow: true },
-    { id: 'deployments',        label: 'Deployment Studio',         icon: <Rocket className="w-5 h-5" />,    alwaysShow: true  },
-    { id: 'portfolios',         label: 'Portfolios & Verification',  icon: <Award className="w-5 h-5" />,     alwaysShow: true  },
-  ].filter(item => item.alwaysShow || !!activeJob);
+    { id: 'workspace',          label: 'Dataset & Profiler',        icon: <Database className="w-5 h-5" />     },
+    { id: 'code-studio',        label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />        },
+    // 'training-results' is intentionally excluded from the sidebar.
+    // It is only reachable by clicking "Launch Training Job" in the Code Studio.
+    { id: 'explainability',     label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" />    },
+    { id: 'classrooms',         label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" /> },
+    { id: 'deployments',        label: 'Deployment Studio',         icon: <Rocket className="w-5 h-5" />       },
+    { id: 'portfolios',         label: 'Portfolios & Verification',  icon: <Award className="w-5 h-5" />       },
+  ];
 
   return (
     <div
