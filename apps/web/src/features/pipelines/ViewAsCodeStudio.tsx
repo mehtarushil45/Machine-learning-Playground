@@ -1270,6 +1270,38 @@ export function ViewAsCodeStudio({
                   >
                     <Download style={{ width: 12, height: 12 }} />
                   </button>
+
+                  {/* View Results — only appears after a training job is launched */}
+                  {activeJob && (
+                    <>
+                      <div style={{ width: 1, height: 14, background: BB.border, margin: '0 4px' }} />
+                      <button
+                        onClick={() => onNavigate?.('training-results')}
+                        title="View training results"
+                        aria-label="View Training Results"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          padding: '0 10px',
+                          height: 22,
+                          borderRadius: 4,
+                          border: `1px solid rgba(34,197,94,0.45)`,
+                          background: 'rgba(34,197,94,0.12)',
+                          color: BB.success,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          transition: 'all 120ms ease',
+                          whiteSpace: 'nowrap',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.22)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.12)'; }}
+                      >
+                        View Results
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 
