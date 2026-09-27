@@ -1,4 +1,4 @@
-﻿"""LocalDeployment Pydantic schemas — Prototype 4."""
+"""LocalDeployment Pydantic schemas — Prototype 4."""
 
 from __future__ import annotations
 
@@ -46,6 +46,10 @@ class LocalDeploymentResponse(BaseModel):
     logs: List[Dict[str, str]]
     total_predictions: int = 0
     endpoint_path: str = Field(..., description="Relative path: /api/v1/local-deployments/{id}/predict")
+    sample_inputs: Optional[Dict[str, Any]] = None
+    metrics: Optional[Dict[str, Any]] = None
+    dataset_name: Optional[str] = None
+    algorithm_display_name: Optional[str] = None
 
 
 class LocalPredictRequest(BaseModel):

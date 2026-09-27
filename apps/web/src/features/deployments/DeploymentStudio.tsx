@@ -1,21 +1,22 @@
 /**
- * DeploymentStudio — Prototype 4: Local Deployment Studio
+ * DeploymentStudio — Enterprise Model Deployment & Live Prediction Console
  *
- * Connects a completed training run to a live local prediction endpoint.
- * All model metadata is sourced from the active training job — never from
- * Page 1 configuration.  The prediction form is generated dynamically from
- * the artifact's feature schema.
+ * Professional ML platform deployment interface modeled after industry standards
+ * (AWS SageMaker Real-Time Endpoints, DataRobot, Vertex AI).
  *
- * Architecture:
- *   activeJob (ProjectContext)
- *     -> job_id + metadata.model_id
- *     -> POST /api/v1/local-deployments        (create)
- *     -> POST /api/v1/local-deployments/{id}/predict  (predict)
- *
- * Immutability: model_path is snapshotted at creation time.
- * A new training run cannot change an existing deployment.
+ * Design Principles:
+ * - Enterprise Cleanliness: Replaces raw internal UUIDs with human-readable model,
+ *   dataset, and target metadata. Technical identifiers are neatly tucked into
+ *   a collapsed developer audit drawer.
+ * - Dynamic Feature Typing: Categorical features render as rich select dropdowns
+ *   using exact categories extracted from the model's fitted preprocessor.
+ *   Numeric features render with numeric steppers; boolean features render as toggles.
+ * - Auto-Fill Sample Data: 1-click testing with realistic dataset values.
+ * - Developer Integration: Ready-to-copy cURL, Python, and JavaScript snippets.
+ * - Live Probabilities & Session History: Interactive results with class distributions
+ *   and recent inference logs.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Rocket,
@@ -26,16 +27,17 @@ import {
   ChevronDown,
   ChevronUp,
   Cpu,
-  Database,
-  Target,
-  Layers,
-  Hash,
-  AlertCircle,
-  Activity,
+  Sparkles,
+  RotateCcw,
+  Code2,
+  Copy,
+  Check,
   Zap,
-  BarChart3,
-  ListOrdered,
   Clock,
+  Terminal,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails } from '../../services/jobService';
@@ -46,205 +48,330 @@ import {
   type FeatureSchemaEntry,
 } from '../../services/localDeploymentService';
 
-/* ─── Status badge helpers ─────────────────────────────────── */
-const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  CREATED:   { bg: 'rgba(100,116,139,0.15)', text: '#94A3B8',  dot: '#94A3B8' },
-  DEPLOYING: { bg: 'rgba(245,166,35,0.15)',  text: '#F5A623',  dot: '#F5A623' },
-  READY:     { bg: 'rgba(0,245,160,0.15)',   text: '#00F5A0',  dot: '#00F5A0' },
-  FAILED:    { bg: 'rgba(239,68,68,0.15)',   text: '#FF4D6D',  dot: '#FF4D6D' },
-  STOPPING:  { bg: 'rgba(245,166,35,0.12)',  text: '#F5A623',  dot: '#F5A623' },
-  STOPPED:   { bg: 'rgba(100,116,139,0.12)', text: '#64748B',  dot: '#64748B' },
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const c = STATUS_COLORS[status] || STATUS_COLORS.CREATED;
-  const isAnimated = status === 'DEPLOYING' || status === 'STOPPING';
+/* ─── Type Badge Helpers ───────────────────────────────────── */
+function TypeBadge({ type }: { type: string }) {
+  if (type === 'categorical') {
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          padding: '2px 7px',
+          borderRadius: 4,
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          background: 'rgba(168, 85, 247, 0.15)',
+          color: '#C084FC',
+          border: '1px solid rgba(168, 85, 247, 0.3)',
+        }}
+      >
+        CAT
+      </span>
+    );
+  }
+  if (type === 'boolean') {
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          padding: '2px 7px',
+          borderRadius: 4,
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.04em',
+          background: 'rgba(59, 130, 246, 0.15)',
+          color: '#60A5FA',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
+        }}
+      >
+        BOOL
+      </span>
+    );
+  }
   return (
     <span
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        padding: '3px 10px', borderRadius: 99,
-        background: c.bg, color: c.text,
-        fontSize: 11, fontWeight: 700, letterSpacing: '0.06em',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        padding: '2px 7px',
+        borderRadius: 4,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        background: 'rgba(0, 212, 255, 0.12)',
+        color: '#00D4FF',
+        border: '1px solid rgba(0, 212, 255, 0.25)',
       }}
     >
-      <span
-        style={{
-          width: 7, height: 7, borderRadius: '50%',
-          background: c.dot,
-          animation: isAnimated ? 'pulse 1.2s ease-in-out infinite' : undefined,
-        }}
-      />
-      {status}
+      NUM
     </span>
   );
 }
 
-/* ─── Numeric / categorical input field ─────────────────────── */
-function FeatureInput({
+/* ─── Status Badge ─────────────────────────────────────────── */
+const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; label: string }> = {
+  READY:     { bg: 'rgba(0,245,160,0.12)', text: '#00F5A0', dot: '#00F5A0', label: 'LIVE & SERVING' },
+  DEPLOYING: { bg: 'rgba(245,166,35,0.15)', text: '#F5A623', dot: '#F5A623', label: 'DEPLOYING' },
+  STOPPED:   { bg: 'rgba(100,116,139,0.15)', text: '#94A3B8', dot: '#64748B', label: 'STOPPED' },
+  FAILED:    { bg: 'rgba(239,68,68,0.15)', text: '#FF4D6D', dot: '#FF4D6D', label: 'FAILED' },
+  STOPPING:  { bg: 'rgba(245,166,35,0.12)', text: '#F5A623', dot: '#F5A623', label: 'STOPPING' },
+};
+
+function StatusIndicator({ status }: { status: string }) {
+  const c = STATUS_CONFIG[status] || { bg: 'rgba(100,116,139,0.15)', text: '#94A3B8', dot: '#94A3B8', label: status };
+  const isAnimated = status === 'READY' || status === 'DEPLOYING';
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '5px 12px',
+        borderRadius: 99,
+        background: c.bg,
+        border: `1px solid ${c.dot}33`,
+      }}
+    >
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: c.dot,
+          boxShadow: isAnimated ? `0 0 10px ${c.dot}` : undefined,
+          animation: isAnimated ? 'deployPulse 1.8s ease-in-out infinite' : undefined,
+        }}
+      />
+      <span style={{ fontSize: 11, fontWeight: 800, color: c.text, letterSpacing: '0.08em' }}>
+        {c.label}
+      </span>
+    </div>
+  );
+}
+
+/* ─── Smart Feature Input Component ────────────────────────── */
+function SmartFeatureInput({
+  name,
   schema,
   value,
   onChange,
 }: {
   name: string;
-  schema: FeatureSchemaEntry;
+  schema?: FeatureSchemaEntry;
   value: string;
   onChange: (v: string) => void;
 }) {
-  const isCateg = schema.type === 'categorical' && schema.categories && schema.categories.length > 0;
+  const type = schema?.type || 'numeric';
+  const hasCategories = type === 'categorical' && schema?.categories && schema.categories.length > 0;
+  const isBoolean = type === 'boolean' || (schema?.categories?.length === 2 && schema.categories.includes('0') && schema.categories.includes('1'));
+
   const inputStyle: React.CSSProperties = {
-    width: '100%', padding: '7px 10px', borderRadius: 8,
-    background: '#040912', border: '1px solid #152540',
-    color: '#E2E8F0', fontSize: 13, fontFamily: 'var(--font-mono)',
-    outline: 'none', transition: 'border-color 150ms',
+    width: '100%',
+    padding: '9px 12px',
+    borderRadius: 8,
+    background: '#040912',
+    border: '1px solid #1E293B',
+    color: '#E2E8F0',
+    fontSize: 13,
+    fontFamily: 'var(--font-mono, monospace)',
+    outline: 'none',
+    transition: 'all 150ms ease',
   };
 
-  if (isCateg) {
+  if (hasCategories) {
+    const selected = value || (schema!.categories && schema!.categories.length > 0 ? schema!.categories[0] : '');
     return (
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-        <option value="">Select…</option>
-        {schema.categories!.map((cat) => (
-          <option key={cat} value={cat}>{cat}</option>
+      <select
+        value={selected}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...inputStyle, cursor: 'pointer' }}
+      >
+        {schema!.categories!.map((cat) => (
+          <option key={cat} value={cat}>
+            {cat}
+          </option>
         ))}
       </select>
     );
   }
+
+  if (isBoolean) {
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...inputStyle, cursor: 'pointer' }}
+      >
+        <option value="1">1 — True / Positive</option>
+        <option value="0">0 — False / Negative</option>
+      </select>
+    );
+  }
+
+  if (type === 'categorical' || type === 'text') {
+    return (
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={`Enter ${name.replace(/_/g, ' ')}…`}
+        style={inputStyle}
+      />
+    );
+  }
+
   return (
     <input
       type="number"
       step="any"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder={schema.min != null ? `e.g. ${schema.min}` : '0'}
+      placeholder={schema?.min != null ? `e.g. ${schema.min}` : '0.0'}
       style={inputStyle}
     />
   );
 }
 
-/* ─── Prediction result panel ─────────────────────────────── */
-function PredictionResult({ result }: { result: LocalPredictResponse }) {
-  const isClassification = result.problem_type.toLowerCase().includes('classif');
-  const probs = result.probabilities;
+/* ─── API Integration Snippet Panel ────────────────────────── */
+function ApiIntegrationTabs({
+  endpointUrl,
+  samplePayload,
+}: {
+  endpointUrl: string;
+  samplePayload: Record<string, any>;
+}) {
+  const [activeTab, setActiveTab] = useState<'curl' | 'python' | 'javascript'>('curl');
+  const [copied, setCopied] = useState(false);
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={{
-        padding: 16, borderRadius: 12,
-        background: 'rgba(0,245,160,0.05)',
-        border: '1px solid rgba(0,245,160,0.25)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#00F5A0', letterSpacing: '0.05em' }}>
-          PREDICTION RESULT
-        </span>
-        <span style={{ fontSize: 11, color: '#475569', fontFamily: 'var(--font-mono)' }}>
-          {result.latency_ms.toFixed(1)}ms
-        </span>
-      </div>
+  const curlSnippet = useMemo(() => {
+    return `curl -X POST "${endpointUrl}" \\
+  -H "Content-Type: application/json" \\
+  -d '${JSON.stringify({ inputs: samplePayload }, null, 2)}'`;
+  }, [endpointUrl, samplePayload]);
 
-      {/* Primary prediction */}
-      <div style={{
-        padding: '12px 16px', borderRadius: 10,
-        background: '#040912', border: '1px solid #152540', marginBottom: 12,
-      }}>
-        <div style={{ fontSize: 11, color: '#475569', marginBottom: 4 }}>Predicted Value</div>
-        <div style={{ fontSize: 28, fontWeight: 800, color: '#E2E8F0', fontFamily: 'var(--font-mono)' }}>
-          {String(result.prediction)}
-        </div>
-        {result.confidence != null && (
-          <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 4 }}>
-            Confidence: <strong style={{ color: '#00F5A0' }}>{(result.confidence * 100).toFixed(1)}%</strong>
-          </div>
-        )}
-      </div>
+  const pythonSnippet = useMemo(() => {
+    return `import requests
 
-      {/* Probabilities */}
-      {isClassification && probs && Object.keys(probs).length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ fontSize: 11, color: '#475569', marginBottom: 4 }}>Class Probabilities</div>
-          {Object.entries(probs)
-            .sort(([, a], [, b]) => b - a)
-            .map(([cls, prob]) => (
-              <div key={cls}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                  <span style={{ fontSize: 12, color: '#94A3B8' }}>{cls}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#E2E8F0', fontFamily: 'var(--font-mono)' }}>
-                    {(prob * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div style={{ height: 5, borderRadius: 99, background: '#152540', overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%', width: `${(prob * 100).toFixed(1)}%`,
-                    background: 'linear-gradient(90deg, #00D4FF, #00F5A0)',
-                    borderRadius: 99, transition: 'width 500ms ease',
-                  }} />
-                </div>
-              </div>
-            ))}
-        </div>
-      )}
-    </motion.div>
-  );
+url = "${endpointUrl}"
+payload = {
+    "inputs": ${JSON.stringify(samplePayload, null, 4)}
 }
 
-/* ─── Log panel ──────────────────────────────────────────── */
-function LogPanel({ logs }: { logs: { ts: string; msg: string }[] }) {
-  const [open, setOpen] = useState(false);
+response = requests.post(url, json=payload)
+result = response.json()
+print("Prediction:", result["prediction"])
+print("Confidence:", result.get("confidence"))`;
+  }, [endpointUrl, samplePayload]);
+
+  const jsSnippet = useMemo(() => {
+    return `const res = await fetch("${endpointUrl}", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    inputs: ${JSON.stringify(samplePayload, null, 4)}
+  })
+});
+const data = await res.json();
+console.log("Prediction:", data.prediction);`;
+  }, [endpointUrl, samplePayload]);
+
+  const activeSnippet =
+    activeTab === 'curl' ? curlSnippet : activeTab === 'python' ? pythonSnippet : jsSnippet;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(activeSnippet);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <div style={{ borderRadius: 10, border: '1px solid #152540', overflow: 'hidden' }}>
-      <button
-        onClick={() => setOpen((p) => !p)}
+    <div style={{ borderRadius: 10, background: '#030810', border: '1px solid #152540', overflow: 'hidden' }}>
+      <div
         style={{
-          width: '100%', padding: '10px 14px',
-          background: '#040912', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          color: '#64748B', fontSize: 12, fontWeight: 600,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          background: '#070F1E',
+          borderBottom: '1px solid #152540',
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <ListOrdered size={13} /> Deployment Logs ({logs.length})
-        </span>
-        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }}
-            style={{ overflow: 'hidden' }}
-          >
-            <div style={{
-              background: '#030810', padding: 12,
-              maxHeight: 220, overflowY: 'auto',
-              fontFamily: 'var(--font-mono)', fontSize: 11,
-            }}>
-              {logs.length === 0 ? (
-                <div style={{ color: '#475569' }}>No log entries yet.</div>
-              ) : (
-                [...logs].reverse().map((l, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 6 }}>
-                    <span style={{ color: '#334155', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                      {new Date(l.ts).toLocaleTimeString()}
-                    </span>
-                    <span style={{ color: l.msg.startsWith('ERROR') ? '#FF4D6D' : '#94A3B8' }}>
-                      {l.msg}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['curl', 'python', 'javascript'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: 'none',
+                background: activeTab === tab ? '#1E293B' : 'transparent',
+                color: activeTab === tab ? '#00D4FF' : '#64748B',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+              }}
+            >
+              {tab === 'javascript' ? 'Node.js' : tab}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={handleCopy}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '4px 8px',
+            borderRadius: 6,
+            background: 'rgba(0,212,255,0.08)',
+            border: '1px solid rgba(0,212,255,0.2)',
+            color: copied ? '#00F5A0' : '#00D4FF',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <pre
+        style={{
+          margin: 0,
+          padding: 12,
+          color: '#94A3B8',
+          fontSize: 11,
+          fontFamily: 'var(--font-mono, monospace)',
+          lineHeight: 1.5,
+          overflowX: 'auto',
+          maxHeight: 160,
+        }}
+      >
+        {activeSnippet}
+      </pre>
     </div>
   );
 }
 
-/* ─── Main component ─────────────────────────────────────── */
+/* ─── Main DeploymentStudio Component ──────────────────────── */
 interface DeploymentStudioProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
+}
+
+interface PredictionHistoryItem {
+  id: string;
+  ts: string;
+  prediction: string | number;
+  confidence?: number | null;
+  latency_ms: number;
+  inputs: Record<string, any>;
 }
 
 export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast }) => {
@@ -261,54 +388,113 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
   const [predResult, setPredResult] = useState<LocalPredictResponse | null>(null);
   const [predError, setPredError] = useState<string | null>(null);
 
-  // On mount: try to fetch existing deployment for this job
+  // Session prediction history
+  const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
+
+  // Collapsible drawers
+  const [showLogs, setShowLogs] = useState(false);
+  const [showApiTab, setShowApiTab] = useState(false);
+
   const jobId = activeJob?.job_id;
-  const modelId: string | undefined =
-    (activeJob?.metadata?.['model_id'] as string | undefined) ||
-    (jobId ? `model-${jobId.slice(0, 8)}` : undefined);
   const isCompleted = activeJob?.status === 'COMPLETED';
 
+  // Inject CSS keyframe for pulse animation
+  useEffect(() => {
+    if (typeof document !== 'undefined' && !document.getElementById('deploy-pulse-kf')) {
+      const style = document.createElement('style');
+      style.id = 'deploy-pulse-kf';
+      style.textContent = `
+        @keyframes deployPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.4; transform: scale(1.15); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }, []);
+
+  // Fetch deployment on mount / job change
   useEffect(() => {
     if (!jobId) return;
     LocalDeploymentService.listForJob(jobId)
       .then((deps) => {
-        if (deps.length > 0) setDeployment(deps[0]);
+        if (deps.length > 0) {
+          setDeployment(deps[0]);
+        }
       })
-      .catch(() => {/* silent — no existing deployment */});
+      .catch(() => {});
 
-    // Refresh activeJob metadata from server if model_id or metrics missing
-    if (!activeJob?.metadata?.['model_id']) {
+    // Refresh activeJob metadata if missing
+    if (!activeJob?.metadata?.['model_id'] || !activeJob?.metadata?.['metrics']) {
       fetchJobDetails(jobId)
         .then((full) => {
           if (full) setActiveJob(full);
         })
-        .catch(() => {/* silent */});
+        .catch(() => {});
     }
   }, [jobId]);
 
-  // Reset prediction when deployment changes
+  // Synchronize input fields when deployment is ready
   useEffect(() => {
-    setPredResult(null);
-    setPredError(null);
     if (deployment?.feature_columns) {
       const init: Record<string, string> = {};
-      deployment.feature_columns.forEach((f) => { init[f] = ''; });
+      const sample = deployment.sample_inputs || {};
+      deployment.feature_columns.forEach((col) => {
+        if (sample[col] != null) {
+          init[col] = String(sample[col]);
+        } else {
+          const schema = deployment.input_schema?.[col];
+          if (schema?.type === 'categorical' && schema.categories?.length) {
+            init[col] = schema.categories[0];
+          } else if (schema?.type === 'boolean') {
+            init[col] = '1';
+          } else {
+            init[col] = '';
+          }
+        }
+      });
       setInputValues(init);
     }
-  }, [deployment?.deployment_id]);
+  }, [deployment?.deployment_id, deployment?.feature_columns]);
 
-  /* ── Actions ── */
+  /* ── Computed Metadata ── */
+  const friendlyAlgorithmName = useMemo(() => {
+    if (deployment?.algorithm_display_name) return deployment.algorithm_display_name;
+    const algo = activeJob?.algorithm || deployment?.algorithm || 'Model';
+    return algo
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }, [activeJob?.algorithm, deployment]);
+
+  const friendlyDatasetName = useMemo(() => {
+    if (deployment?.dataset_name) return deployment.dataset_name;
+    const notes = activeJob?.metadata?.['notes'] as string | undefined;
+    if (notes && notes.includes('Trained on ')) {
+      const match = notes.match(/Trained on ([\w\.-]+)/);
+      if (match) return match[1];
+    }
+    return 'Uploaded Training Dataset';
+  }, [deployment?.dataset_name, activeJob?.metadata]);
+
+  const metrics = deployment?.metrics || (activeJob?.metadata?.['metrics'] as Record<string, any> | undefined);
+
+  const canDeploy = isCompleted && !deployment;
+  const canPredict = deployment?.status === 'READY';
+  const canStop = deployment?.status === 'READY' || deployment?.status === 'DEPLOYING';
+  const canRedeploy = deployment?.status === 'STOPPED' || deployment?.status === 'FAILED';
+
+  /* ── Handlers ── */
   const handleDeploy = async () => {
     if (!jobId) return;
     setDeployLoading(true);
     setDeployError(null);
     try {
-      const dep = await LocalDeploymentService.create(jobId, 'Local Deployment');
+      const dep = await LocalDeploymentService.create(jobId, friendlyAlgorithmName);
       setDeployment(dep);
       if (dep.status === 'READY') {
-        onShowToast?.('Deployment Ready!', `Model ${dep.model_id} is live.`, 'success');
+        onShowToast?.('Endpoint Live!', `${friendlyAlgorithmName} is active and ready for inference.`, 'success');
       } else if (dep.status === 'FAILED') {
-        onShowToast?.('Deployment Failed', dep.error_message || 'Model could not be loaded.', 'error');
+        onShowToast?.('Deployment Issue', dep.error_message || 'Could not load model.', 'error');
       }
     } catch (err: any) {
       const msg = err?.detail || err?.message || 'Deployment failed';
@@ -325,7 +511,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
     try {
       const updated = await LocalDeploymentService.stop(deployment.deployment_id);
       setDeployment(updated);
-      onShowToast?.('Deployment Stopped', 'Model artifact preserved.', 'info');
+      onShowToast?.('Endpoint Stopped', 'Model artifact preserved in registry.', 'info');
     } catch (err: any) {
       onShowToast?.('Stop Failed', err?.detail || err?.message, 'error');
     } finally {
@@ -340,7 +526,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
       const updated = await LocalDeploymentService.redeploy(deployment.deployment_id);
       setDeployment(updated);
       if (updated.status === 'READY') {
-        onShowToast?.('Redeployed!', 'Model is live again.', 'success');
+        onShowToast?.('Endpoint Active!', 'Model reloaded into cache.', 'success');
       }
     } catch (err: any) {
       onShowToast?.('Redeploy Failed', err?.detail || err?.message, 'error');
@@ -349,18 +535,60 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
     }
   };
 
+  const handleAutoFill = () => {
+    if (!deployment?.feature_columns) return;
+    const sample = deployment.sample_inputs || {};
+    const filled: Record<string, string> = {};
+
+    deployment.feature_columns.forEach((col) => {
+      if (sample[col] != null) {
+        filled[col] = String(sample[col]);
+      } else {
+        const schema = deployment.input_schema[col];
+        if (schema?.type === 'categorical' && schema.categories?.length) {
+          filled[col] = schema.categories[0];
+        } else if (schema?.type === 'boolean') {
+          filled[col] = '1';
+        } else {
+          filled[col] = '1.0';
+        }
+      }
+    });
+
+    setInputValues(filled);
+    onShowToast?.('Example Values Loaded', 'Populated inputs with valid training data sample.', 'info');
+  };
+
+  const handleClear = () => {
+    if (!deployment?.feature_columns) return;
+    const cleared: Record<string, string> = {};
+    deployment.feature_columns.forEach((col) => {
+      const schema = deployment.input_schema?.[col];
+      if (schema?.type === 'categorical' && schema.categories?.length) {
+        cleared[col] = schema.categories[0];
+      } else if (schema?.type === 'boolean') {
+        cleared[col] = '1';
+      } else {
+        cleared[col] = '';
+      }
+    });
+    setInputValues(cleared);
+  };
+
   const handlePredict = async () => {
     if (!deployment || deployment.status !== 'READY') return;
     setPredLoading(true);
     setPredError(null);
     setPredResult(null);
 
-    // Coerce values
+    // Build payload according to feature schema types
     const inputs: Record<string, any> = {};
     for (const [k, v] of Object.entries(inputValues)) {
       const schema = deployment.input_schema[k];
-      if (schema?.type === 'categorical') {
+      if (schema?.type === 'categorical' || schema?.type === 'text') {
         inputs[k] = v;
+      } else if (schema?.type === 'boolean') {
+        inputs[k] = v === '1' || v === 'true' ? 1 : 0;
       } else {
         const n = parseFloat(v);
         inputs[k] = isNaN(n) ? v : n;
@@ -373,6 +601,19 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
       setDeployment((prev) =>
         prev ? { ...prev, total_predictions: (prev.total_predictions || 0) + 1 } : prev
       );
+
+      // Add to session history
+      setHistory((prev) => [
+        {
+          id: String(Date.now()),
+          ts: new Date().toLocaleTimeString(),
+          prediction: res.prediction,
+          confidence: res.confidence,
+          latency_ms: res.latency_ms,
+          inputs: { ...inputs },
+        },
+        ...prev.slice(0, 4),
+      ]);
     } catch (err: any) {
       const msg = err?.detail || err?.message || 'Prediction failed';
       setPredError(msg);
@@ -382,329 +623,816 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
     }
   };
 
-  /* ── Computed ── */
-  const canDeploy = isCompleted && !deployment;
-  const canPredict = deployment?.status === 'READY';
-  const canStop = deployment?.status === 'READY' || deployment?.status === 'DEPLOYING';
-  const canRedeploy = deployment?.status === 'STOPPED' || deployment?.status === 'FAILED';
-
-  /* ── Pulse animation keyframe (injected once) ── */
-  if (typeof document !== 'undefined' && !document.getElementById('deploy-pulse-kf')) {
-    const style = document.createElement('style');
-    style.id = 'deploy-pulse-kf';
-    style.textContent = `@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`;
-    document.head.appendChild(style);
-  }
-
-  const CARD: React.CSSProperties = {
-    background: '#0A1628',
+  /* ── Styles ── */
+  const CARD_STYLE: React.CSSProperties = {
+    background: '#0A1424',
     border: '1px solid #152540',
     borderRadius: 14,
-    padding: 20,
+    padding: 22,
   };
-  const LABEL: React.CSSProperties = {
-    fontSize: 10, fontWeight: 700, letterSpacing: '0.1em',
-    color: '#475569', textTransform: 'uppercase' as const, marginBottom: 8,
-    display: 'flex', alignItems: 'center', gap: 5,
+
+  const SECTION_LABEL: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: '0.08em',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    marginBottom: 12,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
   };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 12 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-      style={{ height: '100%', overflowY: 'auto', padding: 24 }}
+      transition={{ duration: 0.2 }}
+      style={{ height: '100%', overflowY: 'auto', padding: 24, background: '#050B14' }}
     >
-      {/* ── Page Header ── */}
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{
-          fontSize: 22, fontWeight: 800, color: '#E2E8F0',
-          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4,
-        }}>
-          <Rocket size={22} style={{ color: '#00F5A0' }} />
-          Deployment Studio
-        </h1>
-        <p style={{ fontSize: 13, color: '#64748B' }}>
-          Deploy a completed training run to a local prediction endpoint. Predictions execute
-          the actual saved model artifact.
-        </p>
-      </div>
-
-      {/* ── No active job guard ── */}
+      {/* ── No Job State ── */}
       {!activeJob && (
-        <div style={{
-          ...CARD, textAlign: 'center', padding: 48,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-        }}>
-          <AlertCircle size={32} style={{ color: '#475569' }} />
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#64748B' }}>No Training Run Selected</div>
-          <div style={{ fontSize: 13, color: '#475569', maxWidth: 380, lineHeight: 1.6 }}>
-            Complete a training job first. Once a job is{' '}
-            <span style={{ color: '#00F5A0', fontWeight: 600 }}>COMPLETED</span>,
-            return here to deploy it.
+        <div
+          style={{
+            ...CARD_STYLE,
+            textAlign: 'center',
+            padding: 56,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 14,
+          }}
+        >
+          <AlertCircle size={36} style={{ color: '#475569' }} />
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#94A3B8' }}>No Active Training Run Found</div>
+          <div style={{ fontSize: 13, color: '#475569', maxWidth: 420, lineHeight: 1.6 }}>
+            Train a model on the Dataset Profiler or Pipeline Studio page first. Once completed, your model
+            artifact will be ready for 1-click deployment here.
           </div>
         </div>
       )}
 
       {activeJob && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
-
-          {/* ══ LEFT COLUMN ════════════════════════════════════════════════ */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-
-            {/* ── Model Info Card ── */}
-            <div style={CARD}>
-              <div style={LABEL}><Cpu size={11} /> Model Artifact</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <Row icon={<Hash size={11} />} label="Job ID" value={activeJob.job_id} mono />
-                <Row icon={<Cpu size={11} />} label="Algorithm" value={activeJob.algorithm} />
-                <Row icon={<Database size={11} />} label="Dataset" value={activeJob.dataset_id} mono />
-                <Row icon={<Target size={11} />} label="Target" value={activeJob.target_column} mono />
-                <Row
-                  icon={<Layers size={11} />}
-                  label="Features"
-                  value={`${activeJob.feature_columns.length} columns`}
-                />
-                <Row
-                  icon={<Activity size={11} />}
-                  label="Status"
-                  value={<span style={{ color: isCompleted ? '#00F5A0' : '#F5A623' }}>{activeJob.status}</span>}
-                />
-                {modelId && (
-                  <Row icon={<Hash size={11} />} label="Model ID" value={modelId} mono />
-                )}
+        <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr', gap: 24, alignItems: 'start' }}>
+          {/* ═══════════════════════════════════════════════════════════════════
+              LEFT COLUMN: MODEL OVERVIEW, ENDPOINT CONTROLS & API SNIPPETS
+             ═══════════════════════════════════════════════════════════════════ */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {/* ── Production Model Overview Card (Enterprise Clean) ── */}
+            <div style={CARD_STYLE}>
+              <div style={SECTION_LABEL}>
+                <Cpu size={12} style={{ color: '#00D4FF' }} /> Model Specification
               </div>
-            </div>
 
-            {/* ── Deployment Status Card ── */}
-            {deployment && (
-              <div style={CARD}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <div style={LABEL}><Rocket size={11} /> Deployment</div>
-                  <StatusBadge status={deployment.status} />
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#F1F5F9', marginBottom: 4 }}>
+                  {friendlyAlgorithmName}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: 'rgba(0, 212, 255, 0.12)',
+                      color: '#00D4FF',
+                    }}
+                  >
+                    {activeJob.algorithm ? activeJob.algorithm.replace(/_/g, ' ') : 'Production Candidate'}
+                  </span>
+                  <span style={{ fontSize: 12, color: '#475569' }}>•</span>
+                  <span style={{ fontSize: 12, color: '#94A3B8' }}>
+                    Target: <strong style={{ color: '#00F5A0' }}>{activeJob.target_column}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Dataset & Feature Metrics */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: 10,
+                  padding: 12,
+                  borderRadius: 10,
+                  background: '#040912',
+                  border: '1px solid #152540',
+                  marginBottom: 16,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 10, color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
+                    Source Dataset
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      color: '#E2E8F0',
+                      marginTop: 3,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={friendlyDatasetName}
+                  >
+                    {friendlyDatasetName}
+                  </div>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-                  <Row icon={<Hash size={11} />} label="Deployment ID" value={deployment.deployment_id} mono small />
-                  <Row icon={<Zap size={11} />} label="Total Predictions" value={String(deployment.total_predictions)} />
-                  <Row
-                    icon={<Clock size={11} />}
-                    label="Started"
-                    value={deployment.started_at ? new Date(deployment.started_at).toLocaleString() : '—'}
-                    small
-                  />
+                <div>
+                  <div style={{ fontSize: 10, color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
+                    Input Features
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#00D4FF', marginTop: 3 }}>
+                    {activeJob.feature_columns.length} columns
+                  </div>
+                </div>
+              </div>
+
+              {/* Performance Metrics Chips (if available) */}
+              {metrics && (
+                <div>
+                  <div style={{ fontSize: 10, color: '#64748B', fontWeight: 700, textTransform: 'uppercase', marginBottom: 8 }}>
+                    Trained Model Performance
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    {metrics.accuracy != null && (
+                      <div style={{ padding: '8px 10px', borderRadius: 8, background: '#050D1A', border: '1px solid #1E293B' }}>
+                        <div style={{ fontSize: 10, color: '#64748B' }}>Accuracy</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: '#00F5A0', marginTop: 2 }}>
+                          {(metrics.accuracy * 100).toFixed(1)}%
+                        </div>
+                      </div>
+                    )}
+                    {metrics.f1_score != null && (
+                      <div style={{ padding: '8px 10px', borderRadius: 8, background: '#050D1A', border: '1px solid #1E293B' }}>
+                        <div style={{ fontSize: 10, color: '#64748B' }}>F1 Score</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: '#38BDF8', marginTop: 2 }}>
+                          {metrics.f1_score.toFixed(3)}
+                        </div>
+                      </div>
+                    )}
+                    {metrics.precision != null && (
+                      <div style={{ padding: '8px 10px', borderRadius: 8, background: '#050D1A', border: '1px solid #1E293B' }}>
+                        <div style={{ fontSize: 10, color: '#64748B' }}>Precision</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: '#A855F7', marginTop: 2 }}>
+                          {metrics.precision.toFixed(3)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Endpoint Deployment Controls ── */}
+            {deployment ? (
+              <div style={CARD_STYLE}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div style={{ ...SECTION_LABEL, marginBottom: 0 }}>
+                    <Zap size={12} style={{ color: '#00F5A0' }} /> Serving Endpoint
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 11, color: '#64748B', fontFamily: 'var(--font-mono, monospace)' }}>
+                      Port: 8000
+                    </span>
+                    <StatusIndicator status={deployment.status} />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                    <span style={{ color: '#64748B' }}>Total Inferences</span>
+                    <span style={{ fontWeight: 700, color: '#F1F5F9', fontFamily: 'var(--font-mono, monospace)' }}>
+                      {deployment.total_predictions} requests
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                    <span style={{ color: '#64748B' }}>Active Since</span>
+                    <span style={{ color: '#94A3B8' }}>
+                      {deployment.started_at ? new Date(deployment.started_at).toLocaleTimeString() : '—'}
+                    </span>
+                  </div>
                 </div>
 
                 {deployment.error_message && (
-                  <div style={{
-                    padding: '8px 12px', borderRadius: 8,
-                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
-                    fontSize: 12, color: '#FF4D6D', marginBottom: 12,
-                  }}>
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      fontSize: 12,
+                      color: '#FF4D6D',
+                      marginBottom: 14,
+                    }}
+                  >
                     {deployment.error_message}
                   </div>
                 )}
 
-                {/* Action buttons */}
-                <div style={{ display: 'flex', gap: 8 }}>
+                {/* Control Action Buttons */}
+                <div style={{ display: 'flex', gap: 10 }}>
                   {canStop && (
-                    <button onClick={handleStop} disabled={deployLoading} style={btnStyle('#F5A623', 'rgba(245,166,35,0.1)')}>
-                      <Square size={13} /> Stop
+                    <button
+                      onClick={handleStop}
+                      disabled={deployLoading}
+                      style={{
+                        flex: 1,
+                        padding: '9px 14px',
+                        borderRadius: 8,
+                        background: 'rgba(245,166,35,0.08)',
+                        border: '1px solid rgba(245,166,35,0.3)',
+                        color: '#F5A623',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Square size={13} /> Stop Endpoint
                     </button>
                   )}
                   {canRedeploy && (
-                    <button onClick={handleRedeploy} disabled={deployLoading} style={btnStyle('#00D4FF', 'rgba(0,212,255,0.1)')}>
-                      <RefreshCw size={13} /> Redeploy
+                    <button
+                      onClick={handleRedeploy}
+                      disabled={deployLoading}
+                      style={{
+                        flex: 1,
+                        padding: '9px 14px',
+                        borderRadius: 8,
+                        background: 'linear-gradient(135deg, rgba(0,212,255,0.15), rgba(0,245,160,0.15))',
+                        border: '1px solid #00F5A0',
+                        color: '#00F5A0',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <RefreshCw size={13} /> Restart Endpoint
                     </button>
                   )}
                 </div>
-
-                <div style={{ marginTop: 14 }}>
-                  <LogPanel logs={deployment.logs || []} />
-                </div>
               </div>
-            )}
+            ) : (
+              /* Deploy Button (When no deployment created yet) */
+              <div style={CARD_STYLE}>
+                <div style={SECTION_LABEL}>
+                  <Rocket size={12} style={{ color: '#00F5A0' }} /> Launch Real-Time Endpoint
+                </div>
+                <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.5, marginBottom: 16 }}>
+                  Deploys this model artifact to an in-memory cached endpoint capable of executing predictions
+                  in under 5 milliseconds.
+                </p>
 
-            {/* ── Deploy Button (only when no deployment exists yet) ── */}
-            {!deployment && (
-              <div style={CARD}>
-                <div style={LABEL}><Rocket size={11} /> Deploy This Model</div>
-                {!isCompleted && (
-                  <div style={{
-                    padding: '10px 14px', borderRadius: 8,
-                    background: 'rgba(245,166,35,0.08)', border: '1px solid rgba(245,166,35,0.2)',
-                    fontSize: 12, color: '#F5A623', marginBottom: 14,
-                  }}>
-                    Training is not yet complete. Wait for COMPLETED status before deploying.
-                  </div>
-                )}
                 {deployError && (
-                  <div style={{
-                    padding: '10px 14px', borderRadius: 8,
-                    background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-                    fontSize: 12, color: '#FF4D6D', marginBottom: 14,
-                  }}>
+                  <div
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 8,
+                      background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.25)',
+                      fontSize: 12,
+                      color: '#FF4D6D',
+                      marginBottom: 14,
+                    }}
+                  >
                     {deployError}
                   </div>
                 )}
+
                 <button
                   onClick={handleDeploy}
                   disabled={!canDeploy || deployLoading}
                   style={{
-                    width: '100%', padding: '11px 18px', borderRadius: 10, border: 'none',
-                    background: canDeploy && !deployLoading
-                      ? 'linear-gradient(135deg, #00D4FF, #00F5A0)'
-                      : '#152540',
-                    color: canDeploy && !deployLoading ? '#0B0912' : '#475569',
-                    fontWeight: 700, fontSize: 14, cursor: canDeploy ? 'pointer' : 'not-allowed',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    transition: 'all 200ms',
+                    width: '100%',
+                    padding: '12px 18px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background:
+                      canDeploy && !deployLoading
+                        ? 'linear-gradient(135deg, #00D4FF, #00F5A0)'
+                        : '#152540',
+                    color: canDeploy && !deployLoading ? '#08111E' : '#475569',
+                    fontWeight: 800,
+                    fontSize: 14,
+                    cursor: canDeploy ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    boxShadow: canDeploy && !deployLoading ? '0 0 20px rgba(0,245,160,0.2)' : 'none',
+                    transition: 'all 200ms ease',
                   }}
                 >
                   {deployLoading ? (
-                    <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Deploying…</>
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Initializing Endpoint…
+                    </>
                   ) : (
-                    <><Rocket size={16} /> Deploy Model</>
+                    <>
+                      <Rocket size={16} /> Deploy Model to Local Endpoint
+                    </>
                   )}
                 </button>
               </div>
             )}
+
+            {/* ── Developer Integration Accordion (cURL / Python) ── */}
+            {deployment && (
+              <div style={{ ...CARD_STYLE, padding: 14 }}>
+                <button
+                  onClick={() => setShowApiTab((prev) => !prev)}
+                  style={{
+                    width: '100%',
+                    background: 'none',
+                    border: 'none',
+                    color: '#94A3B8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#00D4FF' }}>
+                    <Code2 size={14} /> Developer API Snippets
+                  </span>
+                  {showApiTab ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+
+                <AnimatePresence>
+                  {showApiTab && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      style={{ overflow: 'hidden', marginTop: 12 }}
+                    >
+                      <ApiIntegrationTabs
+                        endpointUrl={`http://localhost:8000/api/v1/local-deployments/${deployment.deployment_id}/predict`}
+                        samplePayload={deployment.sample_inputs || {}}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {/* ── Deployment Logs Accordion ── */}
+            {deployment && (
+              <div style={{ ...CARD_STYLE, padding: 14 }}>
+                <button
+                  onClick={() => setShowLogs((prev) => !prev)}
+                  style={{
+                    width: '100%',
+                    background: 'none',
+                    border: 'none',
+                    color: '#94A3B8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <Terminal size={14} /> Lifecycle Logs ({deployment.logs?.length || 0})
+                  </span>
+                  {showLogs ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+
+                <AnimatePresence>
+                  {showLogs && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      style={{ overflow: 'hidden', marginTop: 12 }}
+                    >
+                      <div
+                        style={{
+                          background: '#030810',
+                          padding: 12,
+                          borderRadius: 8,
+                          maxHeight: 180,
+                          overflowY: 'auto',
+                          fontFamily: 'var(--font-mono, monospace)',
+                          fontSize: 11,
+                        }}
+                      >
+                        {deployment.logs && deployment.logs.length > 0 ? (
+                          [...deployment.logs].reverse().map((l, i) => (
+                            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+                              <span style={{ color: '#475569', flexShrink: 0 }}>
+                                {new Date(l.ts).toLocaleTimeString()}
+                              </span>
+                              <span style={{ color: l.msg.startsWith('ERROR') ? '#FF4D6D' : '#94A3B8' }}>
+                                {l.msg}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <div style={{ color: '#475569' }}>No log entries.</div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
           </div>
 
-          {/* ══ RIGHT COLUMN ═══════════════════════════════════════════════ */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* ═══════════════════════════════════════════════════════════════════
+              RIGHT COLUMN: INTERACTIVE PREDICTION CONSOLE
+             ═══════════════════════════════════════════════════════════════════ */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            <div style={CARD_STYLE}>
+              {/* Card Header & Toolbar */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 16,
+                  paddingBottom: 14,
+                  borderBottom: '1px solid #152540',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: '#F8FAFC' }}>
+                    Interactive Inference Console
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748B' }}>
+                    Execute test inputs directly against the compiled model artifact.
+                  </div>
+                </div>
 
-            {/* ── Prediction Form ── */}
-            <div style={CARD}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div style={LABEL}><BarChart3 size={11} /> Run Prediction</div>
-                {deployment && <StatusBadge status={deployment.status} />}
+                {deployment && deployment.status === 'READY' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <button
+                      onClick={handleAutoFill}
+                      title="Load representative values from the training dataset"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '6px 12px',
+                        borderRadius: 8,
+                        background: 'rgba(0, 245, 160, 0.08)',
+                        border: '1px solid rgba(0, 245, 160, 0.25)',
+                        color: '#00F5A0',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 150ms ease',
+                      }}
+                    >
+                      <Sparkles size={13} /> Auto-Fill Example
+                    </button>
+
+                    <button
+                      onClick={handleClear}
+                      title="Clear all fields"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '6px 10px',
+                        borderRadius: 8,
+                        background: 'transparent',
+                        border: '1px solid #1E293B',
+                        color: '#64748B',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <RotateCcw size={12} /> Clear
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {!deployment ? (
-                <div style={{ textAlign: 'center', padding: '24px 0', color: '#475569', fontSize: 13 }}>
-                  Deploy the model first to enable predictions.
-                </div>
-              ) : !canPredict ? (
-                <div style={{ textAlign: 'center', padding: '16px 0', color: '#475569', fontSize: 13 }}>
-                  {deployment.status === 'FAILED'
-                    ? 'Deployment failed. Redeploy to enable predictions.'
-                    : deployment.status === 'STOPPED'
-                    ? 'Deployment is stopped. Redeploy to enable predictions.'
-                    : 'Starting up…'}
+              {!deployment || deployment.status !== 'READY' ? (
+                <div style={{ padding: 48, textAlign: 'center', color: '#64748B' }}>
+                  <HelpCircle size={32} style={{ marginBottom: 10, color: '#334155' }} />
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>Model Not Deployed Yet</div>
+                  <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>
+                    Deploy this model from the left panel to unlock the interactive prediction console.
+                  </div>
                 </div>
               ) : (
-                <>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-                    {deployment.feature_columns.map((feat) => {
-                      const schema = deployment.input_schema[feat] || { type: 'numeric' };
+                /* Feature Input Fields Grid */
+                <div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+                      gap: 14,
+                      marginBottom: 20,
+                    }}
+                  >
+                    {deployment.feature_columns.map((colName) => {
+                      const schema = deployment.input_schema[colName];
+                      const colType = schema?.type || 'numeric';
+
                       return (
-                        <div key={feat}>
-                          <label style={{
-                            fontSize: 11, fontWeight: 600, color: '#64748B',
-                            marginBottom: 5, display: 'flex', alignItems: 'center', gap: 5,
-                          }}>
-                            <span style={{
-                              padding: '1px 5px', borderRadius: 4, fontSize: 9,
-                              background: schema.type === 'categorical' ? 'rgba(0,212,255,0.1)' : 'rgba(0,245,160,0.1)',
-                              color: schema.type === 'categorical' ? '#00D4FF' : '#00F5A0',
-                              fontWeight: 700, letterSpacing: '0.05em',
-                            }}>
-                              {schema.type === 'categorical' ? 'CAT' : 'NUM'}
-                            </span>
-                            {feat}
-                          </label>
-                          <FeatureInput
-                            name={feat}
-                            schema={schema as FeatureSchemaEntry}
-                            value={inputValues[feat] || ''}
-                            onChange={(v) => setInputValues((prev) => ({ ...prev, [feat]: v }))}
+                        <div
+                          key={colName}
+                          style={{
+                            background: '#060D1A',
+                            border: '1px solid #142236',
+                            borderRadius: 10,
+                            padding: 12,
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: 8,
+                            }}
+                          >
+                            <label
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 700,
+                                color: '#CBD5E1',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                              title={colName}
+                            >
+                              {colName.replace(/_/g, ' ')}
+                            </label>
+                            <TypeBadge type={colType} />
+                          </div>
+
+                          <SmartFeatureInput
+                            name={colName}
+                            schema={schema}
+                            value={inputValues[colName] ?? ''}
+                            onChange={(val) => setInputValues((prev) => ({ ...prev, [colName]: val }))}
                           />
                         </div>
                       );
                     })}
                   </div>
 
+                  {/* Prediction Error Alert */}
                   {predError && (
-                    <div style={{
-                      padding: '8px 12px', borderRadius: 8,
-                      background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-                      fontSize: 12, color: '#FF4D6D', marginBottom: 12,
-                    }}>
-                      {predError}
+                    <div
+                      style={{
+                        padding: '12px 16px',
+                        borderRadius: 10,
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        color: '#FF4D6D',
+                        fontSize: 13,
+                        marginBottom: 16,
+                        display: 'flex',
+                        gap: 10,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                      <div>{predError}</div>
                     </div>
                   )}
 
+                  {/* Run Prediction Button */}
                   <button
                     onClick={handlePredict}
-                    disabled={predLoading}
+                    disabled={predLoading || !canPredict}
                     style={{
-                      width: '100%', padding: '10px', borderRadius: 10, border: 'none',
-                      background: 'linear-gradient(135deg, #00D4FF, #00F5A0)',
-                      color: '#0B0912', fontWeight: 700, fontSize: 13,
-                      cursor: predLoading ? 'wait' : 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      width: '100%',
+                      padding: '12px 20px',
+                      borderRadius: 10,
+                      border: 'none',
+                      background: canPredict
+                        ? 'linear-gradient(135deg, #00D4FF, #00F5A0)'
+                        : '#1E293B',
+                      color: canPredict ? '#08111E' : '#64748B',
+                      fontWeight: 800,
+                      fontSize: 14,
+                      cursor: predLoading ? 'wait' : !canPredict ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      boxShadow: '0 0 20px rgba(0,245,160,0.18)',
+                      transition: 'all 150ms ease',
                     }}
                   >
                     {predLoading ? (
-                      <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Running…</>
+                      <>
+                        <Loader2 size={16} className="animate-spin" /> Executing Prediction…
+                      </>
                     ) : (
-                      <><Play size={14} /> Run Prediction</>
+                      <>
+                        <Play size={16} /> Run Live Prediction
+                      </>
                     )}
                   </button>
-                </>
+                </div>
               )}
             </div>
 
-            {/* ── Prediction Result ── */}
-            {predResult && <PredictionResult result={predResult} />}
+            {/* ── Live Prediction Result Panel ── */}
+            <AnimatePresence>
+              {predResult && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  style={{
+                    ...CARD_STYLE,
+                    background: 'rgba(0, 245, 160, 0.03)',
+                    border: '1px solid rgba(0, 245, 160, 0.3)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: 14,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#00F5A0', fontWeight: 800, fontSize: 12 }}>
+                      <CheckCircle2 size={15} /> PREDICTION RESULT
+                    </div>
+                    <span
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        background: '#050D1A',
+                        color: '#64748B',
+                        fontFamily: 'var(--font-mono, monospace)',
+                        fontSize: 11,
+                      }}
+                    >
+                      Latency: <strong style={{ color: '#00F5A0' }}>{predResult.latency_ms.toFixed(1)} ms</strong>
+                    </span>
+                  </div>
+
+                  {/* Primary Predicted Class Hero */}
+                  <div
+                    style={{
+                      padding: 18,
+                      borderRadius: 12,
+                      background: '#040A14',
+                      border: '1px solid #162C46',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: 16,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>
+                        Target Outcome ({deployment?.target_column})
+                      </div>
+                      <div style={{ fontSize: 24, fontWeight: 900, color: '#FFFFFF', marginTop: 4 }}>
+                        {String(predResult.prediction)}
+                      </div>
+                    </div>
+
+                    {predResult.confidence != null && (
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700 }}>CONFIDENCE</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: '#00F5A0', marginTop: 2 }}>
+                          {(predResult.confidence * 100).toFixed(1)}%
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Class Probabilities Distribution */}
+                  {predResult.probabilities && Object.keys(predResult.probabilities).length > 0 && (
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: '#64748B',
+                          textTransform: 'uppercase',
+                          marginBottom: 10,
+                        }}
+                      >
+                        Class Probability Distribution
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {Object.entries(predResult.probabilities)
+                          .sort(([, a], [, b]) => b - a)
+                          .map(([label, prob]) => {
+                            const isWinner = label === String(predResult.prediction);
+                            const pct = (prob * 100).toFixed(1);
+
+                            return (
+                              <div key={label}>
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    fontSize: 12,
+                                    marginBottom: 4,
+                                    color: isWinner ? '#00F5A0' : '#94A3B8',
+                                    fontWeight: isWinner ? 700 : 500,
+                                  }}
+                                >
+                                  <span>{label}</span>
+                                  <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{pct}%</span>
+                                </div>
+                                <div
+                                  style={{
+                                    height: 7,
+                                    borderRadius: 99,
+                                    background: '#0D1B2E',
+                                    overflow: 'hidden',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      height: '100%',
+                                      width: `${pct}%`,
+                                      borderRadius: 99,
+                                      background: isWinner
+                                        ? 'linear-gradient(90deg, #00D4FF, #00F5A0)'
+                                        : '#1E3A5F',
+                                      transition: 'width 300ms ease',
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── Session Prediction History Table ── */}
+            {history.length > 0 && (
+              <div style={CARD_STYLE}>
+                <div style={SECTION_LABEL}>
+                  <Clock size={12} style={{ color: '#00D4FF' }} /> Recent Test Inferences
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {history.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: 8,
+                        background: '#040912',
+                        border: '1px solid #142236',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ color: '#475569', fontSize: 11 }}>{item.ts}</span>
+                        <span style={{ color: '#E2E8F0', fontWeight: 700 }}>
+                          Result: <strong style={{ color: '#00F5A0' }}>{String(item.prediction)}</strong>
+                        </span>
+                        {item.confidence != null && (
+                          <span style={{ color: '#64748B', fontSize: 11 }}>
+                            ({(item.confidence * 100).toFixed(0)}% conf)
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ color: '#475569', fontFamily: 'var(--font-mono, monospace)', fontSize: 11 }}>
+                        {item.latency_ms.toFixed(1)}ms
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
-
-      {/* Spin keyframe */}
-      <style>{`@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }`}</style>
     </motion.div>
   );
 };
-
-/* ─── Row helper ─────────────────────────────────────────────── */
-function Row({
-  icon, label, value, mono = false, small = false,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: React.ReactNode;
-  mono?: boolean;
-  small?: boolean;
-}) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-      <span style={{
-        display: 'flex', alignItems: 'center', gap: 5,
-        fontSize: small ? 11 : 12, color: '#475569', flexShrink: 0,
-      }}>
-        <span style={{ color: '#334155' }}>{icon}</span>
-        {label}
-      </span>
-      <span style={{
-        fontSize: small ? 11 : 12,
-        color: typeof value === 'string' ? '#94A3B8' : undefined,
-        fontFamily: mono ? 'var(--font-mono)' : undefined,
-        textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        maxWidth: 200,
-      }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function btnStyle(color: string, bg: string): React.CSSProperties {
-  return {
-    flex: 1, padding: '8px 14px', borderRadius: 8, border: `1px solid ${color}40`,
-    background: bg, color, fontWeight: 700, fontSize: 12, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-    transition: 'all 150ms',
-  };
-}

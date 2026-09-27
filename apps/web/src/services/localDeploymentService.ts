@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Local Deployment Service — Prototype 4.
  *
  * TypeScript client for /api/v1/local-deployments endpoints.
@@ -12,7 +12,7 @@ import { apiClient } from './apiClient';
 // ---------------------------------------------------------------------------
 
 export interface FeatureSchemaEntry {
-  type: 'numeric' | 'categorical';
+  type: 'numeric' | 'categorical' | 'boolean' | 'text';
   categories?: string[] | null;
   min?: number | null;
   max?: number | null;
@@ -50,6 +50,10 @@ export interface LocalDeploymentResponse {
   logs: LogEntry[];
   total_predictions: number;
   endpoint_path: string;
+  sample_inputs?: Record<string, any> | null;
+  metrics?: Record<string, any> | null;
+  dataset_name?: string | null;
+  algorithm_display_name?: string | null;
 }
 
 export interface LocalDeploymentCreate {

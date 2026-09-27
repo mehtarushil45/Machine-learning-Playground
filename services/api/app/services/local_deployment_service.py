@@ -59,30 +59,6 @@ def _log_entry(msg: str) -> Dict[str, str]:
     return {"ts": _ts(), "msg": msg}
 
 
-def _to_response(dep: LocalDeployment) -> LocalDeploymentResponse:
-    """Map ORM LocalDeployment -> Pydantic response."""
-    return LocalDeploymentResponse(
-        deployment_id=str(dep.id),
-        job_id=dep.job_id,
-        model_id=dep.model_id,
-        name=dep.name,
-        status=dep.status,
-        algorithm=dep.algorithm,
-        problem_type=dep.problem_type,
-        dataset_id=dep.dataset_id,
-        target_column=dep.target_column,
-        feature_columns=dep.feature_columns or [],
-        input_schema=dep.input_schema or {},
-        error_message=dep.error_message,
-        started_at=dep.started_at.isoformat() if dep.started_at else None,
-        stopped_at=dep.stopped_at.isoformat() if dep.stopped_at else None,
-        created_at=dep.created_at.isoformat() if isinstance(dep.created_at, datetime) else str(dep.created_at),
-        logs=dep.logs or [],
-        total_predictions=dep.total_predictions or 0,
-        endpoint_path=f"/api/v1/local-deployments/{dep.id}/predict",
-    )
-
-
 def _assert_owner(dep: LocalDeployment, owner_id: str) -> None:
     if dep.owner_id != owner_id:
         raise HTTPException(
@@ -94,34 +70,175 @@ def _assert_owner(dep: LocalDeployment, owner_id: str) -> None:
 def _build_input_schema(
     feature_columns: List[str],
     model_registry_meta: Dict[str, Any],
-) -> Dict[str, Any]:
+    loaded_model: Optional[Any] = None,
+    dataset_sample: Optional[Any] = None,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """
-    Build a per-feature input schema for the prediction form.
-
-    Uses lineage data when available to detect categorical columns.
-    Fallback: all features are treated as numeric.
+    Build a per-feature input schema and realistic sample inputs for the prediction form.
+    Returns (input_schema, sample_inputs).
     """
-    # Try to get categorical info from lineage
-    lineage = model_registry_meta.get("lineage", {})
-    feature_set = lineage.get("feature_set", {}) if isinstance(lineage, dict) else {}
-    categorical_cols: List[str] = []
+    import pandas as pd
+    cat_cols: set = set()
+    categories_map: Dict[str, List[str]] = {}
+    num_cols: set = set()
+    bool_cols: set = set()
 
-    # Lineage may embed categorical_columns list
-    if isinstance(lineage, dict):
-        categorical_cols = lineage.get("categorical_columns", []) or []
+    # 1. Introspect loaded model container if available
+    if loaded_model:
+        num_cols = set(getattr(loaded_model, "numeric_columns", []))
+        cat_cols = set(getattr(loaded_model, "categorical_columns", []))
+        bool_cols = set(getattr(loaded_model, "boolean_columns", []))
+        categories_map = dict(getattr(loaded_model, "categories_map", {}))
 
-    # Also check registry metadata directly
-    if not categorical_cols:
-        categorical_cols = model_registry_meta.get("categorical_columns", []) or []
+    # 2. Lineage / registry metadata fallback
+    lineage = model_registry_meta.get("lineage", {}) if isinstance(model_registry_meta, dict) else {}
+    if not cat_cols and isinstance(lineage, dict):
+        lineage_cats = lineage.get("categorical_columns") or []
+        cat_cols.update(lineage_cats)
 
     schema: Dict[str, Any] = {}
-    for col in feature_columns:
-        if col in categorical_cols:
-            schema[col] = {"type": "categorical", "categories": None}
-        else:
-            schema[col] = {"type": "numeric"}
+    sample_inputs: Dict[str, Any] = {}
 
-    return schema
+    for col in feature_columns:
+        if col in cat_cols:
+            cats = categories_map.get(col)
+            if not cats and dataset_sample is not None and isinstance(dataset_sample, pd.DataFrame) and col in dataset_sample.columns:
+                unique_vals = [str(x) for x in dataset_sample[col].dropna().unique() if str(x).strip()]
+                cats = unique_vals[:30] if unique_vals else None
+
+            schema[col] = {
+                "type": "categorical",
+                "categories": cats,
+            }
+            if cats:
+                sample_inputs[col] = cats[0]
+            elif dataset_sample is not None and isinstance(dataset_sample, pd.DataFrame) and col in dataset_sample.columns and len(dataset_sample) > 0:
+                sample_inputs[col] = str(dataset_sample[col].iloc[0])
+            else:
+                sample_inputs[col] = "Sample"
+
+        elif col in bool_cols or (
+            dataset_sample is not None
+            and isinstance(dataset_sample, pd.DataFrame)
+            and col in dataset_sample.columns
+            and set(dataset_sample[col].dropna().unique()).issubset({0, 1, "0", "1", True, False})
+        ):
+            schema[col] = {
+                "type": "boolean",
+                "categories": ["0", "1"],
+            }
+            sample_inputs[col] = 1
+
+        else:
+            col_min = None
+            col_max = None
+            col_median = 0.0
+
+            if dataset_sample is not None and isinstance(dataset_sample, pd.DataFrame) and col in dataset_sample.columns:
+                try:
+                    s_num = pd.to_numeric(dataset_sample[col], errors="coerce").dropna()
+                    if len(s_num) > 0:
+                        col_min = float(s_num.min())
+                        col_max = float(s_num.max())
+                        col_median = float(s_num.median())
+                except Exception:
+                    pass
+
+            schema[col] = {
+                "type": "numeric",
+                "min": col_min,
+                "max": col_max,
+            }
+            sample_inputs[col] = round(col_median, 2) if col_median is not None else 0.0
+
+    return schema, sample_inputs
+
+
+def _enrich_deployment_data(
+    dep: LocalDeployment,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]], str, str]:
+    """Enrich deployment with categories, sample data, performance metrics, and clean display names."""
+    import pandas as pd
+    from app.ml.inference_engine import load_model
+    from app.ml.model_registry import get_model_by_id
+
+    registry_meta = get_model_by_id(dep.model_id) or {}
+    metrics = registry_meta.get("metrics")
+    algo_key = dep.algorithm or registry_meta.get("algorithm", "Model")
+
+    # Friendly algorithm display name
+    algo_display = algo_key.replace("_", " ").title()
+    try:
+        from app.ml.algorithm_factory import ALGORITHM_REGISTRY
+        if algo_key in ALGORITHM_REGISTRY:
+            algo_display = ALGORITHM_REGISTRY[algo_key].display_name
+    except Exception:
+        pass
+
+    # Dataset friendly name (strip raw UUID if possible)
+    dataset_name = dep.dataset_id or "Training Dataset"
+    try:
+        from services.worker.core.dataset_loader import find_dataset_path
+        path = find_dataset_path(dep.dataset_id)
+        if path:
+            dataset_name = os.path.basename(path)
+    except Exception:
+        pass
+
+    # Preprocessor introspection for categories and numeric bounds
+    loaded_model = None
+    try:
+        loaded_model = load_model(model_id=dep.model_id)
+    except Exception:
+        pass
+
+    # Load dataset sample
+    dataset_sample = None
+    try:
+        from services.worker.core.dataset_loader import find_dataset_path
+        csv_path = find_dataset_path(dep.dataset_id)
+        if csv_path and os.path.exists(csv_path):
+            dataset_sample = pd.read_csv(csv_path, nrows=50)
+    except Exception:
+        pass
+
+    schema, sample_inputs = _build_input_schema(
+        dep.feature_columns or [],
+        registry_meta,
+        loaded_model=loaded_model,
+        dataset_sample=dataset_sample,
+    )
+
+    return schema, sample_inputs, metrics, dataset_name, algo_display
+
+
+def _to_response(dep: LocalDeployment) -> LocalDeploymentResponse:
+    """Map ORM LocalDeployment -> Pydantic response enriched with enterprise metadata."""
+    schema, sample_inputs, metrics, dataset_name, algo_display = _enrich_deployment_data(dep)
+    return LocalDeploymentResponse(
+        deployment_id=str(dep.id),
+        job_id=dep.job_id,
+        model_id=dep.model_id,
+        name=dep.name,
+        status=dep.status,
+        algorithm=dep.algorithm,
+        problem_type=dep.problem_type,
+        dataset_id=dep.dataset_id,
+        target_column=dep.target_column,
+        feature_columns=dep.feature_columns or [],
+        input_schema=schema,
+        error_message=dep.error_message,
+        started_at=dep.started_at.isoformat() if dep.started_at else None,
+        stopped_at=dep.stopped_at.isoformat() if dep.stopped_at else None,
+        created_at=dep.created_at.isoformat() if isinstance(dep.created_at, datetime) else str(dep.created_at),
+        logs=dep.logs or [],
+        total_predictions=dep.total_predictions or 0,
+        endpoint_path=f"/api/v1/local-deployments/{dep.id}/predict",
+        sample_inputs=sample_inputs,
+        metrics=metrics,
+        dataset_name=dataset_name,
+        algorithm_display_name=algo_display,
+    )
 
 
 async def _get_deployment(
@@ -306,7 +423,7 @@ async def create_local_deployment(
         logs.append(_log_entry("Model binary verified."))
 
     # ── Step 4: Build input schema ─────────────────────────────────────────────
-    input_schema = _build_input_schema(feature_columns, registry_meta)
+    input_schema, _ = _build_input_schema(feature_columns, registry_meta)
     logs.append(_log_entry(f"Input schema built for {len(feature_columns)} features."))
 
     # ── Step 5: Persist deployment record (DEPLOYING) ─────────────────────────

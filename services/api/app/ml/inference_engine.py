@@ -99,6 +99,26 @@ class ModelContainer:
         self.classes_: Optional[np.ndarray] = getattr(model_pipeline, "classes_", None)
         self.loaded_at: str = datetime.now(timezone.utc).isoformat()
 
+        # Introspect preprocessor column types & categories
+        self.numeric_columns: List[str] = []
+        self.categorical_columns: List[str] = []
+        self.boolean_columns: List[str] = []
+        self.categories_map: Dict[str, List[str]] = {}
+
+        preprocessor = getattr(model_pipeline, "named_steps", {}).get("preprocessor")
+        if preprocessor and hasattr(preprocessor, "transformers_"):
+            for name, trans, cols in preprocessor.transformers_:
+                if name == "numeric":
+                    self.numeric_columns.extend(cols)
+                elif name in ("categorical", "boolean"):
+                    self.categorical_columns.extend(cols)
+                    encoder = getattr(trans, "named_steps", {}).get("encoder")
+                    if encoder and hasattr(encoder, "categories_"):
+                        for c, cats in zip(cols, encoder.categories_):
+                            self.categories_map[c] = [str(x) for x in cats]
+                elif name == "boolean":
+                    self.boolean_columns.extend(cols)
+
 
 class ValidationResult:
     """Outcome of feature schema and data validation."""
@@ -304,18 +324,12 @@ def preprocess_input(
 def validate_input(
     df: pd.DataFrame,
     feature_columns: List[str],
+    container: Optional[ModelContainer] = None,
 ) -> ValidationResult:
     """Validate DataFrame against feature columns and schema expectations.
 
-    Checks:
-        - Missing columns
-        - Unexpected extra columns
-        - Non-numeric or un-coercible numeric values
-        - Infinities / overflow
-        - Missing values (NaN handling)
-
-    Returns:
-        ValidationResult object.
+    Smartly casts numeric columns to float64 (preventing scikit-learn SimpleImputer
+    type casting crashes) while preserving categorical and boolean string representations.
     """
     errors: List[str] = []
     warnings: List[str] = []
@@ -330,31 +344,32 @@ def validate_input(
 
     cleaned_df = df.copy()
 
-    # Numeric coercion and validation
-    for col in feature_columns:
-        if col in cleaned_df.columns:
-            s = cleaned_df[col]
-            # Try converting strings to numeric where possible
-            if s.dtype == object:
-                s_numeric = pd.to_numeric(s, errors="coerce")
-                # If non-null string entries failed to parse completely, warn/impute
-                non_null_orig = int(pd.Series(s).notna().sum())
-                non_null_num = int(pd.Series(s_numeric).notna().sum())
-                if non_null_orig > 0 and non_null_num < non_null_orig:
-                    warnings.append(
-                        f"Column '{col}' contains non-numeric strings that were coerced to NaN."
-                    )
-                cleaned_df[col] = s_numeric
+    # Determine numeric vs categorical columns from container introspection
+    num_cols = set(container.numeric_columns) if container and container.numeric_columns else set()
+    cat_cols = set(container.categorical_columns) if container and container.categorical_columns else set()
+    bool_cols = set(container.boolean_columns) if container and container.boolean_columns else set()
 
-            # Check infinities
-            inf_mask = np.isinf(cleaned_df[col].astype(float))
+    for col in feature_columns:
+        if col not in cleaned_df.columns:
+            continue
+
+        s = cleaned_df[col]
+        is_num = col in num_cols or (not cat_cols and col not in bool_cols and pd.api.types.is_numeric_dtype(s))
+
+        if is_num:
+            # Coerce to float64 — required for scikit-learn SimpleImputer compatibility
+            s_numeric = pd.to_numeric(s, errors="coerce").astype("float64")
+            inf_mask = np.isinf(s_numeric)
             if inf_mask.any():
                 warnings.append(f"Column '{col}' contains infinite values replaced with NaN.")
-                cleaned_df.loc[inf_mask, col] = np.nan
-
-            # Impute remaining NaNs with 0.0 to prevent scikit-learn fit/predict crash if missing
-            if bool(cleaned_df[col].isna().any()):
-                cleaned_df[col] = cleaned_df[col].fillna(0.0)
+                s_numeric.loc[inf_mask] = np.nan
+            cleaned_df[col] = s_numeric
+        elif col in bool_cols:
+            # Boolean: convert truthy/falsy
+            cleaned_df[col] = s.apply(lambda v: 1 if str(v).lower() in ("1", "true", "yes", "y") else 0)
+        else:
+            # Categorical or free-text: preserve as string
+            cleaned_df[col] = s.apply(lambda v: "" if pd.isna(v) or v is None else str(v).strip())
 
     is_valid = len(errors) == 0
     return ValidationResult(
@@ -465,7 +480,7 @@ def predict(
         df_raw = preprocess_input(data, container.feature_columns)
 
         # 3. Validate feature columns & types
-        val_res = validate_input(df_raw, container.feature_columns)
+        val_res = validate_input(df_raw, container.feature_columns, container=container)
         if not val_res.is_valid:
             raise InferenceValidationError(
                 f"Feature validation failed: {'; '.join(val_res.errors)}",
@@ -662,7 +677,7 @@ def predict_batch(
         end_idx = min(start_idx + batch_size, total_samples)
         chunk_df = df_input.iloc[start_idx:end_idx]
 
-        val_res = validate_input(chunk_df, container.feature_columns)
+        val_res = validate_input(chunk_df, container.feature_columns, container=container)
         X_chunk = val_res.cleaned_df
 
         chunk_preds = container.pipeline.predict(X_chunk)
