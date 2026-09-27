@@ -274,6 +274,9 @@ def is_redis_available(host: str | None = None, port: int | None = None, timeout
 
 def job_to_response(job: Job) -> JobResponse:
     """Map ORM Job instance to Pydantic JobResponse schema."""
+    meta = dict(job.job_metadata or {})
+    if str(getattr(job.status, "value", job.status)) == "COMPLETED" and not meta.get("model_id"):
+        meta["model_id"] = f"model-{str(job.id)[:8]}"
     return JobResponse(
         job_id=str(job.id),
         dataset_id=str(job.dataset_id) if job.dataset_id is not None else "",
@@ -295,7 +298,7 @@ def job_to_response(job: Job) -> JobResponse:
         error_message=job.error_message,
         retry_count=job.retry_count,
         owner_id=job.owner_id,
-        metadata=job.job_metadata or {},
+        metadata=meta,
     )
 
 

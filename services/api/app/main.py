@@ -22,6 +22,7 @@ from app.routers import auth, classrooms, datasets, deployments, experiments, ex
 from app.routers import organizations, workspaces, users_v7a, api_keys, activity  # V7A
 from app.routers import admin  # V7B Part 1
 from app.routers import studio, explainability_v7b, portfolios_v7b, classrooms_v7b, workflow  # V7B Part 2
+from app.routers import local_deployments  # Prototype 4: Local Deployments
 
 
 @asynccontextmanager
@@ -145,6 +146,10 @@ app.include_router(explainability_v7b.router, prefix=API_V1_PREFIX)  # Ethics & 
 app.include_router(portfolios_v7b.router, prefix=API_V1_PREFIX)      # Portfolio+
 app.include_router(classrooms_v7b.router, prefix=API_V1_PREFIX)      # Classroom Analytics
 app.include_router(workflow.router, prefix=API_V1_PREFIX)             # E2E Workflow
+
+# ── Prototype 4: Local Deployments ───────────────────────────────────────────
+app.include_router(local_deployments.router, prefix=API_V1_PREFIX)        # Local deployment CRUD
+app.include_router(local_deployments.job_router, prefix=API_V1_PREFIX)    # Job-scoped list
 
 
 @app.get(f"{API_V1_PREFIX}/algorithms", tags=["Algorithms"])

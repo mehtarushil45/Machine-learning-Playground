@@ -28,6 +28,7 @@ from app.models.workspace_settings import WorkspaceSettings, DefaultDeploymentPo
 from app.models.workspace_member import WorkspaceMember, WorkspaceRole, MemberStatus  # noqa: F401
 from app.models.api_key import ApiKey  # noqa: F401
 from app.models.deployment import Deployment, DeploymentStatus  # noqa: F401
+from app.models.local_deployment import LocalDeployment, LocalDeploymentStatus  # noqa: F401  # Prototype 4
 from app.models.recommendation import RecommendationJob, RecommendationJobStatus  # noqa: F401
 
 __all__ = [
@@ -55,9 +56,12 @@ __all__ = [
     "WorkspaceRole",
     "MemberStatus",
     "ApiKey",
-    # Deployment Studio
+    # Deployment Studio (Phase 5)
     "Deployment",
     "DeploymentStatus",
+    # Prototype 4: Local Deployments
+    "LocalDeployment",
+    "LocalDeploymentStatus",
     # Algorithm Recommendation
     "RecommendationJob",
     "RecommendationJobStatus",

@@ -4,6 +4,7 @@ import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import {
   Database,
   Code2,
+  BarChart2,
   Sparkles,
   GraduationCap,
   Rocket,
@@ -96,8 +97,7 @@ function AppContent() {
   const navItems = [
     { id: 'workspace',          label: 'Dataset & Profiler',        icon: <Database className="w-5 h-5" />     },
     { id: 'code-studio',        label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />        },
-    // 'training-results' is intentionally excluded from the sidebar.
-    // It is only reachable by clicking "Launch Training Job" in the Code Studio.
+    { id: 'training-results',   label: 'Training Results',          icon: <BarChart2 className="w-5 h-5" />    },
     { id: 'explainability',     label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" />    },
     { id: 'classrooms',         label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" /> },
     { id: 'deployments',        label: 'Deployment Studio',         icon: <Rocket className="w-5 h-5" />       },
@@ -479,7 +479,7 @@ function AppContent() {
 
               <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
-                  <DeploymentStudio />
+                  <DeploymentStudio onShowToast={showToast} />
                 </ErrorBoundary>
               </div>
 

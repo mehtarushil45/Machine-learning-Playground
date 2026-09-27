@@ -1043,7 +1043,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         } on ${selectedFeatures.length} features → ${selectedTarget}`,
         'success',
       );
-      onNavigate('code-studio');
+      onNavigate('training-results');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to launch training job.';
       setLaunchError(msg);

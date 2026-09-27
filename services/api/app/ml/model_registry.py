@@ -239,6 +239,15 @@ def get_model_by_id(model_id: str) -> Optional[Dict[str, Any]]:
     return _read_metadata(model_id)
 
 
+def get_model_by_job_id(job_id: str) -> Optional[Dict[str, Any]]:
+    """Return full metadata for the model registered from job_id, or None."""
+    index = _load_index()
+    for entry in index:
+        if entry.get("job_id") == job_id:
+            return _read_metadata(entry.get("model_id", "")) or entry
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Sprint 5A Lifecycle API
 # ---------------------------------------------------------------------------

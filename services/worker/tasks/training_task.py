@@ -30,6 +30,7 @@ async def _update_job_status_in_db(
     message: str | None = None,
     metrics: dict | None = None,
     model_path: str | None = None,
+    model_id: str | None = None,
     error_msg: str | None = None,
 ) -> None:
     """Persist job state transition to PostgreSQL database."""
@@ -52,12 +53,14 @@ async def _update_job_status_in_db(
                     job.result_path = model_path
                 if status_val == JobStatusEnum.COMPLETED.value:
                     job.completed_at = now
-                if metrics or model_path:
+                if metrics or model_path or model_id:
                     meta = dict(job.job_metadata or {})
                     if metrics:
                         meta["metrics"] = metrics
                     if model_path:
                         meta["model_artifact_path"] = model_path
+                    if model_id:
+                        meta["model_id"] = model_id
                     job.job_metadata = meta
                 await db.commit()
     except Exception as exc:
@@ -80,6 +83,7 @@ def execute_ml_training_job(self: Any, job_id: str, config: Dict[str, Any]) -> D
         result = execute_ml_training_pipeline_sync(job_id, config)
         metrics = result.get("metrics")
         model_path = result.get("model_path")
+        model_id = result.get("model_id") or f"model-{job_id[:8]}"
         asyncio.run(
             _update_job_status_in_db(
                 job_id,
@@ -89,6 +93,7 @@ def execute_ml_training_job(self: Any, job_id: str, config: Dict[str, Any]) -> D
                 f"Training complete. Model: {result.get('filename')}",
                 metrics=metrics,
                 model_path=model_path,
+                model_id=model_id,
             )
         )
         return result
