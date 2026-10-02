@@ -16,7 +16,7 @@
  * - Live Probabilities & Session History: Interactive results with class distributions
  *   and recent inference logs.
  */
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Rocket,
@@ -38,6 +38,7 @@ import {
   CheckCircle2,
   AlertCircle,
   HelpCircle,
+  ArrowLeft,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails } from '../../services/jobService';
@@ -46,6 +47,7 @@ import {
   type LocalDeploymentResponse,
   type LocalPredictResponse,
   type FeatureSchemaEntry,
+  type PredictionHistoryItem,
 } from '../../services/localDeploymentService';
 
 /* ─── Type Badge Helpers ───────────────────────────────────── */
@@ -115,16 +117,18 @@ function TypeBadge({ type }: { type: string }) {
 
 /* ─── Status Badge ─────────────────────────────────────────── */
 const STATUS_CONFIG: Record<string, { bg: string; text: string; dot: string; label: string }> = {
-  READY:     { bg: 'rgba(0,245,160,0.12)', text: '#00F5A0', dot: '#00F5A0', label: 'LIVE & SERVING' },
-  DEPLOYING: { bg: 'rgba(245,166,35,0.15)', text: '#F5A623', dot: '#F5A623', label: 'DEPLOYING' },
+  READY:     { bg: 'rgba(0,245,160,0.12)', text: '#00F5A0', dot: '#00F5A0', label: 'RUNNING' },
+  RUNNING:   { bg: 'rgba(0,245,160,0.12)', text: '#00F5A0', dot: '#00F5A0', label: 'RUNNING' },
+  DEPLOYING: { bg: 'rgba(245,166,35,0.15)', text: '#F5A623', dot: '#F5A623', label: 'STARTING' },
+  STARTING:  { bg: 'rgba(245,166,35,0.15)', text: '#F5A623', dot: '#F5A623', label: 'STARTING' },
+  STOPPING:  { bg: 'rgba(245,166,35,0.12)', text: '#F5A623', dot: '#F5A623', label: 'STOPPING' },
   STOPPED:   { bg: 'rgba(100,116,139,0.15)', text: '#94A3B8', dot: '#64748B', label: 'STOPPED' },
   FAILED:    { bg: 'rgba(239,68,68,0.15)', text: '#FF4D6D', dot: '#FF4D6D', label: 'FAILED' },
-  STOPPING:  { bg: 'rgba(245,166,35,0.12)', text: '#F5A623', dot: '#F5A623', label: 'STOPPING' },
 };
 
 function StatusIndicator({ status }: { status: string }) {
   const c = STATUS_CONFIG[status] || { bg: 'rgba(100,116,139,0.15)', text: '#94A3B8', dot: '#94A3B8', label: status };
-  const isAnimated = status === 'READY' || status === 'DEPLOYING';
+  const isAnimated = status === 'READY' || status === 'RUNNING' || status === 'DEPLOYING' || status === 'STARTING';
   return (
     <div
       style={{
@@ -363,18 +367,17 @@ console.log("Prediction:", data.prediction);`;
 /* ─── Main DeploymentStudio Component ──────────────────────── */
 interface DeploymentStudioProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
+  selectedDeploymentId?: string | null;
+  onDeploymentChange?: () => void;
+  onBack?: () => void;
 }
 
-interface PredictionHistoryItem {
-  id: string;
-  ts: string;
-  prediction: string | number;
-  confidence?: number | null;
-  latency_ms: number;
-  inputs: Record<string, any>;
-}
-
-export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast }) => {
+export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
+  onShowToast,
+  selectedDeploymentId,
+  onDeploymentChange,
+  onBack,
+}) => {
   const { activeJob, setActiveJob } = useProject();
 
   // Deployment lifecycle state
@@ -388,8 +391,9 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
   const [predResult, setPredResult] = useState<LocalPredictResponse | null>(null);
   const [predError, setPredError] = useState<string | null>(null);
 
-  // Session prediction history
+  // Real persisted prediction history
   const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Collapsible drawers
   const [showLogs, setShowLogs] = useState(false);
@@ -413,13 +417,42 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
     }
   }, []);
 
-  // Fetch deployment on mount / job change
+  // Fetch prediction history
+  const loadHistory = useCallback(async (depId: string) => {
+    setHistoryLoading(true);
+    try {
+      const records = await LocalDeploymentService.getPredictions(depId);
+      setHistory(records);
+    } catch {
+      // ignore
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  // Fetch deployment on mount / selection / job change
   useEffect(() => {
+    if (selectedDeploymentId) {
+      LocalDeploymentService.get(selectedDeploymentId)
+        .then((dep) => {
+          setDeployment(dep);
+          loadHistory(dep.deployment_id);
+          if (dep.job_id && dep.job_id !== jobId) {
+            fetchJobDetails(dep.job_id).then((j) => { if (j) setActiveJob(j); }).catch(() => {});
+          }
+        })
+        .catch((err) => {
+          onShowToast?.('Load Error', err?.detail || err?.message, 'error');
+        });
+      return;
+    }
+
     if (!jobId) return;
     LocalDeploymentService.listForJob(jobId)
       .then((deps) => {
         if (deps.length > 0) {
           setDeployment(deps[0]);
+          loadHistory(deps[0].deployment_id);
         }
       })
       .catch(() => {});
@@ -432,7 +465,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
         })
         .catch(() => {});
     }
-  }, [jobId]);
+  }, [selectedDeploymentId, jobId, loadHistory]);
 
   // Synchronize input fields when deployment is ready
   useEffect(() => {
@@ -478,10 +511,17 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
 
   const metrics = deployment?.metrics || (activeJob?.metadata?.['metrics'] as Record<string, any> | undefined);
 
+  const isRunning = deployment?.status === 'RUNNING' || deployment?.status === 'READY';
+  const isStopped = deployment?.status === 'STOPPED';
+  const isFailed = deployment?.status === 'FAILED';
+  const isStarting = deployment?.status === 'STARTING' || deployment?.status === 'DEPLOYING';
+
   const canDeploy = isCompleted && !deployment;
-  const canPredict = deployment?.status === 'READY';
-  const canStop = deployment?.status === 'READY' || deployment?.status === 'DEPLOYING';
-  const canRedeploy = deployment?.status === 'STOPPED' || deployment?.status === 'FAILED';
+  const canPredict = isRunning;
+  const canStart = isStopped || isFailed;
+  const canStop = isRunning || isStarting;
+  const canRestart = isRunning || isStopped;
+  const canRedeploy = true;
 
   /* ── Handlers ── */
   const handleDeploy = async () => {
@@ -491,15 +531,32 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
     try {
       const dep = await LocalDeploymentService.create(jobId, friendlyAlgorithmName);
       setDeployment(dep);
-      if (dep.status === 'READY') {
+      loadHistory(dep.deployment_id);
+      if (dep.status === 'RUNNING' || dep.status === 'READY') {
         onShowToast?.('Endpoint Live!', `${friendlyAlgorithmName} is active and ready for inference.`, 'success');
       } else if (dep.status === 'FAILED') {
         onShowToast?.('Deployment Issue', dep.error_message || 'Could not load model.', 'error');
       }
+      onDeploymentChange?.();
     } catch (err: any) {
       const msg = err?.detail || err?.message || 'Deployment failed';
       setDeployError(msg);
       onShowToast?.('Deployment Failed', msg, 'error');
+    } finally {
+      setDeployLoading(false);
+    }
+  };
+
+  const handleStart = async () => {
+    if (!deployment) return;
+    setDeployLoading(true);
+    try {
+      const updated = await LocalDeploymentService.start(deployment.deployment_id);
+      setDeployment(updated);
+      onShowToast?.('Endpoint Started', 'Serving traffic on port 8000.', 'success');
+      onDeploymentChange?.();
+    } catch (err: any) {
+      onShowToast?.('Start Failed', err?.detail || err?.message, 'error');
     } finally {
       setDeployLoading(false);
     }
@@ -512,8 +569,24 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
       const updated = await LocalDeploymentService.stop(deployment.deployment_id);
       setDeployment(updated);
       onShowToast?.('Endpoint Stopped', 'Model artifact preserved in registry.', 'info');
+      onDeploymentChange?.();
     } catch (err: any) {
       onShowToast?.('Stop Failed', err?.detail || err?.message, 'error');
+    } finally {
+      setDeployLoading(false);
+    }
+  };
+
+  const handleRestart = async () => {
+    if (!deployment) return;
+    setDeployLoading(true);
+    try {
+      const updated = await LocalDeploymentService.restart(deployment.deployment_id);
+      setDeployment(updated);
+      onShowToast?.('Endpoint Restarted', 'Model reloaded into cache.', 'success');
+      onDeploymentChange?.();
+    } catch (err: any) {
+      onShowToast?.('Restart Failed', err?.detail || err?.message, 'error');
     } finally {
       setDeployLoading(false);
     }
@@ -525,9 +598,8 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
     try {
       const updated = await LocalDeploymentService.redeploy(deployment.deployment_id);
       setDeployment(updated);
-      if (updated.status === 'READY') {
-        onShowToast?.('Endpoint Active!', 'Model reloaded into cache.', 'success');
-      }
+      onShowToast?.('Endpoint Active!', 'Model artifact reloaded.', 'success');
+      onDeploymentChange?.();
     } catch (err: any) {
       onShowToast?.('Redeploy Failed', err?.detail || err?.message, 'error');
     } finally {
@@ -576,7 +648,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
   };
 
   const handlePredict = async () => {
-    if (!deployment || deployment.status !== 'READY') return;
+    if (!deployment || !canPredict) return;
     setPredLoading(true);
     setPredError(null);
     setPredResult(null);
@@ -584,7 +656,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
     // Build payload according to feature schema types
     const inputs: Record<string, any> = {};
     for (const [k, v] of Object.entries(inputValues)) {
-      const schema = deployment.input_schema[k];
+      const schema = deployment.input_schema?.[k];
       if (schema?.type === 'categorical' || schema?.type === 'text') {
         inputs[k] = v;
       } else if (schema?.type === 'boolean') {
@@ -602,22 +674,15 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
         prev ? { ...prev, total_predictions: (prev.total_predictions || 0) + 1 } : prev
       );
 
-      // Add to session history
-      setHistory((prev) => [
-        {
-          id: String(Date.now()),
-          ts: new Date().toLocaleTimeString(),
-          prediction: res.prediction,
-          confidence: res.confidence,
-          latency_ms: res.latency_ms,
-          inputs: { ...inputs },
-        },
-        ...prev.slice(0, 4),
-      ]);
+      // Refresh persisted prediction records from backend
+      await loadHistory(deployment.deployment_id);
     } catch (err: any) {
       const msg = err?.detail || err?.message || 'Prediction failed';
       setPredError(msg);
       onShowToast?.('Prediction Error', msg, 'error');
+      if (deployment) {
+        loadHistory(deployment.deployment_id);
+      }
     } finally {
       setPredLoading(false);
     }
@@ -650,8 +715,41 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
       transition={{ duration: 0.2 }}
       style={{ height: '100%', overflowY: 'auto', padding: 24, background: '#050B14' }}
     >
-      {/* ── No Job State ── */}
-      {!activeJob && (
+      {/* ── Top Navigation Bar (Back to Hub) ── */}
+      {onBack && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <button
+            onClick={onBack}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid #1E293B',
+              borderRadius: 8,
+              padding: '7px 14px',
+              color: '#94A3B8',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 150ms ease',
+            }}
+          >
+            <ArrowLeft size={14} /> Back to Deployments
+          </button>
+          {deployment && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 12, color: '#64748B' }}>Deployment:</span>
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono, monospace)', color: '#00D4FF', fontWeight: 600 }}>
+                {deployment.name || deployment.deployment_id.slice(0, 12)}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── No Job or Deployment State ── */}
+      {!activeJob && !deployment && (
         <div
           style={{
             ...CARD_STYLE,
@@ -664,15 +762,14 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
           }}
         >
           <AlertCircle size={36} style={{ color: '#475569' }} />
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#94A3B8' }}>No Active Training Run Found</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#94A3B8' }}>No Active Model or Deployment Found</div>
           <div style={{ fontSize: 13, color: '#475569', maxWidth: 420, lineHeight: 1.6 }}>
-            Train a model on the Dataset Profiler or Pipeline Studio page first. Once completed, your model
-            artifact will be ready for 1-click deployment here.
+            Train a model on the Dataset Profiler or Pipeline Studio page first, or select an existing deployment from the Deployments Hub.
           </div>
         </div>
       )}
 
-      {activeJob && (
+      {(activeJob || deployment) && (
         <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr', gap: 24, alignItems: 'start' }}>
           {/* ═══════════════════════════════════════════════════════════════════
               LEFT COLUMN: MODEL OVERVIEW, ENDPOINT CONTROLS & API SNIPPETS
@@ -685,8 +782,21 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#F1F5F9', marginBottom: 4 }}>
-                  {friendlyAlgorithmName}
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#F1F5F9', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{friendlyAlgorithmName}</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: 'rgba(0, 245, 160, 0.15)',
+                      color: '#00F5A0',
+                      border: '1px solid rgba(0, 245, 160, 0.3)',
+                    }}
+                  >
+                    {deployment?.model_version || 'v1.0.0'}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <span
@@ -699,13 +809,18 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                       color: '#00D4FF',
                     }}
                   >
-                    {activeJob.algorithm ? activeJob.algorithm.replace(/_/g, ' ') : 'Production Candidate'}
+                    {activeJob?.algorithm ? activeJob.algorithm.replace(/_/g, ' ') : deployment?.algorithm || 'Model'}
                   </span>
                   <span style={{ fontSize: 12, color: '#475569' }}>•</span>
                   <span style={{ fontSize: 12, color: '#94A3B8' }}>
-                    Target: <strong style={{ color: '#00F5A0' }}>{activeJob.target_column}</strong>
+                    Target: <strong style={{ color: '#00F5A0' }}>{deployment?.target_column || activeJob?.target_column || '—'}</strong>
                   </span>
                 </div>
+                {deployment?.artifact_id && (
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#64748B', fontFamily: 'var(--font-mono, monospace)' }} title={deployment.artifact_id}>
+                    Artifact: {deployment.artifact_id.slice(0, 16)}…
+                  </div>
+                )}
               </div>
 
               {/* Dataset & Feature Metrics */}
@@ -746,7 +861,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                     Input Features
                   </div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#00D4FF', marginTop: 3 }}>
-                    {activeJob.feature_columns.length} columns
+                    {deployment?.feature_columns?.length || activeJob?.feature_columns?.length || 0} columns
                   </div>
                 </div>
               </div>
@@ -834,7 +949,30 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                 )}
 
                 {/* Control Action Buttons */}
-                <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {canStart && (
+                    <button
+                      onClick={handleStart}
+                      disabled={deployLoading}
+                      style={{
+                        flex: 1,
+                        padding: '9px 14px',
+                        borderRadius: 8,
+                        background: 'rgba(0,245,160,0.12)',
+                        border: '1px solid rgba(0,245,160,0.4)',
+                        color: '#00F5A0',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Play size={13} /> Start Endpoint
+                    </button>
+                  )}
                   {canStop && (
                     <button
                       onClick={handleStop}
@@ -858,17 +996,16 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                       <Square size={13} /> Stop Endpoint
                     </button>
                   )}
-                  {canRedeploy && (
+                  {canRestart && (
                     <button
-                      onClick={handleRedeploy}
+                      onClick={handleRestart}
                       disabled={deployLoading}
                       style={{
-                        flex: 1,
                         padding: '9px 14px',
                         borderRadius: 8,
-                        background: 'linear-gradient(135deg, rgba(0,212,255,0.15), rgba(0,245,160,0.15))',
-                        border: '1px solid #00F5A0',
-                        color: '#00F5A0',
+                        background: 'rgba(56, 189, 248, 0.1)',
+                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                        color: '#38BDF8',
                         fontSize: 12,
                         fontWeight: 700,
                         cursor: 'pointer',
@@ -878,7 +1015,29 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                         gap: 6,
                       }}
                     >
-                      <RefreshCw size={13} /> Restart Endpoint
+                      <RefreshCw size={13} /> Restart
+                    </button>
+                  )}
+                  {canRedeploy && (
+                    <button
+                      onClick={handleRedeploy}
+                      disabled={deployLoading}
+                      title="Reload model artifact"
+                      style={{
+                        padding: '9px 12px',
+                        borderRadius: 8,
+                        background: 'transparent',
+                        border: '1px solid #1E293B',
+                        color: '#94A3B8',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                      }}
+                    >
+                      <RotateCcw size={12} /> Redeploy
                     </button>
                   )}
                 </div>
@@ -1079,7 +1238,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                   </div>
                 </div>
 
-                {deployment && deployment.status === 'READY' && (
+                {deployment && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <button
                       onClick={handleAutoFill}
@@ -1125,7 +1284,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                 )}
               </div>
 
-              {!deployment || deployment.status !== 'READY' ? (
+              {!deployment ? (
                 <div style={{ padding: 48, textAlign: 'center', color: '#64748B' }}>
                   <HelpCircle size={32} style={{ marginBottom: 10, color: '#334155' }} />
                   <div style={{ fontSize: 14, fontWeight: 700 }}>Model Not Deployed Yet</div>
@@ -1136,6 +1295,26 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
               ) : (
                 /* Feature Input Fields Grid */
                 <div>
+                  {isStopped && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '12px 16px',
+                        borderRadius: 8,
+                        background: 'rgba(245, 166, 35, 0.08)',
+                        border: '1px solid rgba(245, 166, 35, 0.3)',
+                        color: '#F5A623',
+                        fontSize: 12,
+                        marginBottom: 16,
+                      }}
+                    >
+                      <AlertCircle size={15} style={{ flexShrink: 0 }} />
+                      <span>Endpoint is currently <strong>STOPPED</strong>. Predictions are offline. Click <strong>Start Endpoint</strong> in the left panel to resume live serving.</span>
+                    </div>
+                  )}
+
                   <div
                     style={{
                       display: 'grid',
@@ -1234,13 +1413,17 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
                       alignItems: 'center',
                       justifyContent: 'center',
                       gap: 8,
-                      boxShadow: '0 0 20px rgba(0,245,160,0.18)',
+                      boxShadow: canPredict ? '0 0 20px rgba(0,245,160,0.18)' : 'none',
                       transition: 'all 150ms ease',
                     }}
                   >
                     {predLoading ? (
                       <>
                         <Loader2 size={16} className="animate-spin" /> Executing Prediction…
+                      </>
+                    ) : isStopped ? (
+                      <>
+                        <Square size={15} /> Endpoint Stopped — Start to Predict
                       </>
                     ) : (
                       <>
@@ -1389,45 +1572,104 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({ onShowToast 
               )}
             </AnimatePresence>
 
-            {/* ── Session Prediction History Table ── */}
-            {history.length > 0 && (
+            {/* ── Persisted Prediction History Section ── */}
+            {deployment && (
               <div style={CARD_STYLE}>
-                <div style={SECTION_LABEL}>
-                  <Clock size={12} style={{ color: '#00D4FF' }} /> Recent Test Inferences
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div style={{ ...SECTION_LABEL, marginBottom: 0 }}>
+                    <Clock size={12} style={{ color: '#00D4FF' }} /> Prediction History ({history.length})
+                  </div>
+                  <button
+                    onClick={() => loadHistory(deployment.deployment_id)}
+                    disabled={historyLoading}
+                    title="Refresh prediction history from database"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      background: 'none',
+                      border: 'none',
+                      color: '#64748B',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <RefreshCw size={11} className={historyLoading ? 'animate-spin' : ''} /> Refresh
+                  </button>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {history.map((item) => (
-                    <div
-                      key={item.id}
-                      style={{
-                        padding: '10px 14px',
-                        borderRadius: 8,
-                        background: '#040912',
-                        border: '1px solid #142236',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        fontSize: 12,
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ color: '#475569', fontSize: 11 }}>{item.ts}</span>
-                        <span style={{ color: '#E2E8F0', fontWeight: 700 }}>
-                          Result: <strong style={{ color: '#00F5A0' }}>{String(item.prediction)}</strong>
-                        </span>
-                        {item.confidence != null && (
-                          <span style={{ color: '#64748B', fontSize: 11 }}>
-                            ({(item.confidence * 100).toFixed(0)}% conf)
-                          </span>
-                        )}
-                      </div>
-                      <span style={{ color: '#475569', fontFamily: 'var(--font-mono, monospace)', fontSize: 11 }}>
-                        {item.latency_ms.toFixed(1)}ms
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                {history.length === 0 ? (
+                  <div style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '16px 0' }}>
+                    No inferences executed yet for this deployment.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {history.slice(0, 10).map((item) => {
+                      const isSuccess = item.status === 'SUCCESS';
+                      return (
+                        <div
+                          key={item.id}
+                          style={{
+                            padding: '10px 14px',
+                            borderRadius: 8,
+                            background: '#040912',
+                            border: `1px solid ${isSuccess ? '#142236' : 'rgba(239, 68, 68, 0.25)'}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontSize: 12,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                            <span style={{ color: '#475569', fontSize: 11 }}>
+                              {item.created_at ? new Date(item.created_at).toLocaleTimeString() : '—'}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 800,
+                                padding: '1px 6px',
+                                borderRadius: 4,
+                                background: isSuccess ? 'rgba(0, 245, 160, 0.12)' : 'rgba(239, 68, 68, 0.15)',
+                                color: isSuccess ? '#00F5A0' : '#FF4D6D',
+                                border: `1px solid ${isSuccess ? 'rgba(0, 245, 160, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                              }}
+                            >
+                              {item.status || 'SUCCESS'}
+                            </span>
+                            {isSuccess ? (
+                              <>
+                                <span style={{ color: '#E2E8F0', fontWeight: 700 }}>
+                                  Result: <strong style={{ color: '#00F5A0' }}>{String(item.prediction)}</strong>
+                                </span>
+                                {item.confidence != null && (
+                                  <span style={{ color: '#64748B', fontSize: 11 }}>
+                                    ({(item.confidence * 100).toFixed(0)}% conf)
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span style={{ color: '#FF4D6D', fontSize: 11 }}>
+                                {item.error_message || 'Inference error'}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {item.model_version && (
+                              <span style={{ fontSize: 10, color: '#64748B', fontFamily: 'var(--font-mono, monospace)' }}>
+                                {item.model_version}
+                              </span>
+                            )}
+                            <span style={{ color: '#475569', fontFamily: 'var(--font-mono, monospace)', fontSize: 11 }}>
+                              {item.latency_ms != null ? `${item.latency_ms.toFixed(1)}ms` : '—'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

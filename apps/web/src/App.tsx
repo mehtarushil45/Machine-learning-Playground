@@ -22,7 +22,7 @@ import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { ExplainabilityHub } from './features/explainability/ExplainabilityHub';
 import { ClassroomHub } from './features/classrooms/ClassroomHub';
-import { DeploymentStudio } from './features/deployments/DeploymentStudio';
+import { DeploymentsHub } from './features/deployments/DeploymentsHub';
 import { PortfolioViewer } from './features/portfolios/PortfolioViewer';
 
 export type PlatformTab =
@@ -100,7 +100,7 @@ function AppContent() {
     { id: 'training-results',   label: 'Training Results',          icon: <BarChart2 className="w-5 h-5" />    },
     { id: 'explainability',     label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" />    },
     { id: 'classrooms',         label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" /> },
-    { id: 'deployments',        label: 'Deployment Studio',         icon: <Rocket className="w-5 h-5" />       },
+    { id: 'deployments',        label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />       },
     { id: 'portfolios',         label: 'Portfolios & Verification',  icon: <Award className="w-5 h-5" />       },
   ];
 
@@ -479,7 +479,7 @@ function AppContent() {
 
               <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
-                  <DeploymentStudio onShowToast={showToast} />
+                  <DeploymentsHub onShowToast={showToast} />
                 </ErrorBoundary>
               </div>
 

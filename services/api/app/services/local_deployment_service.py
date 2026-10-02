@@ -1,53 +1,53 @@
-"""Local Deployment Service — Prototype 4.
+"""Local Deployment Service — Enterprise Model Deployment & Lifecycle Management.
 
 Orchestrates the complete local deployment lifecycle:
-  - Create a deployment from a completed training job (validates artifact integrity)
-  - Load and cache the model artifact for fast inference
-  - Execute predictions against the immutable model artifact
-  - Stop / Redeploy lifecycle transitions
-  - Log all lifecycle events
+  - Create a deployment from a completed training run (validates artifact integrity & lineage)
+  - Manage lifecycle state transitions: STARTING, RUNNING, STOPPING, STOPPED, FAILED
+  - Start, Stop, Restart, Redeploy, and Delete operations
+  - Execute strict pre-inference input validation (schema, types, and categorical domain verification)
+  - Execute inference against the immutable model artifact
+  - Persist real prediction audit logs & telemetry in LocalPredictionHistory
+  - Provide structured lifecycle logs with timestamps and severities
 
-Immutability guarantee:
-  model_path, feature_columns, target_column, and input_schema are all
-  snapshotted from the model registry at creation time and stored in the
-  local_deployments row.  Subsequent training runs cannot change an existing
-  deployment.
-
-Lineage chain:
-  LocalDeployment.job_id -> Job -> job_metadata.model_id
-      -> Model Registry -> lineage.json (DatasetVersion, PipelineRevision, ...)
+Architecture Separation of Concerns:
+  Dataset ≠ Experiment ≠ Training Run ≠ Model ≠ Model Artifact ≠ Deployment ≠ Prediction
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.local_deployment import LocalDeployment, LocalDeploymentStatus
+from app.models.local_prediction_history import LocalPredictionHistory
 from app.schemas.local_deployment import (
     LocalDeploymentCreate,
+    LocalDeploymentRedeploy,
     LocalDeploymentResponse,
+    LocalDeploymentUpdate,
     LocalPredictRequest,
     LocalPredictResponse,
+    ModelVersionOption,
+    PredictionHistoryItem,
 )
 
 logger = logging.getLogger("apex_ml.local_deployment_service")
 
-# Terminal statuses for jobs (from job schema)
+# Terminal status for training jobs
 _JOB_COMPLETED_STATUS = "COMPLETED"
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Internal Helpers
 # ---------------------------------------------------------------------------
 
 def _ts() -> str:
@@ -55,12 +55,18 @@ def _ts() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _log_entry(msg: str) -> Dict[str, str]:
-    return {"ts": _ts(), "msg": msg}
+def _log_entry(msg: str, event: str = "LIFECYCLE_EVENT", severity: str = "INFO") -> Dict[str, Any]:
+    """Build a structured lifecycle log entry."""
+    return {
+        "ts": _ts(),
+        "event": event,
+        "severity": severity,
+        "msg": msg,
+    }
 
 
 def _assert_owner(dep: LocalDeployment, owner_id: str) -> None:
-    if dep.owner_id != owner_id:
+    if dep.owner_id and dep.owner_id != owner_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to access this deployment.",
@@ -72,9 +78,9 @@ def _build_input_schema(
     model_registry_meta: Dict[str, Any],
     loaded_model: Optional[Any] = None,
     dataset_sample: Optional[Any] = None,
-) -> tuple[Dict[str, Any], Dict[str, Any]]:
-    """
-    Build a per-feature input schema and realistic sample inputs for the prediction form.
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Build a per-feature input schema and realistic sample inputs for the prediction form.
+
     Returns (input_schema, sample_inputs).
     """
     import pandas as pd
@@ -156,7 +162,7 @@ def _build_input_schema(
 
 def _enrich_deployment_data(
     dep: LocalDeployment,
-) -> tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]], str, str]:
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]], str, str]:
     """Enrich deployment with categories, sample data, performance metrics, and clean display names."""
     import pandas as pd
     from app.ml.inference_engine import load_model
@@ -175,7 +181,7 @@ def _enrich_deployment_data(
     except Exception:
         pass
 
-    # Dataset friendly name (strip raw UUID if possible)
+    # Dataset friendly name
     dataset_name = dep.dataset_id or "Training Dataset"
     try:
         from services.worker.core.dataset_loader import find_dataset_path
@@ -219,6 +225,8 @@ def _to_response(dep: LocalDeployment) -> LocalDeploymentResponse:
         deployment_id=str(dep.id),
         job_id=dep.job_id,
         model_id=dep.model_id,
+        model_version=dep.model_version or "v1.0.0",
+        artifact_id=dep.artifact_id or (os.path.basename(dep.model_path) if dep.model_path else ""),
         name=dep.name,
         status=dep.status,
         algorithm=dep.algorithm,
@@ -227,6 +235,7 @@ def _to_response(dep: LocalDeployment) -> LocalDeploymentResponse:
         target_column=dep.target_column,
         feature_columns=dep.feature_columns or [],
         input_schema=schema,
+        configuration=dep.configuration or {},
         error_message=dep.error_message,
         started_at=dep.started_at.isoformat() if dep.started_at else None,
         stopped_at=dep.stopped_at.isoformat() if dep.stopped_at else None,
@@ -276,47 +285,25 @@ async def create_local_deployment(
     owner_id: str,
     db: AsyncSession,
 ) -> LocalDeploymentResponse:
-    """
-    Create a local deployment from a completed training job.
-
-    Steps:
-      1. Verify job exists and is COMPLETED
-      2. Extract model_id from job metadata
-      3. Look up model from filesystem registry (feature_columns, model_path, etc.)
-      4. Verify model binary exists on disk (immutability guard)
-      5. Build input_schema from registry metadata
-      6. Persist LocalDeployment record (status=DEPLOYING)
-      7. Warm the inference engine model cache
-      8. Transition to READY
-
-    Raises:
-        HTTP 404: Job not found
-        HTTP 400: Job not COMPLETED / model artifact missing
-        HTTP 409: Model binary missing from disk
-    """
-    from app.services.job_service import job_service, _JOBS_STORE
-    from app.ml.model_registry import get_model_by_id
+    """Create a local deployment from a completed training job."""
+    from app.services.job_service import _JOBS_STORE
+    from app.ml.model_registry import get_model_by_id, get_model_by_job_id
     from app.ml.inference_engine import load_model, ModelNotFoundError
 
-    logs: List[Dict[str, str]] = []
+    logs: List[Dict[str, Any]] = []
+    logs.append(_log_entry(f"Initiating deployment for training job '{payload.job_id}'...", event="DEPLOYMENT_CREATED"))
 
-    # ── Step 1: Validate job is COMPLETED ─────────────────────────────────────
-    logs.append(_log_entry(f"Fetching job {payload.job_id} to validate completion..."))
-
-    # Prefer DB, fall back to in-memory store
-    db_job_meta: Optional[Dict[str, Any]] = None
+    # 1. Validate Job is COMPLETED
     job_model_id: Optional[str] = None
     job_dataset_id: str = ""
     job_status: str = ""
 
-    # Try in-memory first (fast path, also handles mid-session jobs)
     in_mem = _JOBS_STORE.get(payload.job_id)
     if in_mem:
         job_status = in_mem.status
         job_dataset_id = in_mem.dataset_id or ""
         job_model_id = in_mem.metadata.get("model_id") if in_mem.metadata else None
 
-    # Try DB for persistent jobs
     if not in_mem or not job_model_id:
         try:
             from app.database import AsyncSessionLocal
@@ -350,14 +337,10 @@ async def create_local_deployment(
     if job_status != _JOB_COMPLETED_STATUS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Job '{payload.job_id}' has status '{job_status}'. "
-                f"Only COMPLETED jobs can be deployed."
-            ),
+            detail=f"Job '{payload.job_id}' has status '{job_status}'. Only COMPLETED jobs can be deployed.",
         )
 
     if not job_model_id:
-        from app.ml.model_registry import get_model_by_job_id, get_model_by_id
         reg_model = get_model_by_job_id(payload.job_id)
         if reg_model:
             job_model_id = reg_model.get("model_id")
@@ -367,24 +350,17 @@ async def create_local_deployment(
     if not job_model_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Job '{payload.job_id}' completed but no model_id was registered. "
-                f"The training run may have failed to save an artifact."
-            ),
+            detail=f"Job '{payload.job_id}' completed but no model_id was registered.",
         )
 
-    logs.append(_log_entry(f"Job validated: COMPLETED. Model ID: {job_model_id}"))
+    logs.append(_log_entry(f"Training run validated: COMPLETED. Model ID: {job_model_id}", event="ARTIFACT_RESOLVED"))
 
-    # ── Step 2: Load model registry metadata ──────────────────────────────────
-    logs.append(_log_entry("Loading model registry metadata..."))
+    # 2. Model Registry Metadata & Version
     registry_meta = get_model_by_id(job_model_id)
     if not registry_meta:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Model '{job_model_id}' not found in model registry. "
-                f"The artifact may have been deleted."
-            ),
+            detail=f"Model '{job_model_id}' not found in registry.",
         )
 
     feature_columns: List[str] = registry_meta.get("feature_columns", [])
@@ -393,50 +369,55 @@ async def create_local_deployment(
     algorithm: str = registry_meta.get("algorithm", "Unknown")
     problem_type: str = registry_meta.get("problem_type", "")
     dataset_id: str = registry_meta.get("dataset_id", "") or job_dataset_id
+    model_version: str = registry_meta.get("model_version") or registry_meta.get("version") or "v1.0.0"
+    artifact_id: str = os.path.basename(model_path) if model_path else f"artifact-{job_model_id}"
 
-    # ── Step 3: Verify binary exists ──────────────────────────────────────────
-    logs.append(_log_entry(f"Verifying model binary at: {model_path}"))
+    # 3. Verify Binary on Disk
     if not model_path or not os.path.exists(model_path):
-        # Try artifact manager fallback
         try:
             from app.ml.artifact_manager import load_artifact
-            fallback_path = load_artifact("model", model_id=job_model_id)
-            if fallback_path and os.path.exists(str(fallback_path)):
-                model_path = str(fallback_path)
-                logs.append(_log_entry(f"Model binary located via artifact manager: {model_path}"))
+            fb = load_artifact("model", model_id=job_model_id)
+            if fb and os.path.exists(str(fb)):
+                model_path = str(fb)
+                artifact_id = os.path.basename(model_path)
             else:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f"Model binary for '{job_model_id}' not found on disk. "
-                        f"Expected at: {model_path}"
-                    ),
+                    detail=f"Model artifact binary for '{job_model_id}' not found on disk at {model_path}.",
                 )
         except HTTPException:
             raise
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Model binary for '{job_model_id}' not found on disk.",
+                detail=f"Model artifact binary for '{job_model_id}' not found on disk.",
             )
-    else:
-        logs.append(_log_entry("Model binary verified."))
 
-    # ── Step 4: Build input schema ─────────────────────────────────────────────
+    logs.append(_log_entry(f"Model artifact binary verified: {artifact_id}", event="ARTIFACT_LOADED"))
+
+    # 4. Build Input Schema
     input_schema, _ = _build_input_schema(feature_columns, registry_meta)
-    logs.append(_log_entry(f"Input schema built for {len(feature_columns)} features."))
+    logs.append(_log_entry(f"Input schema built for {len(feature_columns)} features.", event="INPUT_SCHEMA_LOADED"))
 
-    # ── Step 5: Persist deployment record (DEPLOYING) ─────────────────────────
+    # 5. Persist Deployment record (STARTING)
     dep_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
-    logs.append(_log_entry("Persisting deployment record..."))
+    config = {
+        "host": "localhost",
+        "port": 8000,
+        "timeout_seconds": 30,
+        **(payload.configuration or {}),
+    }
 
     dep = LocalDeployment(
         id=dep_id,
         job_id=payload.job_id,
         model_id=job_model_id,
+        model_version=model_version,
+        artifact_id=artifact_id,
         name=payload.name,
-        status=LocalDeploymentStatus.DEPLOYING.value,
+        configuration=config,
+        status=LocalDeploymentStatus.STARTING.value,
         algorithm=algorithm,
         problem_type=problem_type,
         dataset_id=dataset_id,
@@ -453,31 +434,28 @@ async def create_local_deployment(
     await db.commit()
     await db.refresh(dep)
 
-    # ── Step 6: Warm model cache (load_model caches in-process) ───────────────
+    # 6. Warm Cache & Transition to RUNNING
     try:
-        logs.append(_log_entry("Loading model into inference cache..."))
+        logs.append(_log_entry("Loading model into in-memory inference cache...", event="ENDPOINT_STARTING"))
         load_model(model_id=job_model_id)
-        logs.append(_log_entry("Model loaded and cached successfully. Deployment READY."))
-        dep.status = LocalDeploymentStatus.READY.value
+        logs.append(_log_entry(f"Endpoint active and serving on /api/v1/local-deployments/{dep.id}/predict", event="ENDPOINT_STARTED"))
+        dep.status = LocalDeploymentStatus.RUNNING.value
     except ModelNotFoundError as exc:
-        err_msg = f"Model load failed: {exc}"
-        logs.append(_log_entry(f"ERROR: {err_msg}"))
+        err = f"Model load failed: {exc}"
+        logs.append(_log_entry(err, event="DEPLOYMENT_FAILED", severity="ERROR"))
         dep.status = LocalDeploymentStatus.FAILED.value
-        dep.error_message = err_msg
+        dep.error_message = err
     except Exception as exc:
-        err_msg = f"Unexpected error during model load: {exc}"
-        logs.append(_log_entry(f"ERROR: {err_msg}"))
+        err = f"Unexpected startup error: {exc}"
+        logs.append(_log_entry(err, event="DEPLOYMENT_FAILED", severity="ERROR"))
         dep.status = LocalDeploymentStatus.FAILED.value
-        dep.error_message = err_msg
+        dep.error_message = err
 
     dep.logs = logs
     await db.commit()
     await db.refresh(dep)
 
-    logger.info(
-        "Created local deployment %s for job %s (model=%s, status=%s).",
-        dep.id, payload.job_id, job_model_id, dep.status,
-    )
+    logger.info("Created local deployment %s (model=%s, version=%s, status=%s).", dep.id, job_model_id, model_version, dep.status)
     return _to_response(dep)
 
 
@@ -487,6 +465,7 @@ async def get_local_deployment(
     owner_id: str,
     db: AsyncSession,
 ) -> LocalDeploymentResponse:
+    """Retrieve full deployment record."""
     dep = await _get_deployment(deployment_id, db)
     _assert_owner(dep, owner_id)
     return _to_response(dep)
@@ -497,6 +476,7 @@ async def list_local_deployments(
     owner_id: str,
     db: AsyncSession,
 ) -> List[LocalDeploymentResponse]:
+    """List all deployments owned by the user, newest first."""
     stmt = (
         select(LocalDeployment)
         .where(LocalDeployment.owner_id == owner_id)
@@ -512,6 +492,7 @@ async def list_deployments_for_job(
     owner_id: str,
     db: AsyncSession,
 ) -> List[LocalDeploymentResponse]:
+    """List all deployments linked to a specific training job."""
     stmt = (
         select(LocalDeployment)
         .where(
@@ -524,6 +505,251 @@ async def list_deployments_for_job(
     return [_to_response(d) for d in result.scalars().all()]
 
 
+async def start_local_deployment(
+    deployment_id: str,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+) -> LocalDeploymentResponse:
+    """Start a STOPPED or FAILED deployment into RUNNING."""
+    from app.ml.inference_engine import load_model, ModelNotFoundError
+
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    if dep.status in (LocalDeploymentStatus.RUNNING.value, "READY"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Deployment '{deployment_id}' is already running.",
+        )
+
+    logs = list(dep.logs or [])
+    logs.append(_log_entry("Starting serving endpoint...", event="ENDPOINT_STARTING"))
+    dep.status = LocalDeploymentStatus.STARTING.value
+    dep.error_message = None
+    dep.stopped_at = None
+    dep.logs = logs
+    await db.commit()
+
+    try:
+        load_model(model_id=dep.model_id)
+        logs.append(_log_entry("Model loaded into cache. Serving active.", event="ENDPOINT_STARTED"))
+        dep.status = LocalDeploymentStatus.RUNNING.value
+        dep.started_at = datetime.now(timezone.utc)
+    except ModelNotFoundError as exc:
+        err = f"Failed to start endpoint — model not found: {exc}"
+        logs.append(_log_entry(err, event="DEPLOYMENT_FAILED", severity="ERROR"))
+        dep.status = LocalDeploymentStatus.FAILED.value
+        dep.error_message = err
+    except Exception as exc:
+        err = f"Failed to start endpoint: {exc}"
+        logs.append(_log_entry(err, event="DEPLOYMENT_FAILED", severity="ERROR"))
+        dep.status = LocalDeploymentStatus.FAILED.value
+        dep.error_message = err
+
+    dep.logs = logs
+    await db.commit()
+    await db.refresh(dep)
+    return _to_response(dep)
+
+
+async def stop_local_deployment(
+    deployment_id: str,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+) -> LocalDeploymentResponse:
+    """Stop a RUNNING or STARTING deployment."""
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    if dep.status == LocalDeploymentStatus.STOPPED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Deployment '{deployment_id}' is already stopped.",
+        )
+
+    logs = list(dep.logs or [])
+    logs.append(_log_entry("Stopping serving endpoint...", event="ENDPOINT_STOPPING"))
+    dep.status = LocalDeploymentStatus.STOPPING.value
+    dep.logs = logs
+    await db.commit()
+
+    logs.append(_log_entry("Endpoint stopped. Model artifact preserved in registry.", event="ENDPOINT_STOPPED"))
+    dep.status = LocalDeploymentStatus.STOPPED.value
+    dep.stopped_at = datetime.now(timezone.utc)
+    dep.logs = logs
+    await db.commit()
+    await db.refresh(dep)
+
+    logger.info("Stopped local deployment %s.", deployment_id)
+    return _to_response(dep)
+
+
+async def restart_local_deployment(
+    deployment_id: str,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+) -> LocalDeploymentResponse:
+    """Restart a deployment: stops if running, reloads model into cache, and starts."""
+    from app.ml.inference_engine import load_model
+
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    logs = list(dep.logs or [])
+    logs.append(_log_entry("Restarting serving endpoint...", event="ENDPOINT_RESTARTING"))
+    dep.status = LocalDeploymentStatus.STARTING.value
+    dep.error_message = None
+    dep.stopped_at = None
+    dep.logs = logs
+    await db.commit()
+
+    try:
+        load_model(model_id=dep.model_id)
+        logs.append(_log_entry("Endpoint restarted successfully and serving predictions.", event="ENDPOINT_RESTARTED"))
+        dep.status = LocalDeploymentStatus.RUNNING.value
+        dep.started_at = datetime.now(timezone.utc)
+    except Exception as exc:
+        err = f"Restart failed: {exc}"
+        logs.append(_log_entry(err, event="DEPLOYMENT_FAILED", severity="ERROR"))
+        dep.status = LocalDeploymentStatus.FAILED.value
+        dep.error_message = err
+
+    dep.logs = logs
+    await db.commit()
+    await db.refresh(dep)
+    return _to_response(dep)
+
+
+async def redeploy_local_deployment(
+    deployment_id: str,
+    payload: Optional[LocalDeploymentRedeploy] = None,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+) -> LocalDeploymentResponse:
+    """Redeploy an existing deployment.
+
+    Can re-initialize the existing model artifact OR upgrade to a new model version
+    (via new job_id or model_id) while preserving historical prediction records.
+    """
+    from app.ml.inference_engine import load_model, ModelNotFoundError
+    from app.ml.model_registry import get_model_by_id, get_model_by_job_id
+
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    logs = list(dep.logs or [])
+    now = datetime.now(timezone.utc)
+
+    target_model_id = dep.model_id
+    target_job_id = dep.job_id
+
+    if payload and (payload.job_id or payload.model_id):
+        if payload.job_id:
+            target_job_id = payload.job_id
+            reg = get_model_by_job_id(payload.job_id)
+            if not reg:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"No registered model found for job '{payload.job_id}'.",
+                )
+            target_model_id = reg["model_id"]
+        elif payload.model_id:
+            target_model_id = payload.model_id
+
+        meta = get_model_by_id(target_model_id)
+        if not meta:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Model '{target_model_id}' not found in registry.",
+            )
+
+        new_version = meta.get("model_version") or meta.get("version") or "v1.0.0"
+        new_path = meta.get("model_path", "")
+        new_artifact_id = os.path.basename(new_path) if new_path else f"artifact-{target_model_id}"
+
+        logs.append(
+            _log_entry(
+                f"Upgrading deployment from model {dep.model_id} ({dep.model_version}) to {target_model_id} ({new_version})...",
+                event="DEPLOYMENT_REDEPLOYED",
+            )
+        )
+
+        dep.job_id = target_job_id
+        dep.model_id = target_model_id
+        dep.model_version = new_version
+        dep.artifact_id = new_artifact_id
+        dep.algorithm = meta.get("algorithm", dep.algorithm)
+        dep.problem_type = meta.get("problem_type", dep.problem_type)
+        dep.target_column = meta.get("target_column", dep.target_column)
+        dep.feature_columns = meta.get("feature_columns", dep.feature_columns)
+        dep.model_path = new_path
+        dep.input_schema, _ = _build_input_schema(dep.feature_columns, meta)
+    else:
+        logs.append(_log_entry("Redeploying current model artifact into cache...", event="DEPLOYMENT_REDEPLOYED"))
+
+    if payload and payload.name:
+        dep.name = payload.name
+
+    dep.status = LocalDeploymentStatus.STARTING.value
+    dep.error_message = None
+    dep.stopped_at = None
+    dep.logs = logs
+    await db.commit()
+
+    try:
+        load_model(model_id=dep.model_id)
+        logs.append(_log_entry(f"Deployment READY and serving model version '{dep.model_version}'.", event="ENDPOINT_STARTED"))
+        dep.status = LocalDeploymentStatus.RUNNING.value
+        dep.started_at = now
+    except ModelNotFoundError as exc:
+        err = f"Redeploy failed — model artifact not found: {exc}"
+        logs.append(_log_entry(err, event="DEPLOYMENT_FAILED", severity="ERROR"))
+        dep.status = LocalDeploymentStatus.FAILED.value
+        dep.error_message = err
+    except Exception as exc:
+        err = f"Redeploy failed: {exc}"
+        logs.append(_log_entry(err, event="DEPLOYMENT_FAILED", severity="ERROR"))
+        dep.status = LocalDeploymentStatus.FAILED.value
+        dep.error_message = err
+
+    dep.logs = logs
+    await db.commit()
+    await db.refresh(dep)
+    return _to_response(dep)
+
+
+async def delete_local_deployment(
+    deployment_id: str,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+) -> Dict[str, Any]:
+    """Delete a deployment and its associated prediction history."""
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    if dep.status == LocalDeploymentStatus.STARTING.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a deployment while it is STARTING.",
+        )
+
+    # Delete prediction history (cascade handled by FK, but explicit cleanup for safety)
+    dep_uuid = dep.id
+    await db.execute(
+        delete(LocalPredictionHistory).where(LocalPredictionHistory.deployment_id == dep_uuid)
+    )
+    await db.delete(dep)
+    await db.commit()
+
+    logger.info("Deleted local deployment %s and associated prediction history.", deployment_id)
+    return {"detail": f"Deployment '{deployment_id}' and all associated inference history deleted successfully."}
+
+
 async def predict_local(
     deployment_id: str,
     payload: LocalPredictRequest,
@@ -531,34 +757,89 @@ async def predict_local(
     owner_id: str,
     db: AsyncSession,
 ) -> LocalPredictResponse:
-    """
-    Execute inference against an immutable local deployment artifact.
-
-    Validates:
-      - Deployment is READY
-      - All required feature columns are present in payload.inputs
-    """
+    """Execute prediction against an active local deployment with strict validation & audit persistence."""
     from app.ml.inference_engine import predict, ModelNotFoundError, InferenceValidationError
 
     dep = await _get_deployment(deployment_id, db)
     _assert_owner(dep, owner_id)
 
-    if dep.status != LocalDeploymentStatus.READY.value:
+    # 1. State check: Must be RUNNING or READY
+    if dep.status not in (LocalDeploymentStatus.RUNNING.value, "READY"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Deployment '{deployment_id}' is not READY (current status: {dep.status}). "
-                   f"Cannot run predictions.",
+            detail=(
+                f"Deployment '{deployment_id}' is currently {dep.status}. "
+                f"Cannot run predictions. Please start the deployment first."
+            ),
         )
 
-    # Validate all required features are provided
-    missing = [f for f in dep.feature_columns if f not in payload.inputs]
-    if missing:
+    # 2. Strict Input Validation
+    missing_features = [f for f in dep.feature_columns if f not in payload.inputs]
+    if missing_features:
+        err_msg = f"Missing required feature(s): {missing_features}. Required features: {dep.feature_columns}"
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Missing required feature(s): {missing}. "
-                   f"Required features: {dep.feature_columns}",
+            detail=err_msg,
         )
 
+    validation_errors: List[str] = []
+    schema = dep.input_schema or {}
+
+    for col in dep.feature_columns:
+        val = payload.inputs.get(col)
+        col_schema = schema.get(col, {})
+        col_type = col_schema.get("type", "numeric")
+
+        if val is None or (isinstance(val, str) and not val.strip()):
+            validation_errors.append(f"{col}: Value cannot be null or empty.")
+            continue
+
+        if col_type == "numeric":
+            try:
+                num = float(val)
+                if not np.isfinite(num):
+                    validation_errors.append(f"{col}: Expected finite numeric value, received {val}.")
+            except (ValueError, TypeError):
+                validation_errors.append(f"{col}: Expected numeric value, received {val!r}.")
+
+        elif col_type == "categorical":
+            valid_categories = col_schema.get("categories")
+            if valid_categories:
+                val_str = str(val).strip()
+                if val_str not in valid_categories:
+                    allowed = ", ".join(valid_categories[:8]) + ("..." if len(valid_categories) > 8 else "")
+                    validation_errors.append(
+                        f"{col}: Value '{val_str}' is not present in the trained categorical schema. Valid categories: {allowed}"
+                    )
+
+        elif col_type == "boolean":
+            if str(val).lower() not in ("0", "1", "true", "false", "yes", "no"):
+                validation_errors.append(f"{col}: Expected boolean value (0/1 or True/False), received {val!r}.")
+
+    if validation_errors:
+        err_detail = "Prediction failed:\n" + "\n".join(validation_errors)
+        # Record failed inference in history for auditing
+        fail_rec = LocalPredictionHistory(
+            id=uuid.uuid4(),
+            deployment_id=dep.id,
+            model_id=dep.model_id,
+            model_version=dep.model_version or "v1.0.0",
+            inputs=payload.inputs,
+            prediction="",
+            status="FAILED",
+            error_message=err_detail,
+            owner_id=owner_id,
+        )
+        db.add(fail_rec)
+        await db.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=err_detail,
+        )
+
+    # 3. Inference Execution
+    t_start = time.perf_counter()
     try:
         result = predict(
             data=payload.inputs,
@@ -577,136 +858,131 @@ async def predict_local(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Prediction failed: {exc}",
+            detail=f"Inference execution failed: {exc}",
         )
 
-    # Atomically increment prediction counter
-    dep.total_predictions = (dep.total_predictions or 0) + 1
-
-    # Append prediction to logs (keep last 50 only to avoid unbounded growth)
+    latency_ms = (time.perf_counter() - t_start) * 1000.0
     prediction_val = result.get("prediction")
-    log_msg = f"Prediction: {prediction_val} (latency={result.get('latency_ms', 0):.1f}ms)"
+    confidence_val = result.get("confidence")
+    probabilities_val = result.get("probabilities")
+
+    # 4. Persist Prediction Record in History
+    pred_id = uuid.uuid4()
+    history_rec = LocalPredictionHistory(
+        id=pred_id,
+        deployment_id=dep.id,
+        model_id=dep.model_id,
+        model_version=dep.model_version or "v1.0.0",
+        inputs=payload.inputs,
+        prediction=str(prediction_val),
+        confidence=confidence_val,
+        probabilities=probabilities_val,
+        latency_ms=round(latency_ms, 2),
+        status="SUCCESS",
+        owner_id=owner_id,
+    )
+    db.add(history_rec)
+
+    # 5. Telemetry & Log
+    dep.total_predictions = (dep.total_predictions or 0) + 1
+    log_msg = f"Prediction: {prediction_val} (latency={latency_ms:.1f}ms, confidence={confidence_val if confidence_val is not None else 'N/A'})"
     current_logs = list(dep.logs or [])
-    current_logs.append(_log_entry(log_msg))
-    dep.logs = current_logs[-100:]  # keep last 100 log entries
+    current_logs.append(_log_entry(log_msg, event="PREDICTION_COMPLETED"))
+    dep.logs = current_logs[-100:]
 
     await db.commit()
     await db.refresh(dep)
 
     return LocalPredictResponse(
+        inference_id=str(pred_id),
         deployment_id=str(dep.id),
         job_id=dep.job_id,
         model_id=dep.model_id,
+        model_version=dep.model_version or "v1.0.0",
         prediction=prediction_val,
-        probabilities=result.get("probabilities"),
-        confidence=result.get("confidence"),
+        probabilities=probabilities_val,
+        confidence=confidence_val,
         problem_type=dep.problem_type,
-        latency_ms=result.get("latency_ms", 0.0),
+        latency_ms=round(latency_ms, 2),
         timestamp=_ts(),
+        status="SUCCESS",
     )
 
 
-async def stop_local_deployment(
+async def list_prediction_history(
+    deployment_id: str,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    owner_id: str,
+    db: AsyncSession,
+) -> List[PredictionHistoryItem]:
+    """Retrieve paginated, persisted inference history for a specific deployment."""
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    stmt = (
+        select(LocalPredictionHistory)
+        .where(LocalPredictionHistory.deployment_id == dep.id)
+        .order_by(LocalPredictionHistory.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    return [
+        PredictionHistoryItem(
+            id=str(r.id),
+            deployment_id=str(r.deployment_id),
+            model_id=r.model_id,
+            model_version=r.model_version,
+            inputs=r.inputs or {},
+            prediction=r.prediction,
+            confidence=r.confidence,
+            probabilities=r.probabilities,
+            latency_ms=r.latency_ms,
+            status=r.status,
+            error_message=r.error_message,
+            created_at=r.created_at.isoformat() if isinstance(r.created_at, datetime) else str(r.created_at),
+        )
+        for r in records
+    ]
+
+
+async def list_available_versions(
     deployment_id: str,
     *,
     owner_id: str,
     db: AsyncSession,
-) -> LocalDeploymentResponse:
-    """
-    Stop a READY or DEPLOYING deployment.
-
-    The model artifact is NOT deleted. The deployment can be redeployed.
-    """
-    dep = await _get_deployment(deployment_id, db)
-    _assert_owner(dep, owner_id)
-
-    if dep.status in (
-        LocalDeploymentStatus.STOPPED.value,
-        LocalDeploymentStatus.STOPPING.value,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Deployment '{deployment_id}' is already {dep.status}.",
-        )
-
-    if dep.status == LocalDeploymentStatus.FAILED.value:
-        # Allow stopping a failed deployment too
-        pass
-
-    logs = list(dep.logs or [])
-    logs.append(_log_entry("Stopping deployment..."))
-    dep.status = LocalDeploymentStatus.STOPPING.value
-    dep.logs = logs
-    await db.commit()
-
-    # Transition to STOPPED
-    logs.append(_log_entry("Deployment stopped. Model artifact preserved."))
-    dep.status = LocalDeploymentStatus.STOPPED.value
-    dep.stopped_at = datetime.now(timezone.utc)
-    dep.logs = logs
-    await db.commit()
-    await db.refresh(dep)
-
-    logger.info("Stopped local deployment %s.", deployment_id)
-    return _to_response(dep)
-
-
-async def redeploy_local_deployment(
-    deployment_id: str,
-    *,
-    owner_id: str,
-    db: AsyncSession,
-) -> LocalDeploymentResponse:
-    """
-    Redeploy a STOPPED or FAILED deployment.
-
-    Re-warms the model cache and transitions back to READY.
-    Uses the immutable model_id snapshot — not any new training run.
-    """
-    from app.ml.inference_engine import load_model, ModelNotFoundError
+) -> List[ModelVersionOption]:
+    """List all registered model versions for this algorithm and dataset, indicating current."""
+    from app.ml.model_registry import list_versions
 
     dep = await _get_deployment(deployment_id, db)
     _assert_owner(dep, owner_id)
 
-    if dep.status not in (
-        LocalDeploymentStatus.STOPPED.value,
-        LocalDeploymentStatus.FAILED.value,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Deployment '{deployment_id}' cannot be redeployed from status '{dep.status}'. "
-                f"Only STOPPED or FAILED deployments can be redeployed."
-            ),
+    versions = list_versions(algorithm=dep.algorithm, dataset_id=dep.dataset_id)
+    options: List[ModelVersionOption] = []
+
+    for v in versions:
+        m_id = v.get("model_id", "")
+        version_str = v.get("model_version") or v.get("version") or "v1.0.0"
+        algo = v.get("algorithm", dep.algorithm)
+        algo_display = algo.replace("_", " ").title()
+
+        options.append(
+            ModelVersionOption(
+                model_id=m_id,
+                job_id=v.get("job_id"),
+                version=version_str,
+                algorithm=algo,
+                algorithm_display_name=algo_display,
+                registered_at=v.get("registered_at", ""),
+                accuracy=v.get("accuracy"),
+                f1=v.get("f1"),
+                is_current=(m_id == dep.model_id),
+            )
         )
 
-    logs = list(dep.logs or [])
-    logs.append(_log_entry("Redeploying: loading model into inference cache..."))
-    dep.status = LocalDeploymentStatus.DEPLOYING.value
-    dep.error_message = None
-    dep.stopped_at = None
-    dep.logs = logs
-    await db.commit()
-
-    try:
-        load_model(model_id=dep.model_id)
-        logs.append(_log_entry("Model reloaded successfully. Deployment READY."))
-        dep.status = LocalDeploymentStatus.READY.value
-        dep.started_at = datetime.now(timezone.utc)
-    except ModelNotFoundError as exc:
-        err = f"Redeploy failed — model not found: {exc}"
-        logs.append(_log_entry(f"ERROR: {err}"))
-        dep.status = LocalDeploymentStatus.FAILED.value
-        dep.error_message = err
-    except Exception as exc:
-        err = f"Redeploy failed: {exc}"
-        logs.append(_log_entry(f"ERROR: {err}"))
-        dep.status = LocalDeploymentStatus.FAILED.value
-        dep.error_message = err
-
-    dep.logs = logs
-    await db.commit()
-    await db.refresh(dep)
-
-    logger.info("Redeployed local deployment %s (status=%s).", deployment_id, dep.status)
-    return _to_response(dep)
+    return options

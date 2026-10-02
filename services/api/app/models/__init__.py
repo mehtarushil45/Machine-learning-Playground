@@ -29,6 +29,7 @@ from app.models.workspace_member import WorkspaceMember, WorkspaceRole, MemberSt
 from app.models.api_key import ApiKey  # noqa: F401
 from app.models.deployment import Deployment, DeploymentStatus  # noqa: F401
 from app.models.local_deployment import LocalDeployment, LocalDeploymentStatus  # noqa: F401  # Prototype 4
+from app.models.local_prediction_history import LocalPredictionHistory  # noqa: F401
 from app.models.recommendation import RecommendationJob, RecommendationJobStatus  # noqa: F401
 
 __all__ = [
@@ -59,9 +60,10 @@ __all__ = [
     # Deployment Studio (Phase 5)
     "Deployment",
     "DeploymentStatus",
-    # Prototype 4: Local Deployments
+    # Prototype 4: Local Deployments & Lifecycle
     "LocalDeployment",
     "LocalDeploymentStatus",
+    "LocalPredictionHistory",
     # Algorithm Recommendation
     "RecommendationJob",
     "RecommendationJobStatus",

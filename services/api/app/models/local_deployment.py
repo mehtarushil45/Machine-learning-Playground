@@ -1,4 +1,4 @@
-﻿"""LocalDeployment model — Prototype 4.
+"""LocalDeployment model — Prototype 4.
 
 Represents a local model deployment that is explicitly linked to a
 training job and its immutable model artifact.  This ensures that:
@@ -30,11 +30,13 @@ from app.models.base import TimeStampMixin, UUIDPrimaryKeyMixin
 
 class LocalDeploymentStatus(str, enum.Enum):
     CREATED   = "CREATED"
-    DEPLOYING = "DEPLOYING"
-    READY     = "READY"
-    FAILED    = "FAILED"
+    STARTING  = "STARTING"
+    DEPLOYING = "STARTING"
+    RUNNING   = "RUNNING"
+    READY     = "RUNNING"
     STOPPING  = "STOPPING"
     STOPPED   = "STOPPED"
+    FAILED    = "FAILED"
 
 
 class LocalDeployment(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
@@ -45,9 +47,12 @@ class LocalDeployment(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     # Training Run Link (immutability anchor)
     job_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     model_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False, default="v1.0.0")
+    artifact_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
 
-    # Display
+    # Display & Configuration
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Local Deployment")
+    configuration: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
     # Lifecycle
     status: Mapped[str] = mapped_column(

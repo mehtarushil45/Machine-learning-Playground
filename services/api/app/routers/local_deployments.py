@@ -1,37 +1,43 @@
-﻿"""Local Deployments Router — Prototype 4.
+"""Local Deployments Router — Enterprise Model Deployment & Lifecycle Management.
 
 All endpoints require JWT authentication (CurrentUser).
 All deployments are scoped to the authenticated owner — no user can
-access or modify another user''s deployments.
+access or modify another user's deployments.
 
 Routes:
   POST   /api/v1/local-deployments                       Create deployment from completed job
   GET    /api/v1/local-deployments                       List all deployments (owner-scoped)
   GET    /api/v1/local-deployments/{id}                  Get deployment details
-  POST   /api/v1/local-deployments/{id}/predict          Execute prediction
-  POST   /api/v1/local-deployments/{id}/stop             Stop deployment
-  POST   /api/v1/local-deployments/{id}/redeploy         Redeploy stopped/failed deployment
+  POST   /api/v1/local-deployments/{id}/start            Start stopped/failed deployment
+  POST   /api/v1/local-deployments/{id}/stop             Stop running deployment
+  POST   /api/v1/local-deployments/{id}/restart          Restart deployment
+  POST   /api/v1/local-deployments/{id}/redeploy         Redeploy (current or new model version)
+  DELETE /api/v1/local-deployments/{id}                  Delete deployment & history
+  POST   /api/v1/local-deployments/{id}/predict          Execute prediction with strict validation
+  GET    /api/v1/local-deployments/{id}/predictions      Get persisted prediction history
+  GET    /api/v1/local-deployments/{id}/versions         Get available model versions for redeployment
   GET    /api/v1/jobs/{job_id}/local-deployments         List deployments for a job
 """
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 
 from app.dependencies import CurrentUser, DBSession
 from app.schemas.local_deployment import (
     LocalDeploymentCreate,
+    LocalDeploymentRedeploy,
     LocalDeploymentResponse,
     LocalPredictRequest,
     LocalPredictResponse,
+    ModelVersionOption,
+    PredictionHistoryItem,
 )
 import app.services.local_deployment_service as svc
 
 router = APIRouter(prefix="/local-deployments", tags=["Local Deployments"])
-
-# Separate router for the job-scoped list endpoint
 job_router = APIRouter(prefix="/jobs", tags=["Local Deployments"])
 
 
@@ -46,16 +52,7 @@ async def create_local_deployment(
     current_user: CurrentUser,
     db: DBSession,
 ) -> LocalDeploymentResponse:
-    """
-    Create a local deployment from a COMPLETED training job.
-
-    Validates that:
-    - The job exists and is COMPLETED
-    - The model artifact exists on disk (immutability guard)
-    - The model can be loaded into the inference cache
-
-    Returns READY status if all checks pass, FAILED otherwise.
-    """
+    """Create a local deployment from a COMPLETED training job."""
     return await svc.create_local_deployment(
         payload,
         owner_id=str(current_user.id),
@@ -95,6 +92,97 @@ async def get_local_deployment(
 
 
 @router.post(
+    "/{deployment_id}/start",
+    response_model=LocalDeploymentResponse,
+    summary="Start a stopped or failed deployment",
+)
+async def start_local_deployment(
+    deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> LocalDeploymentResponse:
+    """Start an endpoint and transition to RUNNING."""
+    return await svc.start_local_deployment(
+        deployment_id,
+        owner_id=str(current_user.id),
+        db=db,
+    )
+
+
+@router.post(
+    "/{deployment_id}/stop",
+    response_model=LocalDeploymentResponse,
+    summary="Stop a running deployment",
+)
+async def stop_local_deployment(
+    deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> LocalDeploymentResponse:
+    """Stop a RUNNING deployment. Model artifact is preserved."""
+    return await svc.stop_local_deployment(
+        deployment_id,
+        owner_id=str(current_user.id),
+        db=db,
+    )
+
+
+@router.post(
+    "/{deployment_id}/restart",
+    response_model=LocalDeploymentResponse,
+    summary="Restart a deployment",
+)
+async def restart_local_deployment(
+    deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> LocalDeploymentResponse:
+    """Restart a deployment: reloads model into cache and transitions to RUNNING."""
+    return await svc.restart_local_deployment(
+        deployment_id,
+        owner_id=str(current_user.id),
+        db=db,
+    )
+
+
+@router.post(
+    "/{deployment_id}/redeploy",
+    response_model=LocalDeploymentResponse,
+    summary="Redeploy a deployment",
+)
+async def redeploy_local_deployment(
+    deployment_id: str,
+    payload: Optional[LocalDeploymentRedeploy] = None,
+    current_user: CurrentUser = None,
+    db: DBSession = None,
+) -> LocalDeploymentResponse:
+    """Redeploy current deployment, optionally updating to a new model artifact version."""
+    return await svc.redeploy_local_deployment(
+        deployment_id,
+        payload=payload,
+        owner_id=str(current_user.id),
+        db=db,
+    )
+
+
+@router.delete(
+    "/{deployment_id}",
+    summary="Delete a deployment and its history",
+)
+async def delete_local_deployment(
+    deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+) -> Dict[str, Any]:
+    """Delete a deployment and cascade-delete its persisted prediction records."""
+    return await svc.delete_local_deployment(
+        deployment_id,
+        owner_id=str(current_user.id),
+        db=db,
+    )
+
+
+@router.post(
     "/{deployment_id}/predict",
     response_model=LocalPredictResponse,
     summary="Run prediction against a local deployment",
@@ -105,14 +193,7 @@ async def predict_local(
     current_user: CurrentUser,
     db: DBSession,
 ) -> LocalPredictResponse:
-    """
-    Execute inference against a READY local deployment.
-
-    - All feature_columns registered at deployment time must be present in inputs.
-    - Returns prediction, confidence, and probabilities (for classification).
-    - Increments total_predictions counter.
-    - Appends to deployment logs.
-    """
+    """Execute inference against a RUNNING local deployment with validation and audit history."""
     return await svc.predict_local(
         deployment_id,
         payload,
@@ -121,45 +202,40 @@ async def predict_local(
     )
 
 
-@router.post(
-    "/{deployment_id}/stop",
-    response_model=LocalDeploymentResponse,
-    summary="Stop a local deployment",
+@router.get(
+    "/{deployment_id}/predictions",
+    response_model=List[PredictionHistoryItem],
+    summary="List persisted prediction history for deployment",
 )
-async def stop_local_deployment(
+async def list_prediction_history(
     deployment_id: str,
-    current_user: CurrentUser,
-    db: DBSession,
-) -> LocalDeploymentResponse:
-    """
-    Stop a READY deployment.
-
-    The model artifact is NOT deleted. The deployment can be redeployed later.
-    """
-    return await svc.stop_local_deployment(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = None,
+    db: DBSession = None,
+) -> List[PredictionHistoryItem]:
+    """Fetch paginated inference audit history."""
+    return await svc.list_prediction_history(
         deployment_id,
+        limit=limit,
+        offset=offset,
         owner_id=str(current_user.id),
         db=db,
     )
 
 
-@router.post(
-    "/{deployment_id}/redeploy",
-    response_model=LocalDeploymentResponse,
-    summary="Redeploy a stopped or failed deployment",
+@router.get(
+    "/{deployment_id}/versions",
+    response_model=List[ModelVersionOption],
+    summary="List available model versions for redeployment",
 )
-async def redeploy_local_deployment(
+async def list_available_versions(
     deployment_id: str,
     current_user: CurrentUser,
     db: DBSession,
-) -> LocalDeploymentResponse:
-    """
-    Redeploy a STOPPED or FAILED deployment back to READY.
-
-    Uses the same immutable model_id snapshot from the original deployment.
-    The original training run artifact is reloaded — no new training run needed.
-    """
-    return await svc.redeploy_local_deployment(
+) -> List[ModelVersionOption]:
+    """List all registered versions of this model in the registry."""
+    return await svc.list_available_versions(
         deployment_id,
         owner_id=str(current_user.id),
         db=db,
@@ -177,7 +253,7 @@ async def list_deployments_for_job(
     current_user: CurrentUser,
     db: DBSession,
 ) -> List[LocalDeploymentResponse]:
-    """List all local deployments that were created from a specific training job."""
+    """List all local deployments created from a specific training job."""
     return await svc.list_deployments_for_job(
         job_id,
         owner_id=str(current_user.id),

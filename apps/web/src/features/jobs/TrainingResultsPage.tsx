@@ -27,6 +27,7 @@ import {
   Layers,
   Sliders,
   Sparkles,
+  Rocket,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails, subscribeToJobProgressSSE, pollJobUntilDone } from '../../services/jobService';
@@ -673,6 +674,31 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
               }}
             />
           </button>
+
+          {/* 1-Click Deploy Model Action */}
+          {job.status === 'COMPLETED' && (
+            <button
+              onClick={() => onNavigate('deployments')}
+              title="Deploy trained model artifact to a local serving endpoint"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '6px 14px',
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: '1px solid rgba(0, 245, 160, 0.4)',
+                background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18) 0%, rgba(0, 245, 160, 0.22) 100%)',
+                color: '#00F5A0',
+                boxShadow: '0 0 14px rgba(0, 245, 160, 0.2)',
+                transition: 'all 150ms ease',
+              }}
+            >
+              <Rocket style={{ width: 14, height: 14 }} /> Deploy Model
+            </button>
+          )}
         </div>
 
         {/* Live Training In Progress Banner */}
