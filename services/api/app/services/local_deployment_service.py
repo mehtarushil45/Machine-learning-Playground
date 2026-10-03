@@ -395,8 +395,28 @@ async def create_local_deployment(
 
     logs.append(_log_entry(f"Model artifact binary verified: {artifact_id}", event="ARTIFACT_LOADED"))
 
-    # 4. Build Input Schema
-    input_schema, _ = _build_input_schema(feature_columns, registry_meta)
+    # 4. Build Input Schema — load model + dataset sample for accurate type introspection
+    import pandas as pd
+    from app.ml.inference_engine import load_model as _load_model_for_schema
+    _loaded_model_for_schema = None
+    _dataset_sample_for_schema = None
+    try:
+        _loaded_model_for_schema = _load_model_for_schema(model_id=job_model_id)
+    except Exception:
+        pass
+    try:
+        from services.worker.core.dataset_loader import find_dataset_path
+        _csv_path = find_dataset_path(dataset_id)
+        if _csv_path and os.path.exists(_csv_path):
+            _dataset_sample_for_schema = pd.read_csv(_csv_path, nrows=50)
+    except Exception:
+        pass
+    input_schema, _ = _build_input_schema(
+        feature_columns,
+        registry_meta,
+        loaded_model=_loaded_model_for_schema,
+        dataset_sample=_dataset_sample_for_schema,
+    )
     logs.append(_log_entry(f"Input schema built for {len(feature_columns)} features.", event="INPUT_SCHEMA_LOADED"))
 
     # 5. Persist Deployment record (STARTING)
@@ -783,7 +803,26 @@ async def predict_local(
         )
 
     validation_errors: List[str] = []
-    schema = dep.input_schema or {}
+    # Always rebuild the live schema from the loaded model at prediction time.
+    # This fixes existing deployments whose DB schema was built without model introspection
+    # (all columns defaulted to "numeric", rejecting legitimate categorical string values).
+    try:
+        from app.ml.inference_engine import load_model as _load_for_validation
+        from app.ml.model_registry import get_model_by_id as _reg_for_validation
+        import pandas as _pd_val
+        _lm = _load_for_validation(model_id=dep.model_id)
+        _rm = _reg_for_validation(dep.model_id) or {}
+        _ds = None
+        try:
+            from services.worker.core.dataset_loader import find_dataset_path as _fdp
+            _cp = _fdp(dep.dataset_id)
+            if _cp and os.path.exists(_cp):
+                _ds = _pd_val.read_csv(_cp, nrows=50)
+        except Exception:
+            pass
+        schema, _ = _build_input_schema(dep.feature_columns or [], _rm, loaded_model=_lm, dataset_sample=_ds)
+    except Exception:
+        schema = dep.input_schema or {}
 
     for col in dep.feature_columns:
         val = payload.inputs.get(col)
