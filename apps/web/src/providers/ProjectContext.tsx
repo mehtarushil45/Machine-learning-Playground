@@ -57,6 +57,16 @@ export interface ProjectState {
   openTabs:         string[];
   /** Map of filename -> JobEntity for multi-file experiment result tracking */
   fileJobs:         Record<string, JobEntity>;
+  /**
+   * Set of filenames where the user has made manual edits after generation.
+   * Serialised as an array in localStorage.
+   */
+  modifiedFiles:    string[];
+  /**
+   * Set of filenames that contain purely generated code (no user edits).
+   * Serialised as an array in localStorage.
+   */
+  generatedFiles:   string[];
 }
 
 export type LifecycleStage =
@@ -84,6 +94,16 @@ interface ProjectContextValue extends ProjectState {
   createExperimentFile:  (fileName: string, initialCode?: string) => void;
   deleteExperimentFile:  (fileName: string) => void;
   setFileJob:            (fileName: string, job: JobEntity) => void;
+  /** Mark a file as user-modified (blocks silent regeneration) */
+  markFileModified:      (fileName: string) => void;
+  /** Mark a file as purely generated (safe to regenerate without warning) */
+  markFileGenerated:     (fileName: string) => void;
+  /** Clear modified status for a file (called after deliberate save/regenerate) */
+  clearFileModified:     (fileName: string) => void;
+  /** True if the given file has user modifications not yet regenerated over */
+  isFileModified:        (fileName: string) => boolean;
+  /** True if the given file is purely generated code with no user edits */
+  isFileGenerated:       (fileName: string) => boolean;
   /**
    * 2-step gatekeeper initializer — called when user completes Step 2.
    * Atomically sets the dataset, creates the first experiment file,
@@ -95,6 +115,7 @@ interface ProjectContextValue extends ProjectState {
   /** Convenience: reset everything and return to gatekeeper */
   resetProject:          ()                    => void;
 }
+
 
 /* ── Context ──────────────────────────────────────────────────────────── */
 const ProjectContext = createContext<ProjectContextValue | null>(null);
@@ -152,6 +173,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [activeExperimentFile, setActiveExperimentFile] = useState<string>(initialActiveFile);
   const [experimentFiles, setExperimentFiles]     = useState<Record<string, string>>(initialFiles);
   const [openTabs, setOpenTabs]                   = useState<string[]>(initialTabs);
+  // Tracks which files have user edits (blocks silent regeneration)
+  const [modifiedFiles, setModifiedFiles]         = useState<string[]>(
+    Array.isArray((initial as any).modifiedFiles) ? (initial as any).modifiedFiles : [],
+  );
+  // Tracks which files are purely generated (safe to regenerate without warning)
+  const [generatedFiles, setGeneratedFiles]       = useState<string[]>(
+    Array.isArray((initial as any).generatedFiles) ? (initial as any).generatedFiles : [],
+  );
 
   const setActiveJob = useCallback((j: JobEntity | null) => {
     setActiveJobState(j);
@@ -173,6 +202,28 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       [fileName]: code,
     }));
   }, []);
+
+  const markFileModified = useCallback((fileName: string) => {
+    setModifiedFiles((prev) => prev.includes(fileName) ? prev : [...prev, fileName]);
+    setGeneratedFiles((prev) => prev.filter((f) => f !== fileName));
+  }, []);
+
+  const markFileGenerated = useCallback((fileName: string) => {
+    setGeneratedFiles((prev) => prev.includes(fileName) ? prev : [...prev, fileName]);
+    setModifiedFiles((prev) => prev.filter((f) => f !== fileName));
+  }, []);
+
+  const clearFileModified = useCallback((fileName: string) => {
+    setModifiedFiles((prev) => prev.filter((f) => f !== fileName));
+  }, []);
+
+  const isFileModified = useCallback((fileName: string) => {
+    return modifiedFiles.includes(fileName);
+  }, [modifiedFiles]);
+
+  const isFileGenerated = useCallback((fileName: string) => {
+    return generatedFiles.includes(fileName);
+  }, [generatedFiles]);
 
   const createExperimentFile = useCallback((fileName: string, initialCode: string = '') => {
     setExperimentFiles((prev) => ({
@@ -216,6 +267,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           activeExperimentFile,
           experimentFiles,
           openTabs,
+          modifiedFiles,
+          generatedFiles,
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToPersist));
       } catch (err) {
@@ -236,6 +289,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     activeExperimentFile,
     experimentFiles,
     openTabs,
+    modifiedFiles,
+    generatedFiles,
   ]);
 
   /**
@@ -257,6 +312,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setExperimentFiles({ [safeName]: '' });
     setOpenTabs([safeName]);
     setActiveExperimentFile(safeName);
+    setModifiedFiles([]);
+    setGeneratedFiles([]);
   }, []);
 
   const loadDataset = useCallback((d: Dataset) => {
@@ -282,6 +339,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setExperimentFiles({});
     setOpenTabs([]);
     setActiveExperimentFile('');
+    setModifiedFiles([]);
+    setGeneratedFiles([]);
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -307,6 +366,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         activeExperimentFile,
         experimentFiles,
         openTabs,
+        modifiedFiles,
+        generatedFiles,
         setDataset,
         setSelectedFeatures,
         setSelectedTarget,
@@ -321,6 +382,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         updateExperimentFileCode,
         createExperimentFile,
         deleteExperimentFile,
+        markFileModified,
+        markFileGenerated,
+        clearFileModified,
+        isFileModified,
+        isFileGenerated,
         initializeProject,
         loadDataset,
         resetProject,

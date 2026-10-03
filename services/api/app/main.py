@@ -23,6 +23,7 @@ from app.routers import organizations, workspaces, users_v7a, api_keys, activity
 from app.routers import admin  # V7B Part 1
 from app.routers import studio, explainability_v7b, portfolios_v7b, classrooms_v7b, workflow  # V7B Part 2
 from app.routers import local_deployments  # Prototype 4: Local Deployments
+from app.routers import code_execution      # Code Studio: sandboxed execution
 
 
 @asynccontextmanager
@@ -150,6 +151,9 @@ app.include_router(workflow.router, prefix=API_V1_PREFIX)             # E2E Work
 # ── Prototype 4: Local Deployments ───────────────────────────────────────────
 app.include_router(local_deployments.router, prefix=API_V1_PREFIX)        # Local deployment CRUD
 app.include_router(local_deployments.job_router, prefix=API_V1_PREFIX)    # Job-scoped list
+
+# ── Code Studio: Sandboxed Code Execution ────────────────────────────────────
+app.include_router(code_execution.router, prefix=API_V1_PREFIX)            # Run / Stop / Stream
 
 
 @app.get(f"{API_V1_PREFIX}/algorithms", tags=["Algorithms"])

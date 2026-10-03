@@ -16,9 +16,16 @@ import {
   Plus,
   FolderOpen,
   X,
+  Play,
+  Square,
+  Terminal,
+  TriangleAlert,
+  ScrollText,
+  Activity,
+  WrapText,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
-import { PipelineService, type CodeStepExplanation, type PipelineDAG } from '../../services/api';
+import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService } from '../../services/api';
 import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer, type CopilotMsg } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
@@ -352,6 +359,8 @@ interface ExperimentExplorerProps {
   files: { name: string }[];
   activeFile: string;
   pendingNewFileName: string | null;
+  modifiedFileNames: string[];
+  generatedFileNames: string[];
   onSelectFile: (name: string) => void;
   onNewFile: () => void;
   onDeleteFile: (name: string) => void;
@@ -365,6 +374,8 @@ function ExperimentExplorer({
   files,
   activeFile,
   pendingNewFileName,
+  modifiedFileNames,
+  generatedFileNames,
   onSelectFile,
   onNewFile,
   onDeleteFile,
@@ -502,6 +513,15 @@ function ExperimentExplorer({
                 {f.name}
               </span>
 
+              {/* Modified indicator dot */}
+              {modifiedFileNames.includes(f.name) && (
+                <span title="Modified — contains user edits" style={{ width: 7, height: 7, borderRadius: '50%', background: BB.gold, flexShrink: 0, display: 'inline-block' }} />
+              )}
+              {/* Generated badge */}
+              {!modifiedFileNames.includes(f.name) && generatedFileNames.includes(f.name) && (
+                <span title="Auto-generated code" style={{ fontSize: 8, color: BB.primaryLight, flexShrink: 0 }}>⚡</span>
+              )}
+
               {/* Delete on hover (non-active only) */}
               {isHovered && !isActive && (
                 <button
@@ -592,6 +612,11 @@ export function ViewAsCodeStudio({
     updateExperimentFileCode,
     createExperimentFile,
     deleteExperimentFile,
+    modifiedFiles,
+    generatedFiles,
+    markFileModified,
+    markFileGenerated,
+    isFileModified,
   } = useProject();
 
   /* ── Studio view mode: 'code' (Python Editor) or 'dag' (Visual Pipeline Flow) ─ */
@@ -606,11 +631,39 @@ export function ViewAsCodeStudio({
   const [authError, setAuthError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  /* ── Regenerate warning modal ───────────────────────────────────────── */
+  const [showRegenerateWarning, setShowRegenerateWarning] = useState(false);
+  const [pendingRegenerateFile, setPendingRegenerateFile] = useState<string | null>(null);
+
+  /* ── Code execution state ──────────────────────────────────────────── */
+  const [execId, setExecId] = useState<string | null>(null);
+  const [execStatus, setExecStatus] = useState<'idle'|'queued'|'running'|'completed'|'failed'|'stopped'>('idle');
+  const [outputLines, setOutputLines] = useState<string[]>([]);
+  const [execArtifacts, setExecArtifacts] = useState<string[]>([]);
+  const [execDuration, setExecDuration] = useState<number | null>(null);
+  const [execExitCode, setExecExitCode] = useState<number | null>(null);
+  const [isFormatting, setIsFormatting] = useState(false);
+  const esRef = useRef<EventSource | null>(null);
+
+  /* ── Bottom panel state ─────────────────────────────────────────────── */
+  const [bottomPanelOpen, setBottomPanelOpen] = useState(false);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(220);
+  const [bottomTab, setBottomTab] = useState<'output'|'problems'|'logs'|'debug'>('output');
+  const bottomDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const outputEndRef = useRef<HTMLDivElement | null>(null);
+
+  /* ── Editor state ───────────────────────────────────────────────────── */
+  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const [isFindOpen, setIsFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+
   /* ── Inline new-file input: null = hidden, string = current typed value ── */
   const [pendingNewFileName, setPendingNewFileName] = useState<string | null>(null);
 
   /* ── Ref to track the last handled job launch from Page 1 ── */
   const lastJobIdRef = useRef<string | null>(activeJob?.job_id ?? null);
+
 
   /* ── Derived: canonical config values ───────────────────────────────── */
   const trainRatio         = Math.round((trainingConfig?.train_test_split ?? 0.8) * 100) / 100;
@@ -714,6 +767,7 @@ export function ViewAsCodeStudio({
       setStepExplanations(resp.steps_explanation || []);
       setIsValidSyntax(resp.is_valid_syntax);
       updateExperimentFileCode(fileToWrite, resp.python_code);
+      markFileGenerated(fileToWrite);
     } catch (err: unknown) {
       setIsValidSyntax(false);
       setGeneratedCode('');
@@ -743,7 +797,23 @@ export function ViewAsCodeStudio({
     testRatio,
     activeExperimentFile,
     updateExperimentFileCode,
+    markFileGenerated,
   ]);
+
+  /**
+   * Safe wrapper for generatePipelineCode.
+   * If the target file has user modifications, shows a confirmation modal first
+   * to prevent silently overwriting user-edited code.
+   */
+  const safeGeneratePipelineCode = useCallback((targetFileName?: string) => {
+    const file = targetFileName || activeExperimentFile || 'pipeline_generated.py';
+    if (isFileModified(file)) {
+      setPendingRegenerateFile(file);
+      setShowRegenerateWarning(true);
+    } else {
+      generatePipelineCode(file);
+    }
+  }, [activeExperimentFile, isFileModified, generatePipelineCode]);
 
   // Initial bootstrap: generate code if active file is currently empty and page is active
   useEffect(() => {
@@ -752,6 +822,7 @@ export function ViewAsCodeStudio({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, isConfigValid, activeExperimentFile]);
+
 
   // Launch sync: when a training job is launched from Page 1, apply changes directly to activeExperimentFile
   useEffect(() => {
@@ -878,6 +949,175 @@ export function ViewAsCodeStudio({
   const handleDeleteFile = useCallback((name: string) => {
     deleteExperimentFile(name);
   }, [deleteExperimentFile]);
+
+  /* ── Editor change handler ───────────────────────────────────────────── */
+  const handleEditorChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newCode = e.target.value;
+    updateExperimentFileCode(activeExperimentFile, newCode);
+    markFileModified(activeExperimentFile);
+  }, [activeExperimentFile, updateExperimentFileCode, markFileModified]);
+
+  const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Ctrl+S — explicit save (no-op visually, state is already saved)
+    if (e.ctrlKey && e.key === 's') {
+      e.preventDefault();
+      onShowToast?.('Saved', `${activeExperimentFile} saved to workspace.`, 'success');
+    }
+    // Ctrl+F — open find bar
+    if (e.ctrlKey && e.key === 'f') {
+      e.preventDefault();
+      setIsFindOpen(true);
+    }
+    // Escape — close find
+    if (e.key === 'Escape') {
+      setIsFindOpen(false);
+      setFindQuery('');
+    }
+    // Tab — insert 4 spaces
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const newVal = ta.value.substring(0, start) + '    ' + ta.value.substring(end);
+      updateExperimentFileCode(activeExperimentFile, newVal);
+      markFileModified(activeExperimentFile);
+      // Restore cursor after React re-render
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + 4;
+      });
+    }
+  }, [activeExperimentFile, updateExperimentFileCode, markFileModified, onShowToast]);
+
+  const handleEditorSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const ta = e.currentTarget;
+    const text = ta.value.substring(0, ta.selectionStart);
+    const lines = text.split('\n');
+    setCursorPos({ line: lines.length, col: (lines[lines.length - 1] || '').length + 1 });
+  }, []);
+
+  /* ── Code execution handlers ─────────────────────────────────────────── */
+  const handleRunCode = useCallback(async () => {
+    if (!displayedCode || execStatus === 'running') return;
+
+    // Reset previous run
+    setOutputLines([]);
+    setExecArtifacts([]);
+    setExecDuration(null);
+    setExecExitCode(null);
+    setExecStatus('queued');
+    setBottomPanelOpen(true);
+    setBottomTab('output');
+
+    // Close previous SSE connection
+    if (esRef.current) {
+      esRef.current.close();
+      esRef.current = null;
+    }
+
+    try {
+      const resp = await CodeExecutionService.execute({
+        code: displayedCode,
+        filename: activeExperimentFile,
+        dataset_id: (trainingConfig as any)?.dataset_id || undefined,
+        timeout: 90,
+      });
+
+      setExecId(resp.exec_id);
+      setExecStatus('running');
+
+      // Subscribe to SSE stream
+      const streamUrl = CodeExecutionService.streamUrl(resp.exec_id);
+      const es = new EventSource(streamUrl, { withCredentials: true });
+      esRef.current = es;
+
+      es.onmessage = (evt) => {
+        const line = evt.data as string;
+        if (line === '[heartbeat]') return;
+        if (line.startsWith('[DONE]')) {
+          const statusMatch = line.match(/status=(\w+)/);
+          const finalStatus = (statusMatch?.[1] ?? 'completed') as 'completed' | 'failed' | 'stopped';
+          setExecStatus(finalStatus);
+          es.close();
+          esRef.current = null;
+          // Fetch final result for artifacts + duration
+          CodeExecutionService.getResult(resp.exec_id).then((result) => {
+            setExecArtifacts(result.artifacts || []);
+            setExecDuration(result.duration_seconds);
+            setExecExitCode(result.exit_code);
+          }).catch(() => {/* ignore */});
+          return;
+        }
+        setOutputLines((prev) => [...prev, line]);
+      };
+
+      es.onerror = () => {
+        setExecStatus('failed');
+        es.close();
+        esRef.current = null;
+      };
+    } catch (err) {
+      setExecStatus('failed');
+      setOutputLines((prev) => [...prev, `[Error] Failed to start execution: ${(err as any)?.message || err}`]);
+    }
+  }, [displayedCode, execStatus, activeExperimentFile, trainingConfig]);
+
+  const handleStopExecution = useCallback(async () => {
+    if (!execId) return;
+    if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    try {
+      await CodeExecutionService.stop(execId);
+    } catch {/* ignore */}
+    setExecStatus('stopped');
+    setOutputLines((prev) => [...prev, '[Stopped by user]']);
+  }, [execId]);
+
+  const handleFormatCode = useCallback(async () => {
+    if (!displayedCode || isFormatting) return;
+    setIsFormatting(true);
+    try {
+      const result = await CodeExecutionService.formatCode(displayedCode);
+      if (result.changed) {
+        updateExperimentFileCode(activeExperimentFile, result.code);
+        markFileModified(activeExperimentFile);
+        onShowToast?.('Formatted', 'Code formatted with Black.', 'success');
+      } else {
+        onShowToast?.('Already Formatted', 'Code style is already clean.', 'info');
+      }
+    } catch {
+      onShowToast?.('Format Error', 'Formatter unavailable (install black or autopep8 on the API server).', 'error');
+    } finally {
+      setIsFormatting(false);
+    }
+  }, [displayedCode, isFormatting, activeExperimentFile, updateExperimentFileCode, markFileModified, onShowToast]);
+
+  // Auto-scroll output panel to bottom when new lines arrive
+  useEffect(() => {
+    outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [outputLines]);
+
+  // Cleanup SSE on unmount
+  useEffect(() => () => { esRef.current?.close(); }, []);
+
+  /* ── Bottom panel drag-to-resize ─────────────────────────────────────── */
+  const handleBottomDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    bottomDragRef.current = { startY: e.clientY, startH: bottomPanelHeight };
+    const onMove = (ev: MouseEvent) => {
+      if (!bottomDragRef.current) return;
+      const delta = bottomDragRef.current.startY - ev.clientY;
+      setBottomPanelHeight(Math.max(100, Math.min(600, bottomDragRef.current.startH + delta)));
+    };
+    const onUp = () => {
+      bottomDragRef.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [bottomPanelHeight]);
+
+
 
   /* ── AI Copilot messages ─────────────────────────────────────────────── */
   const copilotMessages = useMemo<CopilotMsg[]>(() => {
@@ -1013,6 +1253,43 @@ export function ViewAsCodeStudio({
         gap: 0,
       }}
     >
+      {/* ── Regenerate Warning Modal ─── */}
+      {showRegenerateWarning && (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 50,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: BB.surface, border: `1px solid ${BB.border}`, borderRadius: 10,
+            padding: 24, maxWidth: 400, width: '90%',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <TriangleAlert style={{ width: 20, height: 20, color: BB.gold, flexShrink: 0 }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: BB.text }}>Overwrite user edits?</span>
+            </div>
+            <p style={{ fontSize: 12, color: BB.muted, marginBottom: 20, lineHeight: 1.6 }}>
+              <strong style={{ color: BB.text }}>{pendingRegenerateFile}</strong> contains code you edited manually.
+              Regenerating will replace your changes with fresh auto-generated code.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setShowRegenerateWarning(false); setPendingRegenerateFile(null); }}
+                style={{ padding: '7px 16px', borderRadius: 6, background: BB.elevated, border: `1px solid ${BB.border}`, color: BB.text, fontSize: 12, cursor: 'pointer' }}
+              >Cancel</button>
+              <button
+                onClick={() => {
+                  const file = pendingRegenerateFile;
+                  setShowRegenerateWarning(false);
+                  setPendingRegenerateFile(null);
+                  if (file) generatePipelineCode(file);
+                }}
+                style={{ padding: '7px 16px', borderRadius: 6, background: BB.maroon, border: `1px solid rgba(178,58,78,0.6)`, color: BB.text, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              >Overwrite &amp; Regenerate</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── WORKSPACE BODY: EXPLORER + STUDIO + COPILOT ─── */}
       <div
         style={{
@@ -1029,6 +1306,8 @@ export function ViewAsCodeStudio({
           files={experimentFileList}
           activeFile={activeExperimentFile}
           pendingNewFileName={pendingNewFileName}
+          modifiedFileNames={modifiedFiles}
+          generatedFileNames={generatedFiles}
           onSelectFile={handleSelectFile}
           onNewFile={handleNewFile}
           onDeleteFile={handleDeleteFile}
@@ -1204,20 +1483,16 @@ export function ViewAsCodeStudio({
 
                   {/* Regenerate Code (symbol) */}
                   <button
-                    onClick={() => generatePipelineCode(activeExperimentFile)}
+                    onClick={() => safeGeneratePipelineCode(activeExperimentFile)}
                     disabled={isGenerating || !isConfigValid}
-                    title="Regenerate Python code for active file"
+                    title={isFileModified(activeExperimentFile) ? 'Regenerate (will overwrite edits)' : 'Regenerate Python code'}
                     aria-label="Regenerate code"
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 24,
-                      height: 22,
-                      borderRadius: 4,
-                      border: `1px solid ${BB.border}`,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 24, height: 22, borderRadius: 4,
+                      border: `1px solid ${isFileModified(activeExperimentFile) ? BB.gold : BB.border}`,
                       background: 'transparent',
-                      color: isGenerating ? BB.gold : BB.muted,
+                      color: isGenerating ? BB.gold : isFileModified(activeExperimentFile) ? BB.gold : BB.muted,
                       cursor: isGenerating || !isConfigValid ? 'not-allowed' : 'pointer',
                       transition: 'all 120ms ease',
                     }}
@@ -1255,12 +1530,8 @@ export function ViewAsCodeStudio({
                     title="Download standalone Python script"
                     aria-label="Export .py script"
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 24,
-                      height: 22,
-                      borderRadius: 4,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 24, height: 22, borderRadius: 4,
                       border: `1px solid ${BB.border}`,
                       background: 'transparent',
                       color: displayedCode ? BB.text : BB.disabled,
@@ -1270,6 +1541,73 @@ export function ViewAsCodeStudio({
                   >
                     <Download style={{ width: 12, height: 12 }} />
                   </button>
+
+                  {/* Format code */}
+                  <button
+                    onClick={handleFormatCode}
+                    disabled={!displayedCode || isFormatting}
+                    title="Format code (Black)"
+                    aria-label="Format code"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 24, height: 22, borderRadius: 4,
+                      border: `1px solid ${BB.border}`,
+                      background: 'transparent',
+                      color: isFormatting ? BB.gold : BB.muted,
+                      cursor: !displayedCode || isFormatting ? 'not-allowed' : 'pointer',
+                      transition: 'all 120ms ease',
+                    }}
+                  >
+                    <WrapText style={{ width: 12, height: 12, animation: isFormatting ? 'spin 1s linear infinite' : 'none' }} />
+                  </button>
+
+                  <div style={{ width: 1, height: 14, background: BB.border, margin: '0 2px' }} />
+
+                  {/* Run Code */}
+                  {execStatus !== 'running' ? (
+                    <button
+                      onClick={handleRunCode}
+                      disabled={!displayedCode || execStatus === 'queued'}
+                      title="Run Python script (Ctrl+Enter)"
+                      aria-label="Run code"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 8px',
+                        height: 22, borderRadius: 4,
+                        border: `1px solid rgba(34,197,94,0.45)`,
+                        background: 'rgba(34,197,94,0.12)',
+                        color: BB.success,
+                        fontSize: 11, fontWeight: 700,
+                        cursor: displayedCode ? 'pointer' : 'not-allowed',
+                        transition: 'all 120ms ease',
+                        whiteSpace: 'nowrap',
+                        opacity: execStatus === 'queued' ? 0.6 : 1,
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.22)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.12)'; }}
+                    >
+                      <Play style={{ width: 10, height: 10 }} />
+                      {execStatus === 'queued' ? 'Starting…' : 'Run'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleStopExecution}
+                      title="Stop execution"
+                      aria-label="Stop execution"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 8px',
+                        height: 22, borderRadius: 4,
+                        border: `1px solid rgba(239,68,68,0.45)`,
+                        background: 'rgba(239,68,68,0.12)',
+                        color: BB.error,
+                        fontSize: 11, fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Square style={{ width: 9, height: 9 }} />
+                      Stop
+                    </button>
+                  )}
 
                   {/* View Results — only appears after a training job is launched */}
                   {activeJob && (
@@ -1305,34 +1643,41 @@ export function ViewAsCodeStudio({
                 </div>
               </div>
 
-              {/* Viewport Area */}
-              <div
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  overflowY: 'auto',
-                  background: BB.codeBg,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overscrollBehavior: 'contain',
-                }}
-              >
+              {/* Find Bar */}
+              {isFindOpen && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '4px 12px', background: BB.elevated,
+                  borderBottom: `1px solid ${BB.border}`, flexShrink: 0,
+                }}>
+                  <ScrollText style={{ width: 13, height: 13, color: BB.muted }} />
+                  <input
+                    autoFocus
+                    value={findQuery}
+                    onChange={(e) => setFindQuery(e.target.value)}
+                    placeholder="Find in file…"
+                    style={{
+                      flex: 1, background: BB.surface, border: `1px solid ${BB.border}`,
+                      borderRadius: 4, color: BB.text, fontSize: 11,
+                      fontFamily: 'var(--font-mono)', padding: '3px 8px', outline: 'none',
+                    }}
+                  />
+                  <span style={{ fontSize: 10, color: BB.muted, whiteSpace: 'nowrap' }}>
+                    {findQuery ? `${(displayedCode.split(findQuery).length - 1)} matches` : ''}
+                  </span>
+                  <button
+                    onClick={() => { setIsFindOpen(false); setFindQuery(''); }}
+                    style={{ background: 'transparent', border: 'none', color: BB.muted, cursor: 'pointer', padding: 2 }}
+                  ><X style={{ width: 12, height: 12 }} /></button>
+                </div>
+              )}
+
+              {/* ── EDITABLE CODE AREA ─── */}
+              <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
                 {/* Auth Error */}
                 {authError && (
-                  <div
-                    role="alert"
-                    aria-live="assertive"
-                    style={{
-                      margin: 20,
-                      padding: 16,
-                      borderRadius: 8,
-                      background: 'rgba(75, 59, 124, 0.18)',
-                      border: '1px solid rgba(107,92,166,0.45)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 10,
-                    }}
-                  >
+                  <div role="alert" aria-live="assertive" style={{ margin: 20, padding: 16, borderRadius: 8, background: 'rgba(75,59,124,0.18)', border: '1px solid rgba(107,92,166,0.45)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                       <Lock style={{ width: 18, height: 18, color: BB.primaryLight, flexShrink: 0, marginTop: 2 }} />
                       <div>
@@ -1340,225 +1685,157 @@ export function ViewAsCodeStudio({
                         <div style={{ fontSize: 11, color: BB.muted, marginTop: 4 }}>{authError}</div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => onNavigate?.('workspace')}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: 6,
-                        background: BB.elevated,
-                        border: `1px solid ${BB.border}`,
-                        color: BB.text,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        alignSelf: 'flex-start',
-                      }}
-                    >
-                      Go to Login
-                    </button>
+                    <button onClick={() => onNavigate?.('workspace')} style={{ padding: '6px 14px', borderRadius: 6, background: BB.elevated, border: `1px solid ${BB.border}`, color: BB.text, fontSize: 11, fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' }}>Go to Login</button>
                   </div>
                 )}
 
-                {/* Compilation Error */}
+                {/* Generation Error */}
                 {!authError && !isGenerating && generationError && (
-                  <div
-                    role="alert"
-                    style={{
-                      margin: 20,
-                      padding: 16,
-                      borderRadius: 8,
-                      background: 'rgba(110,20,35,0.22)',
-                      border: '1px solid rgba(178,58,78,0.45)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 10,
-                    }}
-                  >
+                  <div role="alert" style={{ margin: 20, padding: 16, borderRadius: 8, background: 'rgba(110,20,35,0.22)', border: '1px solid rgba(178,58,78,0.45)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                       <AlertCircle style={{ width: 18, height: 18, color: BB.maroonLight, flexShrink: 0, marginTop: 2 }} />
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: BB.text }}>Code Generation Failed</div>
-                        <div style={{ fontSize: 11, color: BB.muted, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-                          {generationError}
-                        </div>
+                        <div style={{ fontSize: 11, color: BB.muted, marginTop: 4, fontFamily: 'var(--font-mono)' }}>{generationError}</div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => generatePipelineCode()}
-                      style={{
-                        padding: '6px 14px',
-                        borderRadius: 6,
-                        background: BB.elevated,
-                        border: `1px solid ${BB.border}`,
-                        color: BB.text,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        alignSelf: 'flex-start',
-                      }}
-                    >
-                      Retry Code Generation
-                    </button>
+                    <button onClick={() => generatePipelineCode()} style={{ padding: '6px 14px', borderRadius: 6, background: BB.elevated, border: `1px solid ${BB.border}`, color: BB.text, fontSize: 11, fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-start' }}>Retry</button>
                   </div>
                 )}
 
-                {/* Loading State */}
+                {/* Generating spinner */}
                 {isGenerating && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flex: 1,
-                      padding: 40,
-                      gap: 10,
-                      color: BB.muted,
-                      fontSize: 12,
-                      fontFamily: 'var(--font-mono)',
-                    }}
-                  >
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: 40, gap: 10, color: BB.muted, fontSize: 12, fontFamily: 'var(--font-mono)' }}>
                     <RefreshCw style={{ width: 22, height: 22, animation: 'spin 1s linear infinite', color: BB.gold }} />
                     <span>Synthesizing scikit-learn pipeline DAG code…</span>
                   </div>
                 )}
 
-                {/* Synthesized Python Code with Unified Row Architecture */}
-                {!isGenerating && !generationError && !authError && displayedCode && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      minWidth: '100%',
-                      width: 'max-content',
-                      padding: '10px 0',
-                      fontFamily: 'var(--font-mono)',
-                      boxSizing: 'border-box',
-                    }}
-                  >
-                    {codeLines.map((line, idx) => {
-                      const renderedContent = highlightPythonLine(line);
-                      return (
-                        <div
-                          key={idx}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            minHeight: 22,
-                            lineHeight: '22px',
-                            fontSize: 12.5,
-                            transition: 'background 80ms ease',
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'rgba(107, 92, 166, 0.09)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = 'transparent';
-                          }}
-                        >
-                          {/* Unified Line Number Gutter */}
-                          <div
-                            style={{
-                              width: 52,
-                              minWidth: 52,
-                              userSelect: 'none',
-                              textAlign: 'right',
-                              paddingRight: 16,
-                              color: '#766D94',
-                              fontSize: 11,
-                              fontFamily: 'var(--font-mono)',
-                              borderRight: `1px solid ${BB.border}`,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {idx + 1}
-                          </div>
-
-                          {/* Code Content */}
-                          <div
-                            style={{
-                              flex: 1,
-                              paddingLeft: 16,
-                              paddingRight: 24,
-                              whiteSpace: 'pre',
-                              color: '#F5F1EC',
-                            }}
-                          >
-                            {renderedContent ?? '\u00A0'}
-                          </div>
-                        </div>
-                      );
-                    })}
+                {/* Empty file */}
+                {!isGenerating && !generationError && !authError && !displayedCode && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: 40, gap: 12, color: BB.muted, fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+                    <FileCode style={{ width: 28, height: 28, color: BB.disabled }} />
+                    <span>File is empty. Click Regenerate or start typing.</span>
+                    <button onClick={() => safeGeneratePipelineCode(activeExperimentFile)} style={{ padding: '6px 14px', borderRadius: 5, background: BB.elevated, border: `1px solid ${BB.primaryLight}`, color: BB.text, fontSize: 11, cursor: 'pointer' }}>Generate Code</button>
                   </div>
                 )}
 
-                {/* Empty File State */}
-                {!isGenerating && !generationError && !authError && !displayedCode && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flex: 1,
-                      padding: 40,
-                      gap: 12,
-                      color: BB.muted,
-                      fontSize: 12,
-                      fontFamily: 'var(--font-mono)',
-                    }}
-                  >
-                    <FileCode style={{ width: 28, height: 28, color: BB.disabled }} />
-                    <span>File is empty. Click Regenerate to synthesize pipeline code.</span>
-                    <button
-                      onClick={() => generatePipelineCode(activeExperimentFile)}
+                {/* ── LAYERED EDITOR: syntax-highlight background + textarea overlay ─── */}
+                {!isGenerating && !authError && (displayedCode || true) && (
+                  <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'auto', background: BB.codeBg }}>
+                    {/* Syntax-highlighted background layer (read-only, decorative) */}
+                    <pre
+                      aria-hidden
                       style={{
-                        padding: '6px 14px',
-                        borderRadius: 5,
-                        background: BB.elevated,
-                        border: `1px solid ${BB.primaryLight}`,
-                        color: BB.text,
-                        fontSize: 11,
-                        cursor: 'pointer',
+                        position: 'absolute', top: 0, left: 0,
+                        margin: 0, padding: '10px 24px 10px 68px',
+                        fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: '22px',
+                        color: '#F5F1EC', whiteSpace: 'pre', pointerEvents: 'none',
+                        minWidth: '100%', boxSizing: 'border-box',
+                        background: 'transparent',
                       }}
                     >
-                      Generate Code
-                    </button>
+                      {codeLines.map((line, idx) => {
+                        const highlighted = highlightPythonLine(line);
+                        return (
+                          <div key={idx} style={{ display: 'flex', minHeight: 22, alignItems: 'center' }}>
+                            <span style={{ width: 44, minWidth: 44, textAlign: 'right', paddingRight: 16, color: '#766D94', fontSize: 11, userSelect: 'none', flexShrink: 0 }}>{idx + 1}</span>
+                            <span style={{ paddingLeft: 8 }}>{highlighted ?? '\u00A0'}</span>
+                          </div>
+                        );
+                      })}
+                    </pre>
+
+                    {/* Transparent editable textarea sits perfectly on top */}
+                    <textarea
+                      ref={editorRef}
+                      value={displayedCode}
+                      onChange={handleEditorChange}
+                      onKeyDown={handleEditorKeyDown}
+                      onSelect={handleEditorSelect}
+                      onClick={handleEditorSelect}
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      style={{
+                        position: 'absolute', top: 0, left: 0,
+                        width: '100%', height: '100%',
+                        padding: '10px 24px 10px 68px',
+                        fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: '22px',
+                        color: 'transparent',
+                        caretColor: BB.gold,
+                        background: 'transparent',
+                        border: 'none', outline: 'none', resize: 'none',
+                        whiteSpace: 'pre', overflowWrap: 'normal',
+                        overflow: 'visible',
+                        boxSizing: 'border-box',
+                        tabSize: 4,
+                        WebkitTextFillColor: 'transparent',
+                        zIndex: 1,
+                      }}
+                    />
                   </div>
                 )}
               </div>
 
-              {/* Integrated IDE Status Bar */}
-              {displayedCode && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '4px 14px',
-                    background: BB.elevated,
-                    borderTop: `1px solid ${BB.border}`,
-                    fontSize: 10.5,
-                    color: BB.muted,
-                    fontFamily: 'var(--font-mono)',
-                    flexShrink: 0,
-                    userSelect: 'none',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: BB.success }} />
-                      <span>Python 3.10</span>
-                    </span>
-                    <span>UTF-8</span>
-                    <span>Spaces: 4</span>
-                    <span>scikit-learn 1.4</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <span style={{ color: BB.gold, fontWeight: 600 }}>Standalone Pipeline</span>
-                  </div>
+              {/* ── IDE Status Bar ─── */}
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '3px 12px',
+                  background: BB.elevated, borderTop: `1px solid ${BB.border}`,
+                  fontSize: 10.5, color: BB.muted, fontFamily: 'var(--font-mono)',
+                  flexShrink: 0, userSelect: 'none',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: BB.success }} />
+                    <span>Python 3.10</span>
+                  </span>
+                  <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
+                  <span>scikit-learn 1.4</span>
+                  {isFileModified(activeExperimentFile) && (
+                    <span style={{ color: BB.gold }}>● Modified</span>
+                  )}
+                  {!isFileModified(activeExperimentFile) && generatedFiles.includes(activeExperimentFile) && (
+                    <span style={{ color: BB.primaryLight }}>⚡ Generated</span>
+                  )}
                 </div>
-              )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {/* Execution status pill */}
+                  {execStatus !== 'idle' && (
+                    <span style={{
+                      padding: '1px 7px', borderRadius: 3, fontSize: 10,
+                      background: execStatus === 'running' ? 'rgba(34,197,94,0.15)'
+                        : execStatus === 'completed' ? 'rgba(34,197,94,0.12)'
+                        : execStatus === 'failed' ? 'rgba(239,68,68,0.15)'
+                        : 'rgba(107,92,166,0.15)',
+                      color: execStatus === 'running' ? BB.success
+                        : execStatus === 'completed' ? BB.success
+                        : execStatus === 'failed' ? BB.error
+                        : BB.muted,
+                    }}>
+                      {execStatus === 'running' && '⏺ Running'}
+                      {execStatus === 'queued' && '⏳ Queued'}
+                      {execStatus === 'completed' && `✓ Done${execDuration ? ` (${execDuration.toFixed(1)}s)` : ''}`}
+                      {execStatus === 'failed' && '✗ Failed'}
+                      {execStatus === 'stopped' && '■ Stopped'}
+                    </span>
+                  )}
+                  {/* Terminal panel toggle */}
+                  <button
+                    onClick={() => { setBottomPanelOpen((o) => !o); setBottomTab('output'); }}
+                    title="Toggle terminal panel (Ctrl+`)"
+                    style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', color: bottomPanelOpen ? BB.gold : BB.muted, cursor: 'pointer', padding: '1px 4px', borderRadius: 3, fontSize: 10.5 }}
+                  >
+                    <Terminal style={{ width: 11, height: 11 }} />
+                    <span>Terminal</span>
+                    {outputLines.length > 0 && <span style={{ background: BB.primary, borderRadius: 8, padding: '0 4px', fontSize: 9, color: BB.text }}>{outputLines.length}</span>}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1746,6 +2023,182 @@ export function ViewAsCodeStudio({
           placeholder="Ask about this pipeline configuration…"
         />
       </div>
+
+      {/* ── Bottom Terminal / Output Panel ─────────────────────────────── */}
+      {bottomPanelOpen && (
+        <div
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            height: bottomPanelHeight,
+            background: BB.surface,
+            borderTop: `1px solid ${BB.border}`,
+            overflow: 'hidden',
+          }}
+        >
+          {/* Drag handle */}
+          <div
+            onMouseDown={handleBottomDragStart}
+            style={{
+              height: 5,
+              cursor: 'ns-resize',
+              background: 'transparent',
+              flexShrink: 0,
+            }}
+          />
+
+          {/* Panel tab bar */}
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            borderBottom: `1px solid ${BB.border}`,
+            background: BB.elevated, flexShrink: 0,
+          }}>
+            {(['output', 'problems', 'logs', 'debug'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setBottomTab(tab)}
+                style={{
+                  padding: '5px 14px', border: 'none', background: 'transparent',
+                  color: bottomTab === tab ? BB.text : BB.muted,
+                  borderBottom: bottomTab === tab ? `2px solid ${BB.gold}` : '2px solid transparent',
+                  fontSize: 11.5, cursor: 'pointer', textTransform: 'capitalize',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  transition: 'color 80ms',
+                }}
+              >
+                {tab === 'output' && <Terminal style={{ width: 11, height: 11 }} />}
+                {tab === 'problems' && <TriangleAlert style={{ width: 11, height: 11 }} />}
+                {tab === 'logs' && <ScrollText style={{ width: 11, height: 11 }} />}
+                {tab === 'debug' && <Activity style={{ width: 11, height: 11 }} />}
+                {tab}
+                {tab === 'output' && outputLines.length > 0 && (
+                  <span style={{ background: BB.primary, borderRadius: 8, padding: '0 5px', fontSize: 9, color: BB.text, fontWeight: 700 }}>{outputLines.length}</span>
+                )}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            {/* Exec status badge */}
+            {execStatus !== 'idle' && (
+              <span style={{
+                fontSize: 10, marginRight: 8, padding: '2px 7px', borderRadius: 3,
+                background: execStatus === 'completed' ? 'rgba(34,197,94,0.12)' : execStatus === 'failed' ? 'rgba(239,68,68,0.12)' : 'rgba(107,92,166,0.12)',
+                color: execStatus === 'completed' ? BB.success : execStatus === 'failed' ? BB.error : BB.muted,
+              }}>
+                {execStatus === 'running' && '● Running'}
+                {execStatus === 'completed' && `✓ Exit 0${execDuration ? ` · ${execDuration.toFixed(1)}s` : ''}`}
+                {execStatus === 'failed' && `✗ Exit ${execExitCode ?? '?'}`}
+                {execStatus === 'stopped' && '■ Stopped'}
+                {execStatus === 'queued' && '⏳ Starting…'}
+              </span>
+            )}
+            {outputLines.length > 0 && (
+              <button
+                onClick={() => setOutputLines([])}
+                title="Clear output"
+                style={{ background: 'transparent', border: 'none', color: BB.muted, cursor: 'pointer', padding: '0 8px', fontSize: 10 }}
+              >
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => setBottomPanelOpen(false)}
+              title="Close panel"
+              style={{ background: 'transparent', border: 'none', color: BB.muted, cursor: 'pointer', padding: '0 10px', display: 'flex', alignItems: 'center' }}
+            >
+              <ChevronDown style={{ width: 14, height: 14 }} />
+            </button>
+          </div>
+
+          {/* Panel content */}
+          <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+            {bottomTab === 'output' && (
+              <>
+                {outputLines.length === 0 && execStatus === 'idle' && (
+                  <div style={{ padding: '20px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'var(--font-mono)', textAlign: 'center' }}>
+                    Run your script to see output here.
+                  </div>
+                )}
+                {outputLines.length === 0 && execStatus === 'running' && (
+                  <div style={{ padding: '8px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'var(--font-mono)' }}>
+                    <Activity style={{ width: 12, height: 12, display: 'inline', marginRight: 6, animation: 'spin 1s linear infinite' }} />
+                    Waiting for output…
+                  </div>
+                )}
+                {outputLines.map((line, i) => {
+                  const isStderr = line.startsWith('[stderr]');
+                  const isError = line.startsWith('[Error]') || line.startsWith('[ERROR]');
+                  const isMlpg = line.startsWith('[ML Playground]');
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        padding: '1px 16px',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 11.5,
+                        lineHeight: 1.7,
+                        color: isStderr || isError ? BB.error : isMlpg ? BB.primaryLight : '#D4D0C8',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                        background: (isStderr || isError) ? 'rgba(239,68,68,0.05)' : 'transparent',
+                      }}
+                    >
+                      {line}
+                    </div>
+                  );
+                })}
+                {execArtifacts.length > 0 && (
+                  <div style={{ margin: '8px 16px', padding: '8px 12px', background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 6 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: BB.success, marginBottom: 4 }}>📦 Artifacts Detected</div>
+                    {execArtifacts.map((a) => (
+                      <div key={a} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: BB.text, padding: '1px 0' }}>• {a}</div>
+                    ))}
+                  </div>
+                )}
+                <div ref={outputEndRef} />
+              </>
+            )}
+            {bottomTab === 'problems' && (
+              <div style={{ padding: '12px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'var(--font-mono)' }}>
+                {isValidSyntax === false ? (
+                  <div style={{ color: BB.error, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <TriangleAlert style={{ width: 13, height: 13 }} />
+                    Generated code has syntax errors. Review carefully before running.
+                  </div>
+                ) : (
+                  <div style={{ color: BB.success, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Check style={{ width: 13, height: 13 }} />
+                    No problems detected.
+                  </div>
+                )}
+              </div>
+            )}
+            {bottomTab === 'logs' && (
+              <div style={{ padding: '12px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'var(--font-mono)' }}>
+                {execId ? (
+                  <div>
+                    <div style={{ marginBottom: 4 }}>Execution ID: <span style={{ color: BB.text }}>{execId}</span></div>
+                    <div>Status: <span style={{ color: execStatus === 'completed' ? BB.success : execStatus === 'failed' ? BB.error : BB.muted }}>{execStatus}</span></div>
+                    {execDuration !== null && <div>Duration: <span style={{ color: BB.text }}>{execDuration.toFixed(2)}s</span></div>}
+                    {execExitCode !== null && <div>Exit code: <span style={{ color: execExitCode === 0 ? BB.success : BB.error }}>{execExitCode}</span></div>}
+                  </div>
+                ) : (
+                  <span>No execution logs yet.</span>
+                )}
+              </div>
+            )}
+            {bottomTab === 'debug' && (
+              <div style={{ padding: '12px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'var(--font-mono)' }}>
+                <div>Active file: <span style={{ color: BB.text }}>{activeExperimentFile}</span></div>
+                <div>Modified: <span style={{ color: isFileModified(activeExperimentFile) ? BB.gold : BB.muted }}>{String(isFileModified(activeExperimentFile))}</span></div>
+                <div>Generated: <span style={{ color: generatedFiles.includes(activeExperimentFile) ? BB.primaryLight : BB.muted }}>{String(generatedFiles.includes(activeExperimentFile))}</span></div>
+                <div>Lines: <span style={{ color: BB.text }}>{codeLines.length}</span></div>
+                <div>Open tabs: <span style={{ color: BB.text }}>{openTabs.join(', ')}</span></div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

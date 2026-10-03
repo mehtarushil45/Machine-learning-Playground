@@ -316,3 +316,70 @@ export const PortfolioService = {
 
   verifyCertificate: (projectId: string) => request<CertificateVerificationResponse>(`/portfolios/verify/${projectId}`),
 };
+
+// ---------------------------------------------------------------------------
+// Code Studio Execution API
+// ---------------------------------------------------------------------------
+
+export interface ExecuteRequest {
+  code:       string;
+  filename?:  string;
+  dataset_id?: string;
+  timeout?:   number;
+}
+
+export interface ExecuteResponse {
+  exec_id:    string;
+  status:     string;
+  filename:   string;
+  dataset_id: string | null;
+}
+
+export interface ExecutionResult {
+  exec_id:          string;
+  status:           string;
+  filename:         string;
+  exit_code:        number | null;
+  stdout:           string;
+  stderr:           string;
+  artifacts:        string[];
+  duration_seconds: number | null;
+  error:            string | null;
+}
+
+export interface FormatResponse {
+  code:    string;
+  changed: boolean;
+  error:   string | null;
+}
+
+export const CodeExecutionService = {
+  /** Submit code for execution. Returns exec_id immediately. */
+  execute: (payload: ExecuteRequest) =>
+    request<ExecuteResponse>('/code-execution/execute', {
+      method: 'POST',
+      body: JSON.stringify({ filename: 'train.py', timeout: 90, ...payload }),
+    }),
+
+  /** Stop a running execution. */
+  stop: (execId: string) =>
+    request<{ exec_id: string; status: string }>(`/code-execution/${execId}/stop`, { method: 'POST' }),
+
+  /** Get the full result of a finished execution. */
+  getResult: (execId: string) =>
+    request<ExecutionResult>(`/code-execution/${execId}`),
+
+  /** Format Python code using black/autopep8. */
+  formatCode: (code: string) =>
+    request<FormatResponse>('/code-execution/format', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  /**
+   * Returns the SSE stream URL for a given exec_id.
+   * The caller is responsible for creating the EventSource connection.
+   */
+  streamUrl: (execId: string) => `/api/v1/code-execution/${execId}/stream`,
+};
+
