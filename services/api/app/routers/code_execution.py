@@ -192,5 +192,5 @@ async def format_code(payload: FormatRequest) -> FormatResponse:
     except ImportError:
         pass
 
-    # Neither formatter available — return as-is
-    return FormatResponse(code=original, changed=False, error="No formatter available (install black or autopep8)")
+    # Neither formatter available  --  return as-is
+    return FormatResponse(code=original, changed=False, error="No formatter available (install black or autopep8)")

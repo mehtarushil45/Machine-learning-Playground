@@ -243,4 +243,4 @@ def list_executions() -> List[Dict[str, Any]]:
             "error": rec.error,
             "dataset_id": rec.dataset_id,
         })
-    return result
+    return result

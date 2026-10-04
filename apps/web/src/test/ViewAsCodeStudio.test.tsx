@@ -191,10 +191,15 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
     expect(screen.queryByText(/View Results/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /recompile/i })).not.toBeInTheDocument();
 
-    // Verify symbol-only buttons are present via aria-label
-    expect(await screen.findByRole('button', { name: 'Python Script' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Visual DAG Flow' })).toBeInTheDocument();
+    // Verify Visual DAG Flow and Download/Export buttons are completely removed
+    expect(screen.queryByRole('button', { name: 'Visual DAG Flow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /export \.py/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
+
+    // Verify studio action buttons are present via aria-label
     expect(screen.getByRole('button', { name: /copy code/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /export \.py/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /regenerate code/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /format code/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run code/i })).toBeInTheDocument();
   });
 });

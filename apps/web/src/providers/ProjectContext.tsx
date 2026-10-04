@@ -148,17 +148,17 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const initialFiles: Record<string, string> =
     hasPersistedDataset && initial.experimentFiles && Object.keys(initial.experimentFiles).length > 0
       ? initial.experimentFiles
-      : {};
+      : { 'pipeline_generated.py': '' };
 
   const initialActiveFile: string =
     hasPersistedDataset && hasPersistedFile
       ? initial.activeExperimentFile!
-      : '';
+      : 'pipeline_generated.py';
 
   const initialTabs: string[] =
     hasPersistedDataset && Array.isArray(initial.openTabs) && initial.openTabs.length > 0
       ? initial.openTabs.filter((t) => initialFiles[t] !== undefined)
-      : [];
+      : ['pipeline_generated.py'];
 
   const [dataset,           setDataset]           = useState<Dataset | null>(initial.dataset ?? null);
   const [selectedFeatures,  setSelectedFeatures]  = useState<string[]>(initial.selectedFeatures ?? []);

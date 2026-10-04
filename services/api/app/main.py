@@ -9,6 +9,14 @@ In Docker:
 """
 
 import os as _os
+import sys as _sys
+from pathlib import Path as _Path
+
+# Ensure repo root is on sys.path so worker and sibling services import cleanly
+_repo_root = str(_Path(__file__).resolve().parents[3])
+if _repo_root not in _sys.path:
+    _sys.path.insert(0, _repo_root)
+
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
