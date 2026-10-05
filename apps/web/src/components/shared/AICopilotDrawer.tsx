@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { Sparkles, X } from 'lucide-react';
+import { Sparkles, X, Send } from 'lucide-react';
 
 export interface CopilotMsg {
   id: string;
@@ -7,42 +7,62 @@ export interface CopilotMsg {
   type: 'info' | 'warning' | 'tip';
 }
 
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+}
+
 export interface AICopilotDrawerProps {
   isOpen: boolean;
   onToggle: () => void;
-  messages: CopilotMsg[];
+  messages?: CopilotMsg[];
+  chatMessages?: ChatMessage[];
+  onSendMessage?: (msg: string) => void;
+  suggestedQuestions?: string[];
   placeholder?: string;
   initialWidth?: number;
   minWidth?: number;
   maxWidth?: number;
+  title?: string;
+  badge?: string;
 }
 
 const BB = {
   base: '#0B0912',
-  surface: '#1B1530',
-  elevated: '#2A2247',
-  border: 'rgba(107,92,166,0.18)',
-  borderHover: 'rgba(107,92,166,0.38)',
+  surface: '#151026',
+  surfaceSubtle: '#1C1534',
+  elevated: '#241B42',
+  elevatedHover: '#2E2254',
+  border: 'rgba(107,92,166,0.22)',
+  borderHover: 'rgba(107,92,166,0.48)',
   primary: '#4B3B7C',
-  primaryLight: '#6C5CA6',
+  primaryLight: '#7C6BAE',
+  primaryGlow: 'rgba(124, 107, 174, 0.25)',
   maroon: '#6E1423',
-  maroonLight: '#B23A4E',
   gold: '#C9A24B',
+  goldLight: '#E2BD68',
   text: '#F5F1EC',
   muted: '#9E93B8',
   disabled: '#3D3558',
-  success: '#22c55e',
-  warning: '#f59e0b',
+  success: '#22C55E',
+  warning: '#F59E0B',
+  error: '#EF4444',
 } as const;
 
 export function AICopilotDrawer({
   isOpen,
   onToggle,
-  messages,
+  messages = [],
+  chatMessages = [],
+  onSendMessage,
+  suggestedQuestions = [],
   placeholder = 'Ask AI Copilot…',
-  initialWidth = 360,
-  minWidth = 320,
-  maxWidth = 560,
+  initialWidth = 340,
+  minWidth = 280,
+  maxWidth = 600,
+  title = 'AI Copilot',
+  badge = 'AGENT',
 }: AICopilotDrawerProps) {
   const [copilotWidth, setCopilotWidth] = useState<number>(() => {
     if (typeof localStorage !== 'undefined') {
@@ -55,6 +75,7 @@ export function AICopilotDrawer({
     return initialWidth;
   });
 
+  const [inputVal, setInputVal] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const startXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(copilotWidth);
@@ -66,7 +87,8 @@ export function AICopilotDrawer({
     startWidthRef.current = copilotWidth;
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = startXRef.current - moveEvent.clientX; // dragging left increases width
+      // Dragging left edge: moving mouse left increases drawer width
+      const deltaX = startXRef.current - moveEvent.clientX;
       const nextWidth = Math.min(maxWidth, Math.max(minWidth, startWidthRef.current + deltaX));
       setCopilotWidth(nextWidth);
       if (typeof localStorage !== 'undefined') {
@@ -84,6 +106,13 @@ export function AICopilotDrawer({
     document.addEventListener('mouseup', handleMouseUp);
   }, [copilotWidth, minWidth, maxWidth]);
 
+  const handleSend = (textToSend?: string) => {
+    const q = (textToSend ?? inputVal).trim();
+    if (!q || !onSendMessage) return;
+    onSendMessage(q);
+    if (!textToSend) setInputVal('');
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -94,8 +123,7 @@ export function AICopilotDrawer({
         width: copilotWidth,
         flexShrink: 0,
         background: BB.surface,
-        border: `1px solid ${BB.border}`,
-        borderRadius: '10px',
+        borderLeft: `1px solid ${BB.border}`,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -104,93 +132,100 @@ export function AICopilotDrawer({
         zIndex: 20,
       }}
     >
-      {/* Left Edge Drag Handle (320px–560px) */}
+      {/* Left Edge Drag Handle (resizable from left, docked right) */}
       <div
         onMouseDown={handleMouseDown}
-        title="Drag left/right to resize AI Copilot drawer"
+        title="Drag left/right to resize AI Copilot"
         style={{
           position: 'absolute',
           top: 0,
           bottom: 0,
           left: 0,
-          width: 6,
+          width: 5,
           cursor: 'col-resize',
           zIndex: 30,
-          background: isDragging ? BB.primaryLight : 'transparent',
-          transition: 'background 150ms ease',
+          background: isDragging ? BB.gold : 'transparent',
+          transition: 'background 120ms ease',
+        }}
+        onMouseEnter={(e) => {
+          if (!isDragging) e.currentTarget.style.background = 'rgba(201,162,75,0.4)';
+        }}
+        onMouseLeave={(e) => {
+          if (!isDragging) e.currentTarget.style.background = 'transparent';
         }}
       />
 
       {/* AI Panel Header */}
       <div
         style={{
-          padding: '10px 12px',
+          height: 38,
+          padding: '0 12px',
           borderBottom: `1px solid ${BB.border}`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          background: BB.elevated,
+          background: BB.surfaceSubtle,
           flexShrink: 0,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />
-          <span style={{ fontSize: 11, fontWeight: 700, color: BB.text }}>AI Copilot</span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>{title}</span>
           <span
             style={{
-              fontSize: 8,
+              fontSize: 9.5,
               fontWeight: 700,
               padding: '1px 5px',
-              borderRadius: 10,
-              background: 'rgba(75,59,124,0.25)',
+              borderRadius: 3,
+              background: 'rgba(75,59,124,0.4)',
               color: BB.primaryLight,
-              border: `1px solid rgba(107,92,166,0.30)`,
-              textTransform: 'uppercase',
+              border: `1px solid ${BB.border}`,
               letterSpacing: '0.04em',
             }}
           >
-            AGENT
+            {badge}
           </span>
-          <button
-            onClick={onToggle}
-            title="Close AI Copilot"
-            aria-label="Close AI Copilot"
-            style={{
-              background: 'none',
-              border: 'none',
-              color: BB.muted,
-              cursor: 'pointer',
-              padding: 2,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <X style={{ width: 14, height: 14 }} />
-          </button>
         </div>
+
+        <button
+          onClick={onToggle}
+          title="Close AI Copilot"
+          aria-label="Close AI Copilot"
+          style={{
+            background: 'none',
+            border: 'none',
+            color: BB.muted,
+            cursor: 'pointer',
+            padding: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
+        >
+          <X style={{ width: 14, height: 14 }} />
+        </button>
       </div>
 
-      {/* AI Insights & Message Feed */}
+      {/* AI Messages & Chat Feed */}
       <div
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '10px',
+          padding: 12,
           display: 'flex',
           flexDirection: 'column',
-          gap: 8,
+          gap: 10,
         }}
       >
+        {/* Context Insights */}
         {messages.map((msg) => (
           <div
             key={msg.id}
             style={{
               padding: '8px 10px',
-              borderRadius: '6px',
+              borderRadius: 6,
               background:
                 msg.type === 'warning'
                   ? 'rgba(245,158,11,0.08)'
@@ -199,55 +234,139 @@ export function AICopilotDrawer({
                   : 'rgba(75,59,124,0.12)',
               border: `1px solid ${
                 msg.type === 'warning'
-                  ? 'rgba(245,158,11,0.22)'
+                  ? 'rgba(245,158,11,0.25)'
                   : msg.type === 'tip'
-                  ? 'rgba(201,162,75,0.22)'
-                  : 'rgba(107,92,166,0.22)'
+                  ? 'rgba(201,162,75,0.25)'
+                  : BB.border
               }`,
-              fontSize: 10,
-              color: BB.muted,
-              lineHeight: 1.45,
+              fontSize: 11,
+              color: BB.text,
+              lineHeight: 1.5,
             }}
           >
-            {msg.text.split(/(\*\*[^*]+\*\*)/).map((part, i) =>
-              part.startsWith('**') && part.endsWith('**') ? (
-                <strong key={i} style={{ color: BB.text }}>
-                  {part.slice(2, -2)}
-                </strong>
-              ) : (
-                part
-              ),
-            )}
+            <div
+              dangerouslySetInnerHTML={{
+                __html: msg.text
+                  .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#C9A24B">$1</strong>')
+                  .replace(/`(.*?)`/g, '<code style="background:rgba(0,0,0,0.3);padding:1px 4px;border-radius:3px">$1</code>'),
+              }}
+            />
           </div>
         ))}
+
+        {/* Chat Thread */}
+        {chatMessages.map((chat) => (
+          <div
+            key={chat.id}
+            style={{
+              alignSelf: chat.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '90%',
+              padding: '8px 11px',
+              borderRadius: 8,
+              background: chat.role === 'user' ? BB.primary : BB.elevated,
+              color: BB.text,
+              fontSize: 11.5,
+              lineHeight: 1.5,
+              border: `1px solid ${chat.role === 'user' ? BB.primaryLight : BB.border}`,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {chat.text}
+          </div>
+        ))}
+
+        {/* Suggested Quick Questions */}
+        {suggestedQuestions.length > 0 && onSendMessage && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 10, color: BB.muted, fontWeight: 700, letterSpacing: '0.05em' }}>
+              SUGGESTED QUESTIONS
+            </span>
+            {suggestedQuestions.map((sug) => (
+              <button
+                key={sug}
+                onClick={() => handleSend(sug)}
+                style={{
+                  textAlign: 'left',
+                  padding: '5px 8px',
+                  borderRadius: 5,
+                  background: 'rgba(107,92,166,0.1)',
+                  border: `1px solid ${BB.border}`,
+                  color: BB.muted,
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  transition: 'all 120ms ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(107,92,166,0.22)';
+                  e.currentTarget.style.color = BB.text;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(107,92,166,0.1)';
+                  e.currentTarget.style.color = BB.muted;
+                }}
+              >
+                • {sug}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Input Prompt Stub */}
+      {/* Input Prompt Box */}
       <div
         style={{
           padding: '8px 10px',
           borderTop: `1px solid ${BB.border}`,
-          background: BB.surface,
+          background: BB.elevated,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
           flexShrink: 0,
         }}
       >
         <input
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSend();
+          }}
+          disabled={!onSendMessage}
           placeholder={placeholder}
-          disabled
           style={{
-            width: '100%',
-            padding: '6px 8px',
-            borderRadius: 5,
+            flex: 1,
+            padding: '6px 10px',
+            borderRadius: 6,
             border: `1px solid ${BB.border}`,
-            background: BB.elevated,
-            color: BB.muted,
-            fontSize: 10,
-            fontFamily: 'var(--font-ui)',
+            background: BB.surface,
+            color: BB.text,
+            fontSize: 11.5,
             outline: 'none',
             boxSizing: 'border-box',
-            cursor: 'not-allowed',
+            cursor: onSendMessage ? 'text' : 'not-allowed',
           }}
         />
+        {onSendMessage && (
+          <button
+            onClick={() => handleSend()}
+            disabled={!inputVal.trim()}
+            title="Send to Copilot"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              border: 'none',
+              background: inputVal.trim() ? BB.gold : BB.disabled,
+              color: BB.base,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: inputVal.trim() ? 'pointer' : 'default',
+              transition: 'background 120ms ease',
+            }}
+          >
+            <Send style={{ width: 13, height: 13 }} />
+          </button>
+        )}
       </div>
     </aside>
   );

@@ -17,8 +17,6 @@ import {
   AlertCircle,
   ScrollText,
   Activity,
-  Sparkles,
-  Send,
   Search,
   ArrowUp,
   ArrowDown,
@@ -27,6 +25,7 @@ import {
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService } from '../../services/api';
 import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
+import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
@@ -66,6 +65,24 @@ export interface CopilotMsg {
   id: string;
   text: string;
   type: 'info' | 'warning' | 'tip';
+}
+
+interface Diagnostic {
+  line: number;
+  col: number;
+  end_line?: number;
+  end_col?: number;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  source: 'syntax' | 'pyflakes' | 'pep8' | 'runtime' | 'static';
+  code?: string | null;
+}
+
+interface LogEntry {
+  id: string;
+  time: string;
+  level: 'system' | 'info' | 'warn' | 'error' | 'debug';
+  message: string;
 }
 
 /* ── High-Precision Python Syntax Highlighter Tokenizer ────────────────── */
@@ -389,6 +406,87 @@ function ExperimentExplorer({
   );
 }
 
+/* ── Static Python Code Analyzer ──────────────────────────────────── */
+function analyzeCode(code: string): Diagnostic[] {
+  const results: Diagnostic[] = [];
+  if (!code.trim()) return results;
+  const lines = code.split('\n');
+  const fullCode = code;
+
+  for (let i = 0; i < lines.length; i++) {
+    const num = i + 1;
+    const raw = lines[i];
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    // Line too long (PEP 8 E501)
+    if (raw.length > 120)
+      results.push({ line: num, col: 121, severity: 'warning', message: `Line too long (${raw.length} > 120 chars) — E501`, source: 'static' });
+
+    // Mixed tabs and spaces (E101)
+    const leading = raw.match(/^(\s+)/);
+    if (leading && leading[1].includes('\t') && leading[1].includes(' '))
+      results.push({ line: num, col: 1, severity: 'error', message: 'Mixed tabs and spaces in indentation — E101', source: 'static' });
+
+    // Python 2 print statement
+    if (/\bprint\s+["'a-zA-Z_\[(]/.test(trimmed) && !/\bprint\s*\(/.test(trimmed))
+      results.push({ line: num, col: raw.indexOf('print') + 1, severity: 'warning', message: "Python 2 'print' statement — use print()", source: 'static' });
+
+    // Bare except (E722)
+    if (/^except\s*:/.test(trimmed))
+      results.push({ line: num, col: 1, severity: 'warning', message: 'Bare except: catches all exceptions including SystemExit — E722', source: 'static' });
+
+    // Comparison to None with == (E711)
+    if (/==\s*None\b|None\s*==/.test(trimmed))
+      results.push({ line: num, col: 1, severity: 'warning', message: "Use 'is None' instead of '== None' — E711", source: 'static' });
+
+    // Comparison to True/False (E712)
+    if (/==\s*(True|False)\b/.test(trimmed))
+      results.push({ line: num, col: 1, severity: 'info', message: "Use truthiness check instead of '== True/False' — E712", source: 'static' });
+
+    // Trailing whitespace (W291)
+    if (raw !== raw.trimEnd())
+      results.push({ line: num, col: raw.trimEnd().length + 1, severity: 'info', message: 'Trailing whitespace — W291', source: 'static' });
+
+    // np/pd used without visible import
+    const preamble = fullCode.split('\n').slice(0, i).join('\n');
+    if (/\bnp\./.test(trimmed) && !/import numpy|as np/.test(preamble))
+      results.push({ line: num, col: 1, severity: 'info', message: "'np' used — ensure 'import numpy as np' is present", source: 'static' });
+    if (/\bpd\./.test(trimmed) && !/import pandas|as pd/.test(preamble))
+      results.push({ line: num, col: 1, severity: 'info', message: "'pd' used — ensure 'import pandas as pd' is present", source: 'static' });
+  }
+
+  return results;
+}
+
+/* ── Runtime Error Parser (Python traceback → Diagnostics) ─────────── */
+function parseRuntimeErrors(outputLines: string[]): Diagnostic[] {
+  const results: Diagnostic[] = [];
+  const seen = new Set<number>();
+  let lastError = '';
+
+  for (let i = 0; i < outputLines.length; i++) {
+    const raw = outputLines[i].replace(/^\[stderr\]\s?/, '');
+    if (/^[A-Z][a-zA-Z]+(Error|Exception|Warning):/.test(raw)) lastError = raw;
+
+    const m = raw.match(/File "([^"]+)", line (\d+)/);
+    if (!m) continue;
+    const lineNum = parseInt(m[2]);
+    if (lineNum <= 0 || seen.has(lineNum)) continue;
+    seen.add(lineNum);
+
+    let msg = lastError;
+    if (!msg) {
+      for (let j = i + 1; j < Math.min(i + 8, outputLines.length); j++) {
+        const next = outputLines[j].replace(/^\[stderr\]\s?/, '');
+        if (/^[A-Z][a-zA-Z]+(Error|Exception|Warning):/.test(next)) { msg = next; lastError = msg; break; }
+      }
+    }
+    results.push({ line: lineNum, col: 1, severity: 'error', message: msg || `Runtime error at line ${lineNum}`, source: 'runtime' });
+  }
+  return results;
+}
+
 /* ── Main ViewAsCodeStudio Component ─────────────────────────────────── */
 export function ViewAsCodeStudio({
   isActive = true,
@@ -431,17 +529,6 @@ export function ViewAsCodeStudio({
     return 190;
   });
 
-  const [copilotWidth, setCopilotWidth] = useState<number>(() => {
-    if (typeof localStorage !== 'undefined') {
-      const val = localStorage.getItem('ml_copilot_drawer_width') || localStorage.getItem('ml_studio_copilot_width');
-      if (val) {
-        const parsed = parseInt(val, 10);
-        if (!isNaN(parsed) && parsed >= 260 && parsed <= 600) return parsed;
-      }
-    }
-    return 340;
-  });
-
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(() => {
     if (typeof localStorage !== 'undefined') {
       const val = localStorage.getItem('ml_code_studio_panel_height');
@@ -457,7 +544,6 @@ export function ViewAsCodeStudio({
   const [bottomTab, setBottomTab] = useState<'output' | 'problems' | 'logs' | 'debug'>('output');
 
   const [isDraggingExplorer, setIsDraggingExplorer] = useState(false);
-  const [isDraggingCopilot, setIsDraggingCopilot] = useState(false);
   const [isDraggingBottom, setIsDraggingBottom] = useState(false);
 
   /* ── Code Generation & Editor States ─────────────────────────────── */
@@ -487,6 +573,10 @@ export function ViewAsCodeStudio({
   const [execArtifacts, setExecArtifacts] = useState<string[]>([]);
   const [execDuration, setExecDuration] = useState<number | null>(null);
   const [execExitCode, setExecExitCode] = useState<number | null>(null);
+  const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<Diagnostic[]>([]);
+  const [serverDiagnostics, setServerDiagnostics] = useState<Diagnostic[]>([]);
+  const [isLinting, setIsLinting] = useState<boolean>(false);
+  const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
 
   /* ── AI Copilot Chat State ───────────────────────────────────────── */
   const [copilotInput, setCopilotInput] = useState('');
@@ -545,6 +635,42 @@ export function ViewAsCodeStudio({
       }
     };
   }, []);
+
+  /* ── Live Debounced AST / Pyflakes Linter (350ms after keystroke) ── */
+  useEffect(() => {
+    // If buffer is empty or blank, immediately clear diagnostics (satisfies empty buffer requirement)
+    if (!displayedCode || !displayedCode.trim()) {
+      setServerDiagnostics([]);
+      setIsLinting(false);
+      return;
+    }
+
+    setIsLinting(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await CodeExecutionService.lintCode(displayedCode, currentFile);
+        const mapped: Diagnostic[] = (res.diagnostics || []).map((d) => ({
+          line: d.line,
+          col: d.col,
+          end_line: d.end_line,
+          end_col: d.end_col,
+          severity: d.severity,
+          message: d.message,
+          source: d.source,
+          code: d.code,
+        }));
+        setServerDiagnostics(mapped);
+      } catch {
+        // Fallback to client-side static analysis if server is unreachable
+        const fallback = analyzeCode(displayedCode);
+        setServerDiagnostics(fallback);
+      } finally {
+        setIsLinting(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [displayedCode, currentFile]);
 
   /* ── Code Generation Logic ───────────────────────────────────────── */
   const generatePipelineCode = useCallback(async (targetFileName?: string) => {
@@ -683,31 +809,6 @@ export function ViewAsCodeStudio({
     document.addEventListener('mouseup', onMouseUp);
   }, [explorerWidth]);
 
-  const handleCopilotDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDraggingCopilot(true);
-    const startX = e.clientX;
-    const startW = copilotWidth;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const delta = startX - moveEvent.clientX; // dragging left increases width
-      const nextW = Math.max(260, Math.min(600, startW + delta));
-      setCopilotWidth(nextW);
-      try {
-        localStorage.setItem('ml_copilot_drawer_width', String(nextW));
-        localStorage.setItem('ml_studio_copilot_width', String(nextW));
-      } catch {}
-    };
-
-    const onMouseUp = () => {
-      setIsDraggingCopilot(false);
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }, [copilotWidth]);
 
   const handleBottomDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -824,19 +925,34 @@ export function ViewAsCodeStudio({
   };
 
   const handleFormatCode = async () => {
-    if (!displayedCode || !displayedCode.trim()) return;
+    if (!displayedCode || !displayedCode.trim()) {
+      onShowToast?.('Empty Buffer', 'No Python code to format.', 'info');
+      return;
+    }
     setIsFormatting(true);
+    const cursorOffset = editorRef.current?.selectionStart ?? 0;
+
     try {
       const res = await CodeExecutionService.formatCode(displayedCode);
+      if (res.error) {
+        onShowToast?.('Format Warning', res.error, 'error');
+        return;
+      }
       if (res.changed && res.code) {
         updateExperimentFileCode(currentFile, res.code);
         markFileModified(currentFile);
-        onShowToast?.('Code Formatted', 'Python code formatted successfully.', 'success');
+        setTimeout(() => {
+          if (editorRef.current) {
+            const nextPos = Math.min(cursorOffset, res.code.length);
+            editorRef.current.setSelectionRange(nextPos, nextPos);
+          }
+        }, 0);
+        onShowToast?.('Code Formatted', 'Formatted with Black (PEP 8).', 'success');
       } else {
         onShowToast?.('Code Clean', 'Code is already properly formatted.', 'info');
       }
     } catch (err: any) {
-      onShowToast?.('Format Warning', err.message || 'Formatting fallback used.', 'info');
+      onShowToast?.('Format Error', err.message || 'Formatting failed.', 'error');
     } finally {
       setIsFormatting(false);
     }
@@ -852,6 +968,14 @@ export function ViewAsCodeStudio({
       return;
     }
 
+    const startTime = Date.now();
+    const makeLog = (level: LogEntry['level'], message: string): LogEntry => ({
+      id: `${Date.now()}-${Math.random()}`,
+      time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      level,
+      message,
+    });
+
     setBottomPanelOpen(true);
     setBottomTab('output');
     setOutputLines([`[ML Playground] Submitting ${currentFile} for sandboxed execution...`]);
@@ -859,6 +983,12 @@ export function ViewAsCodeStudio({
     setExecExitCode(null);
     setExecDuration(null);
     setExecArtifacts([]);
+    setRuntimeDiagnostics([]);
+    setLogEntries([
+      makeLog('system', `Execution started: '${currentFile}'`),
+      ...(dataset?.fileName ? [makeLog('info', `Dataset context: ${dataset.fileName}`)] : []),
+      ...(trainingConfig?.algorithm ? [makeLog('info', `Algorithm: ${trainingConfig.algorithm}`)] : []),
+    ]);
 
     try {
       const res = await CodeExecutionService.execute({
@@ -870,6 +1000,7 @@ export function ViewAsCodeStudio({
 
       setExecId(res.exec_id);
       setExecStatus('running');
+      setLogEntries(prev => [...prev, makeLog('info', `Execution accepted (ID: ${res.exec_id.slice(0, 8)})`)]);
       setOutputLines((prev) => [
         ...prev,
         `[ML Playground] Execution started (ID: ${res.exec_id.slice(0, 8)}). Streaming output...`,
@@ -878,30 +1009,104 @@ export function ViewAsCodeStudio({
       const streamUrl = CodeExecutionService.streamUrl(res.exec_id);
       const es = new EventSource(streamUrl);
       eventSourceRef.current = es;
+      // Accumulate all output for post-run traceback analysis
+      const allOutputRef: string[] = [];
 
       es.onmessage = (event) => {
+        const rawData = event.data;
+
+        // ── Try JSON first (backend now sends typed JSON events) ──────────
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(rawData);
+
           if (data.type === 'stdout' && data.data) {
             setOutputLines((p) => [...p, data.data]);
+            allOutputRef.push(data.data);
+            setLogEntries(prev => [...prev, makeLog('debug', data.data.slice(0, 120))]);
+
           } else if (data.type === 'stderr' && data.data) {
-            setOutputLines((p) => [...p, `[stderr] ${data.data}`]);
+            const line = `[stderr] ${data.data}`;
+            setOutputLines((p) => [...p, line]);
+            allOutputRef.push(line);
+            setLogEntries(prev => [...prev, makeLog('warn', data.data.slice(0, 120))]);
+
+          } else if (data.type === 'system' && data.data) {
+            setOutputLines((p) => [...p, data.data]);
+            allOutputRef.push(data.data);
+            setLogEntries(prev => [...prev, makeLog('system', data.data)]);
+
           } else if (data.type === 'exit') {
-            setExecExitCode(data.exit_code);
-            setExecDuration(data.duration_seconds);
-            if (data.artifacts && Array.isArray(data.artifacts)) {
-              setExecArtifacts(data.artifacts);
-            }
-            setExecStatus(data.exit_code === 0 ? 'completed' : 'failed');
+            const exitCode = data.exit_code ?? 0;
+            const dur = data.duration_seconds ?? (Date.now() - startTime) / 1000;
+            const arts = Array.isArray(data.artifacts) ? data.artifacts : [];
+            setExecExitCode(exitCode);
+            setExecDuration(dur);
+            setExecArtifacts(arts);
+            const newStatus = exitCode === 0 ? 'completed' : 'failed';
+            setExecStatus(newStatus);
+            setLogEntries(prev => [
+              ...prev,
+              makeLog(newStatus === 'completed' ? 'info' : 'error',
+                `Process exited with code ${exitCode} in ${dur.toFixed(2)}s`),
+              ...(arts.length > 0 ? [makeLog('info', `Artifacts saved: ${arts.join(', ')}`)] : []),
+            ]);
+            // Parse traceback → inline error markers
+            const errDiags = parseRuntimeErrors(allOutputRef);
+            setRuntimeDiagnostics(errDiags);
+            if (errDiags.length > 0) setBottomTab('problems');
             es.close();
+
           } else if (data.type === 'error') {
-            setOutputLines((p) => [...p, `[Error] ${data.error}`]);
+            const errMsg = `[Error] ${data.error}`;
+            setOutputLines((p) => [...p, errMsg]);
+            allOutputRef.push(errMsg);
+            setLogEntries(prev => [...prev, makeLog('error', data.error)]);
             setExecStatus('failed');
+            setExecDuration((Date.now() - startTime) / 1000);
+            const errDiags = parseRuntimeErrors(allOutputRef);
+            setRuntimeDiagnostics(errDiags);
+            if (errDiags.length > 0) setBottomTab('problems');
             es.close();
+
           }
+          // heartbeat → ignore
+          return;
         } catch {
-          setOutputLines((p) => [...p, event.data]);
+          // Not JSON → plain-text fallback (legacy stream)
         }
+
+        // ── Plain-text fallback ────────────────────────────────────────
+        if (rawData.startsWith('[DONE]')) {
+          const statusMatch = rawData.match(/status=(\w+)/);
+          const st = (statusMatch?.[1] ?? 'completed') as any;
+          setExecStatus(st);
+          setExecDuration((Date.now() - startTime) / 1000);
+          setLogEntries(prev => [...prev, makeLog(st === 'completed' ? 'info' : 'error', `Execution ${st}`)]);
+          CodeExecutionService.getResult(res.exec_id).then(finalRes => {
+            setExecDuration(finalRes.duration_seconds ?? null);
+            setExecExitCode(finalRes.exit_code ?? null);
+            if (finalRes.artifacts) setExecArtifacts(finalRes.artifacts);
+            const allLines = [
+              ...(finalRes.stdout ? finalRes.stdout.split('\n') : []),
+              ...(finalRes.stderr ? finalRes.stderr.split('\n').map(l => `[stderr] ${l}`) : []),
+            ];
+            const errDiags = parseRuntimeErrors(allLines);
+            setRuntimeDiagnostics(errDiags);
+            if (errDiags.length > 0) setBottomTab('problems');
+          }).catch(() => {});
+          es.close();
+          return;
+        }
+
+        const isStderr = rawData.startsWith('[stderr]');
+        const isError  = rawData.startsWith('[Error]') || rawData.startsWith('[ERROR]');
+        const isMlpg   = rawData.startsWith('[ML Playground]');
+        setOutputLines((p) => [...p, rawData]);
+        allOutputRef.push(rawData);
+        if (isError)       setLogEntries(prev => [...prev, makeLog('error', rawData)]);
+        else if (isStderr) setLogEntries(prev => [...prev, makeLog('warn', rawData.replace(/^\[stderr\]\s?/, ''))]);
+        else if (isMlpg)   setLogEntries(prev => [...prev, makeLog('system', rawData)]);
+        else               setLogEntries(prev => [...prev, makeLog('debug', rawData.slice(0, 120))]);
       };
 
       es.onerror = () => {
@@ -909,26 +1114,47 @@ export function ViewAsCodeStudio({
         CodeExecutionService.getResult(res.exec_id)
           .then((finalRes) => {
             if (finalRes.stdout) {
-              setOutputLines((p) => [...p, ...finalRes.stdout.split('\n')]);
+              const stdLines = finalRes.stdout.split('\n').filter(Boolean);
+              setOutputLines((p) => [...p, ...stdLines]);
+              allOutputRef.push(...stdLines);
             }
             if (finalRes.stderr) {
-              setOutputLines((p) => [...p, ...finalRes.stderr.split('\n').map((l) => `[stderr] ${l}`)]);
+              const errLines = finalRes.stderr.split('\n').filter(Boolean).map((l) => `[stderr] ${l}`);
+              setOutputLines((p) => [...p, ...errLines]);
+              allOutputRef.push(...errLines);
             }
-            setExecStatus(finalRes.status as any);
-            setExecExitCode(finalRes.exit_code ?? (finalRes.status === 'completed' ? 0 : 1));
-            setExecDuration(finalRes.duration_seconds ?? null);
+            const st = finalRes.status as any;
+            setExecStatus(st);
+            setExecExitCode(finalRes.exit_code ?? (finalRes.status === 'completed' ? 0 : null));
+            setExecDuration(finalRes.duration_seconds ?? (Date.now() - startTime) / 1000);
             if (finalRes.artifacts) setExecArtifacts(finalRes.artifacts);
+            const errDiags = parseRuntimeErrors(allOutputRef);
+            setRuntimeDiagnostics(errDiags);
+            if (errDiags.length > 0) setBottomTab('problems');
+            setLogEntries(prev => [...prev,
+              makeLog(st === 'completed' ? 'info' : 'error',
+                `Stream ended — final status: ${st}${finalRes.exit_code != null ? ` (exit ${finalRes.exit_code})` : ''}`),
+            ]);
           })
           .catch(() => {
             setExecStatus('completed');
+            setLogEntries(prev => [...prev, makeLog('warn', 'Stream ended (status unknown)')]);
           });
       };
     } catch (err: any) {
       setExecStatus('failed');
-      setOutputLines((prev) => [
-        ...prev,
-        `[Error] Failed to start execution: ${err.message || 'Unknown error'}`,
-      ]);
+      setExecExitCode(null); // CRITICAL: Never fabricate an exit code (e.g. exit 1) for a request that didn't run!
+      setExecDuration(null);
+      const isNotFound = err?.status === 404;
+      const isAuth     = err?.status === 401 || err?.status === 403;
+      const errMsg = isNotFound
+        ? '[ML Playground] Execution backend unavailable (404 Not Found). The code execution service is not registered or running.'
+        : isAuth
+        ? '[ML Playground] Authentication required. Please log in to execute code.'
+        : `[ML Playground] Execution unavailable: ${err?.message || 'Could not connect to execution service.'}`;
+      setOutputLines((prev) => [...prev, errMsg]);
+      setLogEntries(prev => [...prev, makeLog('error', errMsg.replace('[ML Playground] ', ''))]);
+      onShowToast?.('Execution Unavailable', isNotFound ? 'Backend execution service unavailable (404).' : (err?.message || 'Execution failed.'), 'error');
     }
   };
 
@@ -1200,16 +1426,52 @@ export function ViewAsCodeStudio({
   const codeLines = displayedCode.split('\n');
   const experimentFileList = Object.keys(experimentFiles).map((name) => ({ name }));
 
+  /* ── Diagnostic Computations (Single Source of Truth: server + runtime) ─ */
+  const allDiagnostics = useMemo(() => {
+    // If buffer is empty, immediately return empty diagnostics (clean empty-state)
+    if (!displayedCode || !displayedCode.trim()) return [];
+
+    const seen = new Map<string, Diagnostic>();
+    // Primary source: real server-side AST and pyflakes diagnostics.
+    // Client-side analyzeCode serves as initial pre-check while server request is in flight
+    const activeDiagnostics = serverDiagnostics.length > 0 ? serverDiagnostics : analyzeCode(displayedCode);
+
+    [...activeDiagnostics, ...runtimeDiagnostics].forEach((d) => {
+      const key = `${d.line}:${d.message}`;
+      if (!seen.has(key)) seen.set(key, d);
+    });
+
+    return Array.from(seen.values()).sort((a, b) => {
+      const s: Record<string, number> = { error: 0, warning: 1, info: 2 };
+      return (s[a.severity] ?? 3) - (s[b.severity] ?? 3) || a.line - b.line;
+    });
+  }, [displayedCode, serverDiagnostics, runtimeDiagnostics]);
+
+  const diagnosticsByLine = useMemo(() => {
+    const map = new Map<number, Diagnostic>();
+    allDiagnostics.forEach(d => {
+      if (!map.has(d.line)) { map.set(d.line, d); return; }
+      const ex = map.get(d.line)!;
+      if ((d.severity === 'error' && ex.severity !== 'error') ||
+          (d.severity === 'warning' && ex.severity === 'info'))
+        map.set(d.line, d);
+    });
+    return map;
+  }, [allDiagnostics]);
+
+  const errorCount = allDiagnostics.filter(d => d.severity === 'error').length;
+  const warnCount  = allDiagnostics.filter(d => d.severity === 'warning').length;
+
   return (
     <div
       style={{
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'row',
         width: '100%',
         height: '100%',
         background: BB.base,
         overflow: 'hidden',
-        userSelect: isDraggingExplorer || isDraggingCopilot || isDraggingBottom ? 'none' : 'auto',
+        userSelect: isDraggingExplorer || isDraggingBottom ? 'none' : 'auto',
       }}
     >
       {/* ── Overwrite Warning Modal ── */}
@@ -1287,7 +1549,18 @@ export function ViewAsCodeStudio({
         </div>
       )}
 
-      {/* ── TOP STUDIO TAB BAR & TOOLBAR (Fixed 38px) ────────────────── */}
+      {/* ── LEFT & CENTER: STUDIO WORKSPACE (Tabs, Toolbar, Explorer, Editor, Terminal) ── */}
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          overflow: 'hidden',
+        }}
+      >
+        {/* ── TOP STUDIO TAB BAR & TOOLBAR (Fixed 38px) ────────────────── */}
       <header
         style={{
           height: 38,
@@ -1360,26 +1633,6 @@ export function ViewAsCodeStudio({
               </div>
             );
           })}
-
-          <button
-            onClick={handleNewFile}
-            title="Create new experiment file"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '0 10px',
-              background: 'transparent',
-              border: 'none',
-              borderRight: `1px solid ${BB.border}`,
-              color: BB.muted,
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = BB.gold; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
-          >
-            <Plus style={{ width: 13, height: 13 }} />
-          </button>
         </div>
 
         {/* Right: Studio Action Buttons */}
@@ -1509,31 +1762,6 @@ export function ViewAsCodeStudio({
             >
               <Play style={{ width: 12, height: 12, fill: BB.success }} />
               <span>Run</span>
-            </button>
-          )}
-
-          {/* AI Copilot Toggle Button */}
-          {onToggleCopilot && (
-            <button
-              onClick={onToggleCopilot}
-              aria-label="Toggle AI copilot"
-              title="Toggle AI Copilot panel"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 10px',
-                borderRadius: 5,
-                border: `1px solid ${isCopilotOpen ? BB.gold : BB.border}`,
-                background: isCopilotOpen ? 'rgba(201,162,75,0.18)' : 'transparent',
-                color: isCopilotOpen ? BB.gold : BB.muted,
-                fontSize: 11.5,
-                cursor: 'pointer',
-                transition: 'all 120ms ease',
-              }}
-            >
-              <Sparkles style={{ width: 12, height: 12 }} />
-              <span>Copilot</span>
             </button>
           )}
         </div>
@@ -1744,23 +1972,47 @@ export function ViewAsCodeStudio({
               }}
             >
               {codeLines.map((_, idx) => {
-                const isCurrent = cursorPos.line === idx + 1;
+                const lineNum  = idx + 1;
+                const isCurrent = cursorPos.line === lineNum;
+                const diag     = diagnosticsByLine.get(lineNum);
+                const diagColor = diag
+                  ? diag.severity === 'error'   ? '#EF4444'
+                  : diag.severity === 'warning' ? '#F59E0B'
+                  : '#818CF8'
+                  : null;
                 return (
                   <div
                     key={idx}
+                    title={diag?.message}
                     style={{
                       height: 22,
                       lineHeight: '22px',
                       textAlign: 'right',
-                      paddingRight: 12,
+                      paddingRight: 8,
                       fontSize: 12,
                       fontFamily: 'Consolas, Monaco, monospace',
-                      color: isCurrent ? BB.gold : '#5C5478',
+                      color: isCurrent ? BB.gold : diag ? diagColor! : '#5C5478',
                       fontWeight: isCurrent ? 700 : 400,
-                      background: isCurrent ? 'rgba(201,162,75,0.08)' : 'transparent',
+                      background: isCurrent
+                        ? 'rgba(201,162,75,0.08)'
+                        : diag?.severity === 'error'
+                        ? 'rgba(239,68,68,0.08)'
+                        : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      gap: 4,
+                      cursor: diag ? 'help' : 'default',
                     }}
                   >
-                    {idx + 1}
+                    {diag && (
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: diagColor!, flexShrink: 0,
+                        boxShadow: `0 0 4px ${diagColor}80`,
+                      }} />
+                    )}
+                    {lineNum}
                   </div>
                 );
               })}
@@ -1790,7 +2042,9 @@ export function ViewAsCodeStudio({
                 }}
               >
                 {codeLines.map((line, idx) => {
-                  const isCurrent = cursorPos.line === idx + 1;
+                  const lineNum   = idx + 1;
+                  const isCurrent = cursorPos.line === lineNum;
+                  const diag      = diagnosticsByLine.get(lineNum);
                   return (
                     <div
                       key={idx}
@@ -1798,7 +2052,18 @@ export function ViewAsCodeStudio({
                         height: 22,
                         lineHeight: '22px',
                         whiteSpace: 'pre',
-                        background: isCurrent ? 'rgba(255,255,255,0.02)' : 'transparent',
+                        background: diag?.severity === 'error'
+                          ? 'rgba(239,68,68,0.07)'
+                          : diag?.severity === 'warning'
+                          ? 'rgba(245,158,11,0.05)'
+                          : isCurrent
+                          ? 'rgba(255,255,255,0.02)'
+                          : 'transparent',
+                        borderLeft: diag?.severity === 'error'
+                          ? '2px solid rgba(239,68,68,0.6)'
+                          : diag?.severity === 'warning'
+                          ? '2px solid rgba(245,158,11,0.5)'
+                          : '2px solid transparent',
                       }}
                     >
                       {highlightPythonLine(line) ?? ' '}
@@ -1877,6 +2142,39 @@ export function ViewAsCodeStudio({
               {!isFileModified(currentFile) && generatedFiles.includes(currentFile) && (
                 <span style={{ color: BB.primaryLight }}>✦ Generated</span>
               )}
+              {/* Diagnostics & Linting Status */}
+              <button
+                onClick={() => {
+                  setBottomPanelOpen(true);
+                  setBottomTab('problems');
+                }}
+                title="View Problems (Inline & semantic diagnostics)"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: isLinting ? BB.gold : errorCount > 0 ? '#EF4444' : warnCount > 0 ? '#F59E0B' : BB.muted,
+                  cursor: 'pointer',
+                  padding: '1px 5px',
+                  borderRadius: 3,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  fontSize: 11,
+                  fontFamily: 'inherit',
+                }}
+              >
+                {isLinting ? (
+                  <>
+                    <Activity style={{ width: 11, height: 11 }} />
+                    <span>Checking…</span>
+                  </>
+                ) : (
+                  <>
+                    <TriangleAlert style={{ width: 11, height: 11 }} />
+                    <span>{errorCount} errors, {warnCount} warnings</span>
+                  </>
+                )}
+              </button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -1907,7 +2205,7 @@ export function ViewAsCodeStudio({
                   {execStatus === 'running' && '● Running'}
                   {execStatus === 'queued' && '⏳ Queued'}
                   {execStatus === 'completed' && `✓ Done${execDuration ? ` (${execDuration.toFixed(1)}s)` : ''}`}
-                  {execStatus === 'failed' && `✕ Failed (Exit ${execExitCode ?? 1})`}
+                  {execStatus === 'failed' && (execExitCode !== null ? `✕ Failed (Exit ${execExitCode})` : '✕ Unavailable')}
                   {execStatus === 'stopped' && '■ Stopped'}
                 </span>
               )}
@@ -2018,17 +2316,18 @@ export function ViewAsCodeStudio({
                     {tab === 'debug' && <Activity style={{ width: 12, height: 12 }} />}
                     <span>{tab}</span>
                     {tab === 'output' && outputLines.length > 0 && (
-                      <span
-                        style={{
-                          background: BB.primary,
-                          borderRadius: 8,
-                          padding: '0 5px',
-                          fontSize: 9.5,
-                          color: BB.text,
-                          fontWeight: 700,
-                        }}
-                      >
+                      <span style={{ background: BB.primary, borderRadius: 8, padding: '0 5px', fontSize: 9.5, color: BB.text, fontWeight: 700 }}>
                         {outputLines.length}
+                      </span>
+                    )}
+                    {tab === 'problems' && (errorCount + warnCount) > 0 && (
+                      <span style={{ background: errorCount > 0 ? '#EF4444' : '#F59E0B', borderRadius: 8, padding: '0 5px', fontSize: 9.5, color: '#fff', fontWeight: 700 }}>
+                        {errorCount + warnCount}
+                      </span>
+                    )}
+                    {tab === 'logs' && logEntries.length > 0 && (
+                      <span style={{ background: 'rgba(107,92,166,0.7)', borderRadius: 8, padding: '0 5px', fontSize: 9.5, color: BB.text, fontWeight: 700 }}>
+                        {logEntries.length}
                       </span>
                     )}
                   </button>
@@ -2138,279 +2437,211 @@ export function ViewAsCodeStudio({
                 )}
 
                 {bottomTab === 'problems' && (
-                  <div style={{ padding: '14px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'Consolas, Monaco, monospace' }}>
-                    {isValidSyntax === false ? (
-                      <span style={{ color: BB.error }}>✕ AST Syntax error detected in current script.</span>
+                  <div style={{ flex: 1, overflow: 'auto', fontSize: 11.5 }}>
+                    {allDiagnostics.length === 0 ? (
+                      <div style={{ padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 10, color: BB.muted }}>
+                        <span style={{ fontSize: 18 }}>✓</span>
+                        <div>
+                          <div style={{ color: BB.success, fontWeight: 600, marginBottom: 2 }}>No problems detected</div>
+                          <div style={{ fontSize: 10.5 }}>Static analysis passed. Run your code to check for runtime errors.</div>
+                        </div>
+                      </div>
                     ) : (
-                      <span style={{ color: BB.success }}>✓ No problems detected. Script syntax validated.</span>
+                      <div>
+                        {['error', 'warning', 'info'].map(sev => {
+                          const items = allDiagnostics.filter(d => d.severity === sev);
+                          if (items.length === 0) return null;
+                          const color = sev === 'error' ? '#EF4444' : sev === 'warning' ? '#F59E0B' : '#818CF8';
+                          const icon  = sev === 'error' ? '✕' : sev === 'warning' ? '⚠' : 'ℹ';
+                          return (
+                            <div key={sev}>
+                              <div style={{ padding: '6px 12px 3px', fontSize: 10, fontWeight: 700, color: BB.muted, textTransform: 'uppercase', letterSpacing: 0.8, borderBottom: `1px solid ${BB.border}` }}>
+                                {icon} {sev}s ({items.length})
+                              </div>
+                              {items.map((d, i) => (
+                                <div
+                                  key={i}
+                                  title={d.message}
+                                  onClick={() => {
+                                    // Jump editor to the line
+                                    if (editorRef.current) {
+                                      const lines = displayedCode.split('\n');
+                                      let offset = 0;
+                                      for (let j = 0; j < d.line - 1; j++) offset += lines[j].length + 1;
+                                      editorRef.current.focus();
+                                      editorRef.current.setSelectionRange(offset, offset + (lines[d.line - 1]?.length ?? 0));
+                                    }
+                                  }}
+                                  style={{
+                                    padding: '4px 12px 4px 16px',
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: 8,
+                                    cursor: 'pointer',
+                                    borderBottom: `1px solid ${BB.border}22`,
+                                    transition: 'background 80ms',
+                                    fontFamily: 'Consolas, Monaco, monospace',
+                                  }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                                >
+                                  <span style={{ color, flexShrink: 0, marginTop: 1 }}>{icon}</span>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <span style={{ color: BB.text }}>{d.message}</span>
+                                    <span style={{ color: BB.muted, marginLeft: 10, fontSize: 10.5 }}>
+                                      {currentFile}:{d.line}:{d.col}
+                                    </span>
+                                  </div>
+                                  <span style={{
+                                    fontSize: 9.5, padding: '1px 5px', borderRadius: 3,
+                                    background: d.source === 'runtime' ? 'rgba(239,68,68,0.15)' : 'rgba(107,92,166,0.2)',
+                                    color: d.source === 'runtime' ? '#EF4444' : BB.primaryLight,
+                                    flexShrink: 0,
+                                  }}>
+                                    {d.source}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 )}
 
                 {bottomTab === 'logs' && (
-                  <div style={{ padding: '14px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'Consolas, Monaco, monospace' }}>
-                    <div>[System] Studio active: {activeDatasetName}</div>
-                    <div>[System] Active file: {currentFile}</div>
-                    <div>[System] Algorithm: {canonicalAlgorithm} | Scaler: {canonicalScaler}</div>
+                  <div style={{ flex: 1, overflow: 'auto', fontFamily: 'Consolas, Monaco, monospace', fontSize: 11.5 }}>
+                    {logEntries.length === 0 ? (
+                      <div style={{ padding: '18px 20px', color: BB.muted }}>
+                        <div style={{ marginBottom: 4, fontWeight: 600 }}>No log entries yet</div>
+                        <div style={{ fontSize: 10.5 }}>Execution logs will appear here when you run your code (Ctrl+Enter).</div>
+                      </div>
+                    ) : (
+                      logEntries.map(entry => {
+                        const lvlColor = entry.level === 'error'  ? '#EF4444'
+                          : entry.level === 'warn'   ? '#F59E0B'
+                          : entry.level === 'system' ? BB.primaryLight
+                          : entry.level === 'info'   ? BB.success
+                          : BB.muted;
+                        const lvlTag = entry.level.toUpperCase().padEnd(6);
+                        return (
+                          <div
+                            key={entry.id}
+                            style={{
+                              padding: '2px 12px',
+                              display: 'flex',
+                              gap: 10,
+                              borderBottom: `1px solid ${BB.border}11`,
+                              lineHeight: 1.7,
+                            }}
+                          >
+                            <span style={{ color: '#5C5478', flexShrink: 0 }}>{entry.time}</span>
+                            <span style={{ color: lvlColor, flexShrink: 0, fontWeight: 700 }}>{lvlTag}</span>
+                            <span style={{
+                              color: entry.level === 'error' ? '#FCA5A5'
+                                : entry.level === 'warn' ? '#FDE68A'
+                                : '#D4D0C8',
+                              wordBreak: 'break-all',
+                              flex: 1,
+                            }}>{entry.message}</span>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                 )}
 
                 {bottomTab === 'debug' && (
-                  <div style={{ padding: '14px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'Consolas, Monaco, monospace' }}>
-                    <div>Execution ID: {execId || 'None'}</div>
-                    <div>Status: {execStatus}</div>
-                    <div>Duration: {execDuration ? `${execDuration.toFixed(2)}s` : 'N/A'}</div>
-                    <div>Exit Code: {execExitCode ?? 'N/A'}</div>
+                  <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px', fontSize: 11.5, fontFamily: 'Consolas, Monaco, monospace' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '4px 12px', lineHeight: 1.8 }}>
+                      {/* Execution metadata */}
+                      <span style={{ color: BB.muted }}>Execution ID</span>
+                      <span style={{ color: execId ? BB.primaryLight : BB.muted }}>{execId || '—'}</span>
+
+                      <span style={{ color: BB.muted }}>Status</span>
+                      <span style={{ color:
+                        execStatus === 'running'   ? BB.success
+                        : execStatus === 'completed' ? BB.success
+                        : execStatus === 'failed'    ? '#EF4444'
+                        : BB.muted
+                      }}>
+                        {execStatus === 'idle' ? '—' : execStatus}
+                      </span>
+
+                      <span style={{ color: BB.muted }}>Exit Code</span>
+                      <span style={{ color: execExitCode === 0 ? BB.success : execExitCode != null ? '#EF4444' : BB.muted }}>
+                        {execExitCode != null ? execExitCode : '—'}
+                      </span>
+
+                      <span style={{ color: BB.muted }}>Duration</span>
+                      <span style={{ color: BB.text }}>{execDuration != null ? `${execDuration.toFixed(2)}s` : '—'}</span>
+
+                      <span style={{ color: BB.muted }}>File</span>
+                      <span style={{ color: BB.text }}>{currentFile}</span>
+
+                      <span style={{ color: BB.muted }}>Lines</span>
+                      <span style={{ color: BB.text }}>{codeLines.length}</span>
+
+                      <span style={{ color: BB.muted }}>Dataset</span>
+                      <span style={{ color: BB.text }}>{dataset?.fileName || activeDatasetName || '—'}</span>
+
+                      <span style={{ color: BB.muted }}>Algorithm</span>
+                      <span style={{ color: BB.text }}>{canonicalAlgorithm || '—'}</span>
+
+                      {execArtifacts.length > 0 && (
+                        <>
+                          <span style={{ color: BB.muted }}>Artifacts</span>
+                          <span style={{ color: BB.success }}>{execArtifacts.join(', ')}</span>
+                        </>
+                      )}
+
+                      {runtimeDiagnostics.length > 0 && (
+                        <>
+                          <span style={{ color: BB.muted }}>Runtime Errors</span>
+                          <span style={{ color: '#EF4444' }}>{runtimeDiagnostics.length} error{runtimeDiagnostics.length !== 1 ? 's' : ''} detected</span>
+                        </>
+                      )}
+
+                      {allDiagnostics.length > 0 && (
+                        <>
+                          <span style={{ color: BB.muted }}>Diagnostics</span>
+                          <span style={{ color: BB.text }}>
+                            {errorCount > 0 && <span style={{ color: '#EF4444', marginRight: 8 }}>✕ {errorCount} error{errorCount !== 1 ? 's' : ''}</span>}
+                            {warnCount > 0 && <span style={{ color: '#F59E0B', marginRight: 8 }}>⚠ {warnCount} warning{warnCount !== 1 ? 's' : ''}</span>}
+                            {(allDiagnostics.length - errorCount - warnCount) > 0 && (
+                              <span style={{ color: '#818CF8' }}>ℹ {allDiagnostics.length - errorCount - warnCount} info</span>
+                            )}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           )}
         </div>
-
-        {/* ── RESIZE HANDLE: Center Workspace <-> AI Copilot ─────── */}
-        {isCopilotOpen && (
-          <div
-            onMouseDown={handleCopilotDragStart}
-            title="Drag left/right to resize AI Copilot"
-            style={{
-              width: 5,
-              flexShrink: 0,
-              cursor: 'col-resize',
-              background: isDraggingCopilot ? BB.gold : BB.border,
-              transition: 'background 120ms ease',
-              zIndex: 15,
-            }}
-          />
-        )}
-
-        {/* ── RIGHT: AI COPILOT DOCKED PANEL (Full height to bottom!) ─── */}
-        {isCopilotOpen && (
-          <aside
-            aria-label="AI Copilot Agent Drawer"
-            style={{
-              width: copilotWidth,
-              flexShrink: 0,
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              background: BB.surface,
-              overflow: 'hidden',
-              boxSizing: 'border-box',
-              zIndex: 20,
-            }}
-          >
-            {/* Copilot Header */}
-            <div
-              style={{
-                padding: '8px 12px',
-                borderBottom: `1px solid ${BB.border}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: BB.elevated,
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />
-                <span style={{ fontSize: 12, fontWeight: 700, color: BB.text }}>AI Copilot</span>
-                <span
-                  style={{
-                    fontSize: 9.5,
-                    fontWeight: 700,
-                    padding: '1px 5px',
-                    borderRadius: 3,
-                    background: 'rgba(75,59,124,0.4)',
-                    color: BB.primaryLight,
-                    border: `1px solid ${BB.border}`,
-                  }}
-                >
-                  AGENT
-                </span>
-              </div>
-              {onToggleCopilot && (
-                <button
-                  onClick={onToggleCopilot}
-                  title="Close Copilot"
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: BB.muted,
-                    cursor: 'pointer',
-                    padding: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
-                >
-                  <X style={{ width: 14, height: 14 }} />
-                </button>
-              )}
-            </div>
-
-            {/* Copilot Body (Scrollable messages + insights) */}
-            <div
-              style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: 12,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 10,
-              }}
-            >
-              {/* Insight Cards */}
-              {copilotMessages.map((msg) => (
-                <div
-                  key={msg.id}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: 6,
-                    background:
-                      msg.type === 'warning'
-                        ? 'rgba(245,158,11,0.08)'
-                        : msg.type === 'tip'
-                        ? 'rgba(201,162,75,0.08)'
-                        : 'rgba(75,59,124,0.12)',
-                    border: `1px solid ${
-                      msg.type === 'warning'
-                        ? 'rgba(245,158,11,0.25)'
-                        : msg.type === 'tip'
-                        ? 'rgba(201,162,75,0.25)'
-                        : BB.border
-                    }`,
-                    fontSize: 11,
-                    lineHeight: 1.5,
-                    color: BB.text,
-                  }}
-                >
-                  <div
-                    dangerouslySetInnerHTML={{
-                      __html: msg.text
-                        .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#C9A24B">$1</strong>')
-                        .replace(/`(.*?)`/g, '<code style="background:rgba(0,0,0,0.3);padding:1px 4px;border-radius:3px">$1</code>'),
-                    }}
-                  />
-                </div>
-              ))}
-
-              {/* Chat Thread */}
-              {copilotChat.map((chat) => (
-                <div
-                  key={chat.id}
-                  style={{
-                    alignSelf: chat.role === 'user' ? 'flex-end' : 'flex-start',
-                    maxWidth: '90%',
-                    padding: '8px 11px',
-                    borderRadius: 8,
-                    background: chat.role === 'user' ? BB.primary : BB.elevated,
-                    color: BB.text,
-                    fontSize: 11.5,
-                    lineHeight: 1.5,
-                    border: `1px solid ${chat.role === 'user' ? BB.primaryLight : BB.border}`,
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {chat.text}
-                </div>
-              ))}
-
-              {/* Suggestion Prompts */}
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ fontSize: 10, color: BB.muted, fontWeight: 700, letterSpacing: '0.05em' }}>
-                  SUGGESTED QUESTIONS
-                </span>
-                {[
-                  'Explain this pipeline configuration',
-                  'How to prevent data leakage?',
-                  'Suggest hyperparameters to tune',
-                  'Add cross-validation evaluation',
-                ].map((sug) => (
-                  <button
-                    key={sug}
-                    onClick={() => handleSendCopilotMessage(sug)}
-                    style={{
-                      textAlign: 'left',
-                      padding: '5px 8px',
-                      borderRadius: 5,
-                      background: 'rgba(107,92,166,0.1)',
-                      border: `1px solid ${BB.border}`,
-                      color: BB.muted,
-                      fontSize: 11,
-                      cursor: 'pointer',
-                      transition: 'all 120ms ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(107,92,166,0.22)';
-                      e.currentTarget.style.color = BB.text;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(107,92,166,0.1)';
-                      e.currentTarget.style.color = BB.muted;
-                    }}
-                  >
-                    • {sug}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Copilot Prompt Input (Fixed at bottom of panel) */}
-            <div
-              style={{
-                padding: '8px 10px',
-                borderTop: `1px solid ${BB.border}`,
-                background: BB.elevated,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                flexShrink: 0,
-              }}
-            >
-              <input
-                value={copilotInput}
-                onChange={(e) => setCopilotInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSendCopilotMessage();
-                }}
-                placeholder="Ask about this pipeline configuration..."
-                style={{
-                  flex: 1,
-                  background: BB.surface,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 6,
-                  padding: '6px 10px',
-                  color: BB.text,
-                  fontSize: 11.5,
-                  outline: 'none',
-                }}
-              />
-              <button
-                onClick={() => handleSendCopilotMessage()}
-                disabled={!copilotInput.trim()}
-                title="Send to Copilot"
-                style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 6,
-                  border: 'none',
-                  background: copilotInput.trim() ? BB.gold : BB.disabled,
-                  color: BB.base,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: copilotInput.trim() ? 'pointer' : 'default',
-                  transition: 'background 120ms ease',
-                }}
-              >
-                <Send style={{ width: 13, height: 13 }} />
-              </button>
-            </div>
-          </aside>
-        )}
       </div>
+    </div>
+
+      {/* ── RIGHT: AI COPILOT DOCKED PANEL (Unified Shared Component, docked right) ── */}
+      <AICopilotDrawer
+        isOpen={isCopilotOpen}
+        onToggle={onToggleCopilot || (() => {})}
+        messages={copilotMessages}
+        chatMessages={copilotChat}
+        onSendMessage={handleSendCopilotMessage}
+        suggestedQuestions={[
+          'Explain this pipeline configuration',
+          'How to prevent data leakage?',
+          'Suggest hyperparameters to tune',
+          'Add cross-validation evaluation',
+        ]}
+        placeholder="Ask about this pipeline configuration..."
+        title="AI Copilot"
+        badge="AGENT"
+      />
     </div>
   );
 }

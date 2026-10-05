@@ -416,7 +416,7 @@ function AppContent() {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            padding: 6,
+            padding: activeTab === 'code-studio' ? 0 : 6,
             width: '100%',
             height: 'calc(100vh - 48px)',
             boxSizing: 'border-box',

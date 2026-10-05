@@ -353,6 +353,24 @@ export interface FormatResponse {
   error:   string | null;
 }
 
+export interface DiagnosticItemResponse {
+  line:     number;
+  col:      number;
+  end_line: number;
+  end_col:  number;
+  severity: 'error' | 'warning' | 'info';
+  message:  string;
+  source:   'syntax' | 'pyflakes' | 'pep8' | 'runtime';
+  code?:    string | null;
+}
+
+export interface LintResponse {
+  diagnostics:   DiagnosticItemResponse[];
+  valid:         boolean;
+  error_count:   number;
+  warning_count: number;
+}
+
 export const CodeExecutionService = {
   /** Submit code for execution. Returns exec_id immediately. */
   execute: (payload: ExecuteRequest) =>
@@ -374,6 +392,13 @@ export const CodeExecutionService = {
     request<FormatResponse>('/code-execution/format', {
       method: 'POST',
       body: JSON.stringify({ code }),
+    }),
+
+  /** Lint Python code via server-side AST, pyflakes and PEP 8 analysis. */
+  lintCode: (code: string, filename: string = 'train.py') =>
+    request<LintResponse>('/code-execution/lint', {
+      method: 'POST',
+      body: JSON.stringify({ code, filename }),
     }),
 
   /**

@@ -62,6 +62,8 @@ def _detect_artifacts(sandbox: str) -> List[str]:
     return found
 
 
+MAX_STREAM_LINES = 5000
+
 async def _stream_output(
     stream: asyncio.StreamReader,
     buffer: List[str],
@@ -70,6 +72,11 @@ async def _stream_output(
 ) -> None:
     try:
         async for raw_line in stream:
+            if len(buffer) >= MAX_STREAM_LINES:
+                warning_msg = f"{prefix}[ML Playground] Output limit exceeded ({MAX_STREAM_LINES} lines capped)."
+                buffer.append(warning_msg)
+                await queue.put(warning_msg)
+                break
             line = raw_line.decode("utf-8", errors="replace").rstrip()
             tagged = f"{prefix}{line}" if prefix else line
             buffer.append(tagged)
@@ -122,10 +129,17 @@ async def _run_execution(
         await rec._queue.put(None)
         return
 
-    env = dict(os.environ)
+    # Clean, isolated execution environment: strip database credentials, tokens, secrets
+    _SENSITIVE_PREFIXES = ("DATABASE", "REDIS", "POSTGRES", "AWS", "SECRET", "JWT", "CELERY", "S3", "MINIO", "TOKEN", "API_KEY", "PASSWORD")
+    env = {
+        k: v for k, v in os.environ.items()
+        if not any(k.upper().startswith(p) for p in _SENSITIVE_PREFIXES)
+    }
     env.update(extra_env)
     env["PYTHONPATH"] = sandbox + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONUNBUFFERED"] = "1"
+    env["MLPG_SANDBOX"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
 
     stdout_lines: List[str] = []
     stderr_lines: List[str] = []
@@ -203,24 +217,47 @@ async def stop_execution(exec_id: str) -> bool:
 
 
 async def stream_execution(exec_id: str) -> AsyncGenerator[str, None]:
+    import json as _json
     rec = _EXECUTIONS.get(exec_id)
     if rec is None:
-        yield f"data: [ERROR] Execution {exec_id} not found.\n\n"
+        payload = _json.dumps({"type": "error", "error": f"Execution {exec_id} not found."})
+        yield f"data: {payload}\n\n"
         return
 
     while True:
         try:
             line = await asyncio.wait_for(rec._queue.get(), timeout=30)
         except asyncio.TimeoutError:
-            yield "data: [heartbeat]\n\n"
+            yield f"data: {_json.dumps({'type': 'heartbeat'})}\n\n"
             if rec.status not in ("queued", "running"):
                 break
             continue
 
         if line is None:
-            yield f"data: [DONE] status={rec.status}\n\n"
+            # Compute duration for the exit event
+            duration = None
+            if rec.started_at and rec.finished_at:
+                duration = round(rec.finished_at - rec.started_at, 2)
+            payload = _json.dumps({
+                "type": "exit",
+                "exit_code": rec.exit_code,
+                "status": rec.status,
+                "duration_seconds": duration,
+                "artifacts": rec.artifacts,
+            })
+            yield f"data: {payload}\n\n"
             break
-        yield f"data: {line}\n\n"
+
+        # Classify the line type based on prefix
+        if line.startswith("[stderr] "):
+            payload = _json.dumps({"type": "stderr", "data": line[9:]})
+        elif line.startswith("[ML Playground]"):
+            payload = _json.dumps({"type": "system", "data": line})
+        elif line.startswith("[ERROR]") or line.startswith("[Error]"):
+            payload = _json.dumps({"type": "error", "error": line})
+        else:
+            payload = _json.dumps({"type": "stdout", "data": line})
+        yield f"data: {payload}\n\n"
 
 
 def get_execution(exec_id: str) -> Optional[ExecutionRecord]:

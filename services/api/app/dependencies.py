@@ -147,6 +147,40 @@ async def get_current_active_user(
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
 
 
+async def get_current_user_optional(
+    request: Request,
+    db: DBSession,
+    bearer_token: Annotated[str | None, Depends(_bearer_scheme)] = None,
+    access_token_cookie: Annotated[str | None, Cookie(alias="access_token")] = None,
+) -> User | None:
+    """Resolve current user if authentication token is present and valid; otherwise None."""
+    raw = access_token_cookie or bearer_token or request.query_params.get("token")
+    if not raw:
+        return None
+    try:
+        payload = decode_access_token(raw)
+        user_id_str: str | None = payload.get("sub")
+        if not user_id_str:
+            return None
+        user_id = uuid.UUID(user_id_str)
+        if await is_token_blacklisted(raw):
+            return None
+        token_ver: int = payload.get("ver", 0)
+        current_ver = await get_user_token_version(str(user_id))
+        if token_ver < current_ver:
+            return None
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user and not user.is_active:
+            return None
+        return user
+    except Exception:
+        return None
+
+
+OptionalCurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
+
+
 # ── Admin-only gate ───────────────────────────────────────────────────────────
 
 _ADMIN_ROLES: frozenset[str] = frozenset({
