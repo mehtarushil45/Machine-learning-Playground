@@ -39,6 +39,12 @@ import {
   AlertCircle,
   HelpCircle,
   ArrowLeft,
+  UploadCloud,
+  FileSpreadsheet,
+  Download,
+  Search,
+  Sliders,
+  X,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails } from '../../services/jobService';
@@ -46,6 +52,7 @@ import {
   LocalDeploymentService,
   type LocalDeploymentResponse,
   type LocalPredictResponse,
+  type LocalBatchPredictResponse,
   type FeatureSchemaEntry,
   type PredictionHistoryItem,
 } from '../../services/localDeploymentService';
@@ -249,14 +256,24 @@ function ApiIntegrationTabs({
   endpointUrl: string;
   samplePayload: Record<string, any>;
 }) {
-  const [activeTab, setActiveTab] = useState<'curl' | 'python' | 'javascript'>('curl');
+  const [activeTab, setActiveTab] = useState<'curl' | 'curl-batch' | 'python' | 'python-batch' | 'javascript'>('curl');
   const [copied, setCopied] = useState(false);
+
+  const batchUrl = useMemo(() => endpointUrl.replace(/\/predict$/, '/predict-batch'), [endpointUrl]);
 
   const curlSnippet = useMemo(() => {
     return `curl -X POST "${endpointUrl}" \\
   -H "Content-Type: application/json" \\
   -d '${JSON.stringify({ inputs: samplePayload }, null, 2)}'`;
   }, [endpointUrl, samplePayload]);
+
+  const curlBatchSnippet = useMemo(() => {
+    return `# High-throughput Batch CSV Scoring (multipart)
+curl -X POST "${batchUrl}" \\
+  -F "file=@unseen_records.csv" \\
+  -F "batch_size=1000" \\
+  -F "return_probabilities=true"`;
+  }, [batchUrl]);
 
   const pythonSnippet = useMemo(() => {
     return `import requests
@@ -272,6 +289,18 @@ print("Prediction:", result["prediction"])
 print("Confidence:", result.get("confidence"))`;
   }, [endpointUrl, samplePayload]);
 
+  const pythonBatchSnippet = useMemo(() => {
+    return `import requests
+
+url = "${batchUrl}"
+with open("unseen_records.csv", "rb") as fh:
+    response = requests.post(url, files={"file": fh}, data={"batch_size": 1000})
+
+result = response.json()
+print(f"Scored {result['total_samples']} records in {result['latency_ms']:.1f}ms")
+print("Download enriched predictions CSV:", result["download_url"])`;
+  }, [batchUrl]);
+
   const jsSnippet = useMemo(() => {
     return `const res = await fetch("${endpointUrl}", {
   method: "POST",
@@ -285,7 +314,15 @@ console.log("Prediction:", data.prediction);`;
   }, [endpointUrl, samplePayload]);
 
   const activeSnippet =
-    activeTab === 'curl' ? curlSnippet : activeTab === 'python' ? pythonSnippet : jsSnippet;
+    activeTab === 'curl'
+      ? curlSnippet
+      : activeTab === 'curl-batch'
+      ? curlBatchSnippet
+      : activeTab === 'python'
+      ? pythonSnippet
+      : activeTab === 'python-batch'
+      ? pythonBatchSnippet
+      : jsSnippet;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(activeSnippet);
@@ -305,24 +342,29 @@ console.log("Prediction:", data.prediction);`;
           borderBottom: '1px solid #152540',
         }}
       >
-        <div style={{ display: 'flex', gap: 6 }}>
-          {(['curl', 'python', 'javascript'] as const).map((tab) => (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { id: 'curl', label: 'cURL (Single)' },
+            { id: 'curl-batch', label: 'cURL (Batch CSV)' },
+            { id: 'python', label: 'Python (Single)' },
+            { id: 'python-batch', label: 'Python (Batch CSV)' },
+            { id: 'javascript', label: 'Node.js' },
+          ].map((tab) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
               style={{
                 padding: '4px 10px',
                 borderRadius: 6,
                 border: 'none',
-                background: activeTab === tab ? '#1E293B' : 'transparent',
-                color: activeTab === tab ? '#00D4FF' : '#64748B',
+                background: activeTab === tab.id ? '#1E293B' : 'transparent',
+                color: activeTab === tab.id ? '#00D4FF' : '#64748B',
                 fontSize: 11,
                 fontWeight: 700,
                 cursor: 'pointer',
-                textTransform: 'uppercase',
               }}
             >
-              {tab === 'javascript' ? 'Node.js' : tab}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -340,6 +382,7 @@ console.log("Prediction:", data.prediction);`;
             fontSize: 11,
             fontWeight: 600,
             cursor: 'pointer',
+            flexShrink: 0,
           }}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
@@ -390,6 +433,19 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
   const [predLoading, setPredLoading] = useState(false);
   const [predResult, setPredResult] = useState<LocalPredictResponse | null>(null);
   const [predError, setPredError] = useState<string | null>(null);
+
+  // Console Mode: Single Record vs High-Throughput Batch Scoring
+  const [consoleMode, setConsoleMode] = useState<'single' | 'batch'>('single');
+
+  // Batch scoring state
+  const [batchFile, setBatchFile] = useState<File | null>(null);
+  const [batchSize, setBatchSize] = useState<number>(1000);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchResult, setBatchResult] = useState<LocalBatchPredictResponse | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const [batchSearchQuery, setBatchSearchQuery] = useState('');
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Real persisted prediction history
   const [history, setHistory] = useState<PredictionHistoryItem[]>([]);
@@ -687,6 +743,67 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
       setPredLoading(false);
     }
   };
+
+  const handleDownloadTemplate = async () => {
+    if (!deployment) return;
+    setTemplateLoading(true);
+    try {
+      await LocalDeploymentService.downloadTemplateCsv(
+        deployment.deployment_id,
+        `${deployment.algorithm || 'model'}_template.csv`
+      );
+      onShowToast?.('Template CSV Downloaded', 'Populate this CSV with your unseen data.', 'success');
+    } catch (err: any) {
+      onShowToast?.('Template Download Failed', err?.message || 'Error creating CSV template', 'error');
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const handleBatchPredict = async () => {
+    if (!deployment || !batchFile || !canPredict) return;
+    setBatchLoading(true);
+    setBatchError(null);
+    setBatchResult(null);
+
+    try {
+      const res = await LocalDeploymentService.predictBatch(
+        deployment.deployment_id,
+        batchFile,
+        batchSize,
+        true
+      );
+      setBatchResult(res);
+      setDeployment((prev) =>
+        prev
+          ? {
+              ...prev,
+              total_predictions: (prev.total_predictions || 0) + res.total_samples,
+            }
+          : prev
+      );
+      onShowToast?.(
+        'Batch Scoring Complete!',
+        `Successfully scored ${res.total_samples.toLocaleString()} records in ${res.latency_ms.toFixed(1)}ms.`,
+        'success'
+      );
+      await loadHistory(deployment.deployment_id);
+    } catch (err: any) {
+      const msg = err?.detail || err?.message || 'Batch prediction failed';
+      setBatchError(msg);
+      onShowToast?.('Batch Scoring Error', msg, 'error');
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleClearBatch = () => {
+    setBatchFile(null);
+    setBatchResult(null);
+    setBatchError(null);
+    setBatchSearchQuery('');
+  };
+
 
   /* ── Styles ── */
   const CARD_STYLE: React.CSSProperties = {
@@ -1240,46 +1357,101 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
 
                 {deployment && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button
-                      onClick={handleAutoFill}
-                      title="Load representative values from the training dataset"
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '6px 12px',
-                        borderRadius: 8,
-                        background: 'rgba(0, 245, 160, 0.08)',
-                        border: '1px solid rgba(0, 245, 160, 0.25)',
-                        color: '#00F5A0',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        transition: 'all 150ms ease',
-                      }}
-                    >
-                      <Sparkles size={13} /> Auto-Fill Example
-                    </button>
+                    {consoleMode === 'single' ? (
+                      <>
+                        <button
+                          onClick={handleAutoFill}
+                          title="Load representative values from the training dataset"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            background: 'rgba(0, 245, 160, 0.08)',
+                            border: '1px solid rgba(0, 245, 160, 0.25)',
+                            color: '#00F5A0',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            transition: 'all 150ms ease',
+                          }}
+                        >
+                          <Sparkles size={13} /> Auto-Fill Example
+                        </button>
 
-                    <button
-                      onClick={handleClear}
-                      title="Clear all fields"
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 5,
-                        padding: '6px 10px',
-                        borderRadius: 8,
-                        background: 'transparent',
-                        border: '1px solid #1E293B',
-                        color: '#64748B',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <RotateCcw size={12} /> Clear
-                    </button>
+                        <button
+                          onClick={handleClear}
+                          title="Clear all fields"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            padding: '6px 10px',
+                            borderRadius: 8,
+                            background: 'transparent',
+                            border: '1px solid #1E293B',
+                            color: '#64748B',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <RotateCcw size={12} /> Clear
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={handleDownloadTemplate}
+                          disabled={templateLoading}
+                          title="Download pre-formatted CSV template"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            background: 'rgba(0, 212, 255, 0.08)',
+                            border: '1px solid rgba(0, 212, 255, 0.25)',
+                            color: '#00D4FF',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: templateLoading ? 'wait' : 'pointer',
+                            transition: 'all 150ms ease',
+                          }}
+                        >
+                          {templateLoading ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <Download size={13} />
+                          )}
+                          Template CSV
+                        </button>
+
+                        {batchFile && (
+                          <button
+                            onClick={handleClearBatch}
+                            title="Clear selected CSV file"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 5,
+                              padding: '6px 10px',
+                              borderRadius: 8,
+                              background: 'transparent',
+                              border: '1px solid #1E293B',
+                              color: '#64748B',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <RotateCcw size={12} /> Reset
+                          </button>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -1293,8 +1465,60 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Feature Input Fields Grid */
                 <div>
+                  {/* Segmented Mode Selector */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      background: '#040914',
+                      border: '1px solid #142236',
+                      borderRadius: 10,
+                      padding: 3,
+                      marginBottom: 18,
+                      width: 'fit-content',
+                    }}
+                  >
+                    <button
+                      onClick={() => setConsoleMode('single')}
+                      style={{
+                        padding: '6px 16px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: consoleMode === 'single' ? '#1E293B' : 'transparent',
+                        color: consoleMode === 'single' ? '#00D4FF' : '#64748B',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        transition: 'all 150ms ease',
+                      }}
+                    >
+                      <Sliders size={13} /> Single Record Real-Time
+                    </button>
+                    <button
+                      onClick={() => setConsoleMode('batch')}
+                      style={{
+                        padding: '6px 16px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: consoleMode === 'batch' ? '#1E293B' : 'transparent',
+                        color: consoleMode === 'batch' ? '#00F5A0' : '#64748B',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        transition: 'all 150ms ease',
+                      }}
+                    >
+                      <FileSpreadsheet size={13} /> High-Throughput Batch CSV Scoring
+                    </button>
+                  </div>
+
                   {isStopped && (
                     <div
                       style={{
@@ -1311,126 +1535,439 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                       }}
                     >
                       <AlertCircle size={15} style={{ flexShrink: 0 }} />
-                      <span>Endpoint is currently <strong>STOPPED</strong>. Predictions are offline. Click <strong>Start Endpoint</strong> in the left panel to resume live serving.</span>
+                      <span>
+                        Endpoint is currently <strong>STOPPED</strong>. Predictions are offline. Click{' '}
+                        <strong>Start Endpoint</strong> in the left panel to resume live serving.
+                      </span>
                     </div>
                   )}
 
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
-                      gap: 14,
-                      marginBottom: 20,
-                    }}
-                  >
-                    {deployment.feature_columns.map((colName) => {
-                      const schema = deployment.input_schema[colName];
-                      const colType = schema?.type || 'numeric';
+                  {consoleMode === 'single' ? (
+                    /* ═══════════════════════════════════════════════════════════════════
+                        SINGLE RECORD PREDICTION FORM
+                       ═══════════════════════════════════════════════════════════════════ */
+                    <div>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+                          gap: 14,
+                          marginBottom: 20,
+                        }}
+                      >
+                        {deployment.feature_columns.map((colName) => {
+                          const schema = deployment.input_schema[colName];
+                          const colType = schema?.type || 'numeric';
 
-                      return (
+                          return (
+                            <div
+                              key={colName}
+                              style={{
+                                background: '#060D1A',
+                                border: '1px solid #142236',
+                                borderRadius: 10,
+                                padding: 12,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  marginBottom: 8,
+                                }}
+                              >
+                                <label
+                                  style={{
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: '#CBD5E1',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  }}
+                                  title={colName}
+                                >
+                                  {colName.replace(/_/g, ' ')}
+                                </label>
+                                <TypeBadge type={colType} />
+                              </div>
+
+                              <SmartFeatureInput
+                                name={colName}
+                                schema={schema}
+                                value={inputValues[colName] ?? ''}
+                                onChange={(val) => setInputValues((prev) => ({ ...prev, [colName]: val }))}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Prediction Error Alert */}
+                      {predError && (
                         <div
-                          key={colName}
                           style={{
-                            background: '#060D1A',
-                            border: '1px solid #142236',
+                            padding: '12px 16px',
                             borderRadius: 10,
-                            padding: 12,
+                            background: 'rgba(239, 68, 68, 0.08)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            color: '#FF4D6D',
+                            fontSize: 13,
+                            marginBottom: 16,
+                            display: 'flex',
+                            gap: 10,
+                            alignItems: 'center',
                           }}
                         >
-                          <div
+                          <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                          <div>{predError}</div>
+                        </div>
+                      )}
+
+                      {/* Run Prediction Button */}
+                      <button
+                        onClick={handlePredict}
+                        disabled={predLoading || !canPredict}
+                        style={{
+                          width: '100%',
+                          padding: '12px 20px',
+                          borderRadius: 10,
+                          border: 'none',
+                          background: canPredict
+                            ? 'linear-gradient(135deg, #00D4FF, #00F5A0)'
+                            : '#1E293B',
+                          color: canPredict ? '#08111E' : '#64748B',
+                          fontWeight: 800,
+                          fontSize: 14,
+                          cursor: predLoading ? 'wait' : !canPredict ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8,
+                          boxShadow: canPredict ? '0 0 20px rgba(0,245,160,0.18)' : 'none',
+                          transition: 'all 150ms ease',
+                        }}
+                      >
+                        {predLoading ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" /> Executing Prediction…
+                          </>
+                        ) : isStopped ? (
+                          <>
+                            <Square size={15} /> Endpoint Stopped — Start to Predict
+                          </>
+                        ) : (
+                          <>
+                            <Play size={16} /> Run Live Prediction
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ) : (
+                    /* ═══════════════════════════════════════════════════════════════════
+                        HIGH-THROUGHPUT BATCH CSV SCORING INTERFACE
+                       ═══════════════════════════════════════════════════════════════════ */
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      {/* Requirements Banner */}
+                      <div
+                        style={{
+                          background: '#040A14',
+                          border: '1px solid #142236',
+                          borderRadius: 10,
+                          padding: '14px 16px',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: 16,
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#F1F5F9', marginBottom: 4 }}>
+                            Batch Inference Schema Requirements
+                          </div>
+                          <div style={{ fontSize: 12, color: '#64748B', lineHeight: 1.5, marginBottom: 10 }}>
+                            Upload an unseen CSV file containing the {deployment.feature_columns.length} feature columns required by this model. Predictions and confidence distributions will be computed in memory and returned as a downloadable enriched CSV.
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {deployment.feature_columns.map((col) => (
+                              <span
+                                key={col}
+                                style={{
+                                  fontFamily: 'var(--font-mono, monospace)',
+                                  fontSize: 11,
+                                  padding: '2px 8px',
+                                  borderRadius: 4,
+                                  background: '#0A1424',
+                                  border: '1px solid #1A2E4C',
+                                  color: '#94A3B8',
+                                }}
+                              >
+                                {col}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleDownloadTemplate}
+                          disabled={templateLoading}
+                          title="Download sample CSV populated with correct column names"
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '8px 14px',
+                            borderRadius: 8,
+                            background: 'rgba(0, 212, 255, 0.08)',
+                            border: '1px solid rgba(0, 212, 255, 0.25)',
+                            color: '#00D4FF',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: templateLoading ? 'wait' : 'pointer',
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {templateLoading ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <Download size={13} />
+                          )}
+                          Template CSV
+                        </button>
+                      </div>
+
+                      {/* Drag & Drop Upload Zone */}
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setIsDragOver(true);
+                        }}
+                        onDragLeave={() => setIsDragOver(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setIsDragOver(false);
+                          const file = e.dataTransfer.files?.[0];
+                          if (file) {
+                            if (!file.name.toLowerCase().endsWith('.csv')) {
+                              onShowToast?.('Invalid File', 'Only CSV files are supported for batch scoring.', 'error');
+                              return;
+                            }
+                            setBatchFile(file);
+                            setBatchResult(null);
+                            setBatchError(null);
+                          }
+                        }}
+                        onClick={() => {
+                          const input = document.getElementById('batch-csv-upload-input') as HTMLInputElement;
+                          if (input) input.click();
+                        }}
+                        style={{
+                          border: `2px dashed ${isDragOver ? '#00F5A0' : batchFile ? '#00D4FF' : '#1A2E4C'}`,
+                          borderRadius: 12,
+                          padding: '24px 20px',
+                          textAlign: 'center',
+                          background: isDragOver ? 'rgba(0, 245, 160, 0.04)' : '#040912',
+                          cursor: 'pointer',
+                          transition: 'all 150ms ease',
+                        }}
+                      >
+                        <input
+                          id="batch-csv-upload-input"
+                          type="file"
+                          accept=".csv"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              setBatchFile(file);
+                              setBatchResult(null);
+                              setBatchError(null);
+                            }
+                          }}
+                        />
+
+                        {batchFile ? (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+                            <div
+                              style={{
+                                width: 44,
+                                height: 44,
+                                borderRadius: 10,
+                                background: 'rgba(0, 245, 160, 0.1)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#00F5A0',
+                              }}
+                            >
+                              <FileSpreadsheet size={24} />
+                            </div>
+                            <div style={{ textAlign: 'left' }}>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: '#F1F5F9' }}>
+                                {batchFile.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                                {(batchFile.size / 1024).toFixed(1)} KB · Ready for scoring
+                              </div>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleClearBatch();
+                              }}
+                              title="Remove file"
+                              style={{
+                                background: 'rgba(255, 255, 255, 0.05)',
+                                border: '1px solid #1E293B',
+                                borderRadius: 6,
+                                color: '#94A3B8',
+                                padding: '6px',
+                                cursor: 'pointer',
+                                marginLeft: 12,
+                              }}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                            <div
+                              style={{
+                                width: 48,
+                                height: 48,
+                                borderRadius: 12,
+                                background: 'rgba(0, 212, 255, 0.08)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#00D4FF',
+                              }}
+                            >
+                              <UploadCloud size={24} />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: '#E2E8F0' }}>
+                                Drag & drop CSV file here, or click to browse
+                              </div>
+                              <div style={{ fontSize: 12, color: '#64748B', marginTop: 4 }}>
+                                Supports datasets up to 100,000 records (.csv format)
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Batch Processing Settings */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 16px',
+                          background: '#040A14',
+                          borderRadius: 8,
+                          border: '1px solid #142236',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 600 }}>Chunk Processing Size:</span>
+                          <select
+                            value={batchSize}
+                            onChange={(e) => setBatchSize(Number(e.target.value))}
                             style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              marginBottom: 8,
+                              background: '#081220',
+                              border: '1px solid #1E293B',
+                              color: '#00D4FF',
+                              borderRadius: 6,
+                              padding: '4px 8px',
+                              fontSize: 12,
+                              fontFamily: 'var(--font-mono, monospace)',
+                              outline: 'none',
+                              cursor: 'pointer',
                             }}
                           >
-                            <label
-                              style={{
-                                fontSize: 12,
-                                fontWeight: 700,
-                                color: '#CBD5E1',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                              }}
-                              title={colName}
-                            >
-                              {colName.replace(/_/g, ' ')}
-                            </label>
-                            <TypeBadge type={colType} />
-                          </div>
-
-                          <SmartFeatureInput
-                            name={colName}
-                            schema={schema}
-                            value={inputValues[colName] ?? ''}
-                            onChange={(val) => setInputValues((prev) => ({ ...prev, [colName]: val }))}
-                          />
+                            <option value={500}>500 rows / chunk</option>
+                            <option value={1000}>1,000 rows / chunk</option>
+                            <option value={2500}>2,500 rows / chunk</option>
+                            <option value={5000}>5,000 rows / chunk</option>
+                          </select>
                         </div>
-                      );
-                    })}
-                  </div>
 
-                  {/* Prediction Error Alert */}
-                  {predError && (
-                    <div
-                      style={{
-                        padding: '12px 16px',
-                        borderRadius: 10,
-                        background: 'rgba(239, 68, 68, 0.08)',
-                        border: '1px solid rgba(239, 68, 68, 0.3)',
-                        color: '#FF4D6D',
-                        fontSize: 13,
-                        marginBottom: 16,
-                        display: 'flex',
-                        gap: 10,
-                        alignItems: 'center',
-                      }}
-                    >
-                      <AlertCircle size={16} style={{ flexShrink: 0 }} />
-                      <div>{predError}</div>
+                        <div style={{ fontSize: 11, color: '#475569' }}>
+                          In-memory vectorized evaluation with streaming CSV export
+                        </div>
+                      </div>
+
+                      {/* Batch Error Alert */}
+                      {batchError && (
+                        <div
+                          style={{
+                            padding: '12px 16px',
+                            borderRadius: 10,
+                            background: 'rgba(239, 68, 68, 0.08)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            color: '#FF4D6D',
+                            fontSize: 13,
+                            display: 'flex',
+                            gap: 10,
+                            alignItems: 'center',
+                          }}
+                        >
+                          <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                          <div>{batchError}</div>
+                        </div>
+                      )}
+
+                      {/* Execute Batch Scoring Button */}
+                      <button
+                        onClick={handleBatchPredict}
+                        disabled={batchLoading || !batchFile || !canPredict}
+                        style={{
+                          width: '100%',
+                          padding: '13px 20px',
+                          borderRadius: 10,
+                          border: 'none',
+                          background:
+                            canPredict && batchFile && !batchLoading
+                              ? 'linear-gradient(135deg, #00D4FF, #00F5A0)'
+                              : '#1E293B',
+                          color: canPredict && batchFile && !batchLoading ? '#08111E' : '#64748B',
+                          fontWeight: 800,
+                          fontSize: 14,
+                          cursor: batchLoading ? 'wait' : !canPredict || !batchFile ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8,
+                          boxShadow:
+                            canPredict && batchFile && !batchLoading
+                              ? '0 0 20px rgba(0, 245, 160, 0.18)'
+                              : 'none',
+                          transition: 'all 150ms ease',
+                        }}
+                      >
+                        {batchLoading ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" /> Scoring {batchFile?.name} in memory…
+                          </>
+                        ) : isStopped ? (
+                          <>
+                            <Square size={15} /> Endpoint Stopped — Start to Score
+                          </>
+                        ) : !batchFile ? (
+                          <>
+                            <UploadCloud size={16} /> Select CSV File to Score
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={16} /> Execute High-Throughput Batch Scoring
+                          </>
+                        )}
+                      </button>
                     </div>
                   )}
-
-                  {/* Run Prediction Button */}
-                  <button
-                    onClick={handlePredict}
-                    disabled={predLoading || !canPredict}
-                    style={{
-                      width: '100%',
-                      padding: '12px 20px',
-                      borderRadius: 10,
-                      border: 'none',
-                      background: canPredict
-                        ? 'linear-gradient(135deg, #00D4FF, #00F5A0)'
-                        : '#1E293B',
-                      color: canPredict ? '#08111E' : '#64748B',
-                      fontWeight: 800,
-                      fontSize: 14,
-                      cursor: predLoading ? 'wait' : !canPredict ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      boxShadow: canPredict ? '0 0 20px rgba(0,245,160,0.18)' : 'none',
-                      transition: 'all 150ms ease',
-                    }}
-                  >
-                    {predLoading ? (
-                      <>
-                        <Loader2 size={16} className="animate-spin" /> Executing Prediction…
-                      </>
-                    ) : isStopped ? (
-                      <>
-                        <Square size={15} /> Endpoint Stopped — Start to Predict
-                      </>
-                    ) : (
-                      <>
-                        <Play size={16} /> Run Live Prediction
-                      </>
-                    )}
-                  </button>
                 </div>
               )}
             </div>
@@ -1568,6 +2105,286 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                       </div>
                     </div>
                   )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── Batch CSV Scoring Results Panel ── */}
+            <AnimatePresence>
+              {consoleMode === 'batch' && batchResult && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  style={{
+                    ...CARD_STYLE,
+                    background: 'rgba(0, 245, 160, 0.03)',
+                    border: '1px solid rgba(0, 245, 160, 0.35)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: 16,
+                      flexWrap: 'wrap',
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <CheckCircle2 size={18} style={{ color: '#00F5A0' }} />
+                      <span style={{ fontSize: 13, fontWeight: 800, color: '#00F5A0', letterSpacing: '0.04em' }}>
+                        BATCH SCORING COMPLETED
+                      </span>
+                      <span
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 6,
+                          background: '#050D1A',
+                          color: '#64748B',
+                          fontFamily: 'var(--font-mono, monospace)',
+                          fontSize: 11,
+                        }}
+                      >
+                        {new Date(batchResult.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+
+                    {batchResult.download_url && (
+                      <a
+                        href={batchResult.download_url}
+                        download
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 7,
+                          padding: '7px 16px',
+                          borderRadius: 8,
+                          background: 'linear-gradient(135deg, #00D4FF, #00F5A0)',
+                          color: '#08111E',
+                          fontWeight: 800,
+                          fontSize: 12,
+                          textDecoration: 'none',
+                          boxShadow: '0 0 15px rgba(0, 245, 160, 0.25)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Download size={14} /> Download Enriched CSV
+                      </a>
+                    )}
+                  </div>
+
+                  {/* Summary Metric Tiles */}
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                      gap: 12,
+                      marginBottom: 20,
+                    }}
+                  >
+                    <div
+                      style={{
+                        background: '#040A14',
+                        border: '1px solid #14243B',
+                        borderRadius: 10,
+                        padding: '12px 14px',
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                        Records Scored
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 900, color: '#FFFFFF', marginTop: 4 }}>
+                        {batchResult.total_samples.toLocaleString()}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#040A14',
+                        border: '1px solid #14243B',
+                        borderRadius: 10,
+                        padding: '12px 14px',
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                        Batch Latency
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 900, color: '#00D4FF', marginTop: 4 }}>
+                        {batchResult.latency_ms.toFixed(1)} <span style={{ fontSize: 12, fontWeight: 600 }}>ms</span>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#040A14',
+                        border: '1px solid #14243B',
+                        borderRadius: 10,
+                        padding: '12px 14px',
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                        Throughput
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 900, color: '#00F5A0', marginTop: 4 }}>
+                        {Math.round((batchResult.total_samples / Math.max(batchResult.latency_ms, 1)) * 1000).toLocaleString()}{' '}
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#64748B' }}>row/s</span>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#040A14',
+                        border: '1px solid #14243B',
+                        borderRadius: 10,
+                        padding: '12px 14px',
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                        Avg Confidence
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 900, color: '#A855F7', marginTop: 4 }}>
+                        {batchResult.avg_confidence != null ? `${(batchResult.avg_confidence * 100).toFixed(1)}%` : 'N/A'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Class Distribution (if classification) */}
+                  {batchResult.class_distribution && Object.keys(batchResult.class_distribution).length > 0 && (
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', marginBottom: 10 }}>
+                        Predicted Class Distribution
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {Object.entries(batchResult.class_distribution)
+                          .sort(([, a], [, b]) => b - a)
+                          .map(([cls, count]) => {
+                            const pct = ((count / Math.max(batchResult.total_samples, 1)) * 100).toFixed(1);
+                            return (
+                              <div key={cls}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4, color: '#CBD5E1' }}>
+                                  <span>{cls}</span>
+                                  <span style={{ fontFamily: 'var(--font-mono, monospace)', color: '#94A3B8' }}>
+                                    {count.toLocaleString()} ({pct}%)
+                                  </span>
+                                </div>
+                                <div style={{ height: 6, borderRadius: 99, background: '#0D1B2E', overflow: 'hidden' }}>
+                                  <div
+                                    style={{
+                                      height: '100%',
+                                      width: `${pct}%`,
+                                      borderRadius: 99,
+                                      background: 'linear-gradient(90deg, #00D4FF, #00F5A0)',
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Scored Predictions Preview Table */}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
+                        Prediction Sample Preview (First {batchResult.predictions_preview.length} Rows)
+                      </div>
+                      <div style={{ position: 'relative', width: 200 }}>
+                        <Search size={13} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#64748B' }} />
+                        <input
+                          type="text"
+                          value={batchSearchQuery}
+                          onChange={(e) => setBatchSearchQuery(e.target.value)}
+                          placeholder="Filter preview…"
+                          style={{
+                            width: '100%',
+                            background: '#040A14',
+                            border: '1px solid #1E293B',
+                            borderRadius: 6,
+                            padding: '4px 8px 4px 26px',
+                            color: '#E2E8F0',
+                            fontSize: 11,
+                            outline: 'none',
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: '#040A14',
+                        border: '1px solid #142236',
+                        borderRadius: 8,
+                        maxHeight: 280,
+                        overflowY: 'auto',
+                      }}
+                    >
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #142236', background: '#07101E', color: '#64748B', fontSize: 11 }}>
+                            <th style={{ padding: '8px 12px', fontWeight: 700, width: 60 }}>#</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 700 }}>PREDICTION</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 700, width: 120 }}>CONFIDENCE</th>
+                            <th style={{ padding: '8px 12px', fontWeight: 700 }}>PROBABILITIES</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {batchResult.predictions_preview
+                            .filter((row) =>
+                              !batchSearchQuery
+                                ? true
+                                : String(row.prediction).toLowerCase().includes(batchSearchQuery.toLowerCase())
+                            )
+                            .map((row) => (
+                              <tr
+                                key={row.row_index}
+                                style={{
+                                  borderBottom: '1px solid #0D1B2E',
+                                  transition: 'background 100ms ease',
+                                }}
+                              >
+                                <td style={{ padding: '7px 12px', fontFamily: 'var(--font-mono, monospace)', color: '#475569' }}>
+                                  {row.row_index}
+                                </td>
+                                <td style={{ padding: '7px 12px', fontWeight: 700, color: '#00F5A0' }}>
+                                  {String(row.prediction)}
+                                </td>
+                                <td style={{ padding: '7px 12px', fontFamily: 'var(--font-mono, monospace)', color: '#CBD5E1' }}>
+                                  {row.confidence != null ? `${(row.confidence * 100).toFixed(1)}%` : '—'}
+                                </td>
+                                <td style={{ padding: '7px 12px' }}>
+                                  {row.probabilities ? (
+                                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                      {Object.entries(row.probabilities).map(([c, p]) => (
+                                        <span
+                                          key={c}
+                                          style={{
+                                            fontSize: 10,
+                                            padding: '1px 6px',
+                                            borderRadius: 4,
+                                            background: '#091526',
+                                            border: '1px solid #14243C',
+                                            color: '#94A3B8',
+                                            fontFamily: 'var(--font-mono, monospace)',
+                                          }}
+                                        >
+                                          {c}: {(p * 100).toFixed(0)}%
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span style={{ color: '#475569', fontSize: 11 }}>—</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

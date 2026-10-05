@@ -121,6 +121,28 @@ export interface ModelVersionOption {
   is_current: boolean;
 }
 
+export interface BatchPredictionPreviewRow {
+  row_index: number;
+  prediction: any;
+  confidence?: number | null;
+  probabilities?: Record<string, number> | null;
+}
+
+export interface LocalBatchPredictResponse {
+  deployment_id: string;
+  total_samples: number;
+  successful_predictions: number;
+  failed_predictions: number;
+  predictions_preview: BatchPredictionPreviewRow[];
+  class_distribution?: Record<string, number> | null;
+  avg_confidence?: number | null;
+  latency_ms: number;
+  download_url?: string | null;
+  status: string;
+  timestamp: string;
+}
+
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -200,4 +222,51 @@ export const LocalDeploymentService = {
   /** List deployments created from a specific training job. */
   listForJob: (jobId: string): Promise<LocalDeploymentResponse[]> =>
     request<LocalDeploymentResponse[]>(`/jobs/${jobId}/local-deployments`),
+
+  /** Execute high-throughput batch scoring from an uploaded CSV file. */
+  predictBatch: (
+    deploymentId: string,
+    file: File,
+    batchSize = 1000,
+    returnProbabilities = true
+  ): Promise<LocalBatchPredictResponse> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('batch_size', String(batchSize));
+    formData.append('return_probabilities', String(returnProbabilities));
+    return request<LocalBatchPredictResponse>(`/local-deployments/${deploymentId}/predict-batch`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+
+  /** Execute batch prediction with a list of JSON records. */
+  predictBatchJson: (
+    deploymentId: string,
+    data: Record<string, any>[],
+    batchSize = 1000
+  ): Promise<LocalBatchPredictResponse> =>
+    request<LocalBatchPredictResponse>(`/local-deployments/${deploymentId}/predict-batch-json`, {
+      method: 'POST',
+      body: JSON.stringify({ data, batch_size: batchSize, return_probabilities: true }),
+    }),
+
+  /** Download pre-formatted template CSV for a deployment. */
+  downloadTemplateCsv: async (deploymentId: string, filename = 'template.csv'): Promise<void> => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const res = await fetch(`/api/v1/local-deployments/${deploymentId}/template-csv`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error('Failed to generate template CSV');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
 };
+

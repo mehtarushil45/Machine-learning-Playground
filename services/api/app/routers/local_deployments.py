@@ -23,10 +23,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 
 from app.dependencies import CurrentUser, DBSession
 from app.schemas.local_deployment import (
+    LocalBatchPredictRequest,
+    LocalBatchPredictResponse,
     LocalDeploymentCreate,
     LocalDeploymentRedeploy,
     LocalDeploymentResponse,
@@ -200,6 +203,83 @@ async def predict_local(
         owner_id=str(current_user.id),
         db=db,
     )
+
+
+@router.post(
+    "/{deployment_id}/predict-batch",
+    response_model=LocalBatchPredictResponse,
+    summary="Run batch CSV scoring against a local deployment",
+)
+async def predict_batch_local(
+    deployment_id: str,
+    file: UploadFile = File(..., description="CSV file containing feature records"),
+    batch_size: int = Form(1000, description="Processing batch size"),
+    return_probabilities: bool = Form(True, description="Compute class probabilities"),
+    current_user: CurrentUser = None,
+    db: DBSession = None,
+) -> LocalBatchPredictResponse:
+    """Execute high-throughput batch scoring from an uploaded CSV file."""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Batch upload must be a valid .csv file.",
+        )
+    content = await file.read()
+    return await svc.predict_batch_local(
+        deployment_id,
+        data=content,
+        owner_id=str(current_user.id),
+        db=db,
+        batch_size=batch_size,
+        return_probabilities=return_probabilities,
+    )
+
+
+@router.post(
+    "/{deployment_id}/predict-batch-json",
+    response_model=LocalBatchPredictResponse,
+    summary="Run batch JSON scoring against a local deployment",
+)
+async def predict_batch_json_local(
+    deployment_id: str,
+    payload: LocalBatchPredictRequest,
+    current_user: CurrentUser = None,
+    db: DBSession = None,
+) -> LocalBatchPredictResponse:
+    """Execute batch inference for a list of JSON feature records."""
+    return await svc.predict_batch_local(
+        deployment_id,
+        data=payload.data,
+        owner_id=str(current_user.id),
+        db=db,
+        batch_size=payload.batch_size or 1000,
+        return_probabilities=payload.return_probabilities if payload.return_probabilities is not None else True,
+    )
+
+
+@router.get(
+    "/{deployment_id}/template-csv",
+    summary="Download template CSV for batch scoring",
+)
+async def get_template_csv(
+    deployment_id: str,
+    current_user: CurrentUser = None,
+    db: DBSession = None,
+) -> Response:
+    """Download a pre-formatted template CSV populated with the required feature headers and sample rows."""
+    csv_text = await svc.generate_template_csv(
+        deployment_id,
+        owner_id=str(current_user.id),
+        db=db,
+    )
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="template_{deployment_id[:8]}.csv"',
+        },
+    )
+
 
 
 @router.get(

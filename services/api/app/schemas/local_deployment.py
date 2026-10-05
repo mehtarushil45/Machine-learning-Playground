@@ -129,3 +129,28 @@ class ModelVersionOption(BaseModel):
     accuracy: Optional[float] = None
     f1: Optional[float] = None
     is_current: bool = False
+
+
+class LocalBatchPredictRequest(BaseModel):
+    """Batch prediction request via JSON record collection."""
+
+    data: List[Dict[str, Any]] = Field(..., description="List of feature name -> value dicts.")
+    batch_size: Optional[int] = Field(1000, ge=1, le=10000, description="Processing chunk batch size")
+    return_probabilities: Optional[bool] = Field(True, description="Compute probability distributions for classification")
+
+
+class LocalBatchPredictResponse(BaseModel):
+    """Batch prediction outcome summary returned from a local deployment."""
+
+    deployment_id: str
+    total_samples: int
+    successful_predictions: int
+    failed_predictions: int = 0
+    predictions_preview: List[Dict[str, Any]] = Field(default_factory=list, description="First N predictions for preview")
+    class_distribution: Optional[Dict[str, int]] = Field(None, description="Frequency per predicted class")
+    avg_confidence: Optional[float] = Field(None, description="Average prediction confidence")
+    latency_ms: float
+    download_url: Optional[str] = Field(None, description="URL to download the full enriched CSV")
+    status: str = "SUCCESS"
+    timestamp: str
+

@@ -30,10 +30,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.local_deployment import LocalDeployment, LocalDeploymentStatus
 from app.models.local_prediction_history import LocalPredictionHistory
 from app.schemas.local_deployment import (
+    LocalBatchPredictResponse,
     LocalDeploymentCreate,
     LocalDeploymentRedeploy,
     LocalDeploymentResponse,
-    LocalDeploymentUpdate,
     LocalPredictRequest,
     LocalPredictResponse,
     ModelVersionOption,
@@ -86,12 +86,10 @@ def _build_input_schema(
     import pandas as pd
     cat_cols: set = set()
     categories_map: Dict[str, List[str]] = {}
-    num_cols: set = set()
     bool_cols: set = set()
 
     # 1. Introspect loaded model container if available
     if loaded_model:
-        num_cols = set(getattr(loaded_model, "numeric_columns", []))
         cat_cols = set(getattr(loaded_model, "categorical_columns", []))
         bool_cols = set(getattr(loaded_model, "boolean_columns", []))
         categories_map = dict(getattr(loaded_model, "categories_map", {}))
@@ -1025,3 +1023,160 @@ async def list_available_versions(
         )
 
     return options
+
+
+async def predict_batch_local(
+    deployment_id: str,
+    data: Any,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+    batch_size: int = 1000,
+    return_probabilities: bool = True,
+) -> LocalBatchPredictResponse:
+    """Execute high-throughput batch predictions against a local deployment.
+
+    Accepts raw CSV bytes, DataFrame, or List[Dict[str, Any]].
+    Saves predictions to a downloadable enriched CSV and logs performance telemetry.
+    """
+    from collections import Counter
+    from app.ml.inference_engine import (
+        predict_batch,
+        ModelNotFoundError,
+        InferenceValidationError,
+    )
+
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    # 1. State check: Must be RUNNING or READY
+    if dep.status not in (LocalDeploymentStatus.RUNNING.value, "READY"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Deployment '{deployment_id}' is currently {dep.status}. "
+                f"Cannot run batch predictions. Please start the deployment first."
+            ),
+        )
+
+    # 2. Run inference via inference_engine
+    try:
+        res = predict_batch(
+            data=data,
+            model_id=dep.model_id,
+            return_probabilities=return_probabilities,
+            batch_size=batch_size,
+            save_csv=True,
+        )
+    except ModelNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Model artifact unavailable for batch inference: {exc}",
+        )
+    except InferenceValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Batch input validation failed: {exc}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch inference failed: {exc}",
+        )
+
+    total_samples = res.get("total_samples", 0)
+    successful = res.get("successful_predictions", 0)
+    failed = res.get("failed_predictions", 0)
+    all_preds = res.get("predictions", [])
+    latency_ms = res.get("latency_ms", 0.0)
+    download_url = res.get("csv_download_url")
+
+    # 3. Build preview (first 50)
+    preview: List[Dict[str, Any]] = []
+    for idx, item in enumerate(all_preds[:50]):
+        preview.append({
+            "row_index": idx + 1,
+            "prediction": item.get("prediction"),
+            "confidence": item.get("confidence"),
+            "probabilities": item.get("probabilities"),
+        })
+
+    # 4. Class distribution for classification
+    class_distribution: Optional[Dict[str, int]] = None
+    if "classification" in (dep.problem_type or "").lower() and all_preds:
+        class_distribution = dict(Counter(str(item.get("prediction")) for item in all_preds))
+
+    # 5. Average confidence
+    confidences = [item.get("confidence") for item in all_preds if item.get("confidence") is not None]
+    avg_conf = float(np.mean(confidences)) if confidences else None
+
+    # 6. Update deployment telemetry and logs
+    dep.total_predictions = (dep.total_predictions or 0) + total_samples
+    log_msg = f"Batch scoring: {total_samples} samples scored in {latency_ms:.1f}ms ({successful} successful)"
+    current_logs = list(dep.logs or [])
+    current_logs.append(_log_entry(log_msg, event="BATCH_PREDICTION_COMPLETED"))
+    dep.logs = current_logs[-100:]
+
+    await db.commit()
+    await db.refresh(dep)
+
+    return LocalBatchPredictResponse(
+        deployment_id=str(dep.id),
+        total_samples=total_samples,
+        successful_predictions=successful,
+        failed_predictions=failed,
+        predictions_preview=preview,
+        class_distribution=class_distribution,
+        avg_confidence=round(avg_conf, 4) if avg_conf is not None else None,
+        latency_ms=round(latency_ms, 2),
+        download_url=download_url,
+        status="SUCCESS",
+        timestamp=_ts(),
+    )
+
+
+async def generate_template_csv(
+    deployment_id: str,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+) -> str:
+    """Generate a template CSV string containing required feature columns and sample values."""
+    import io
+    import pandas as pd
+
+    dep = await _get_deployment(deployment_id, db)
+    _assert_owner(dep, owner_id)
+
+    schema, sample_inputs = _build_input_schema(dep.feature_columns or [], {})
+
+    # Generate 3 representative sample rows
+    rows: List[Dict[str, Any]] = []
+    for i in range(3):
+        row: Dict[str, Any] = {}
+        for col in (dep.feature_columns or []):
+            base_val = sample_inputs.get(col, "0")
+            col_info = schema.get(col, {})
+            if col_info.get("type") == "numeric":
+                try:
+                    num_val = float(base_val)
+                    row[col] = round(num_val + i * (1.0 if num_val >= 0 else -1.0), 2)
+                except (ValueError, TypeError):
+                    row[col] = base_val
+            elif col_info.get("type") == "categorical":
+                cats = col_info.get("categories") or []
+                if cats:
+                    row[col] = cats[i % len(cats)]
+                else:
+                    row[col] = base_val
+            elif col_info.get("type") == "boolean":
+                row[col] = i % 2
+            else:
+                row[col] = f"{base_val}_{i + 1}"
+        rows.append(row)
+
+    df_sample = pd.DataFrame(rows, columns=dep.feature_columns or [])
+    out = io.StringIO()
+    df_sample.to_csv(out, index=False)
+    return out.getvalue()
+
