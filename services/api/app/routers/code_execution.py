@@ -14,7 +14,7 @@ from __future__ import annotations
 import ast
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -215,7 +215,7 @@ async def execute_code(
     "/{exec_id}/stream",
     summary="Stream execution output via SSE",
 )
-async def stream_output(exec_id: str, _: Request = None) -> StreamingResponse:
+async def stream_output(exec_id: str) -> StreamingResponse:
     """Stream stdout / stderr of a running execution as Server-Sent Events."""
     if get_execution(exec_id) is None:
         raise HTTPException(status_code=404, detail=f"Execution '{exec_id}' not found.")

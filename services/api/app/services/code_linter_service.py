@@ -259,7 +259,8 @@ def lint_code(code: str, filename: str = "train.py") -> List[DiagnosticItem]:
     # 2. Pyflakes Semantic Analysis (run if no syntax error or via pyflakes reporter)
     if not syntax_error:
         try:
-            from pyflakes import api as pyflakes_api
+            import importlib
+            pyflakes_api = importlib.import_module("pyflakes.api")
             collector = _PyflakesCollector()
             pyflakes_api.check(code, filename, collector)
             diagnostics.extend(collector.diagnostics)

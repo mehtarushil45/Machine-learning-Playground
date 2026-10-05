@@ -13,13 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import sys
 import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -65,11 +63,13 @@ def _detect_artifacts(sandbox: str) -> List[str]:
 MAX_STREAM_LINES = 5000
 
 async def _stream_output(
-    stream: asyncio.StreamReader,
+    stream: Optional[asyncio.StreamReader],
     buffer: List[str],
     queue: "asyncio.Queue[Optional[str]]",
     prefix: str = "",
 ) -> None:
+    if stream is None:
+        return
     try:
         async for raw_line in stream:
             if len(buffer) >= MAX_STREAM_LINES:
@@ -155,12 +155,15 @@ async def _run_execution(
         rec._process = proc
         await rec._queue.put(f"[ML Playground] Starting: {rec.filename}")
 
+        stream_tasks = []
+        if proc.stdout is not None:
+            stream_tasks.append(_stream_output(proc.stdout, stdout_lines, rec._queue))
+        if proc.stderr is not None:
+            stream_tasks.append(_stream_output(proc.stderr, stderr_lines, rec._queue, prefix="[stderr] "))
+        stream_tasks.append(proc.wait())
+
         await asyncio.wait_for(
-            asyncio.gather(
-                _stream_output(proc.stdout, stdout_lines, rec._queue),
-                _stream_output(proc.stderr, stderr_lines, rec._queue, prefix="[stderr] "),
-                proc.wait(),
-            ),
+            asyncio.gather(*stream_tasks),
             timeout=timeout,
         )
 
@@ -171,7 +174,7 @@ async def _run_execution(
         if proc.returncode == 0:
             rec.status = "completed"
             rec.artifacts = _detect_artifacts(sandbox)
-            await rec._queue.put(f"[ML Playground] Completed (exit 0).")
+            await rec._queue.put("[ML Playground] Completed (exit 0).")
             if rec.artifacts:
                 await rec._queue.put(f"[ML Playground] Artifacts: {', '.join(rec.artifacts)}")
         else:

@@ -6,9 +6,7 @@ import {
   Code2,
   BarChart2,
   Sparkles,
-  GraduationCap,
   Rocket,
-  Award,
   Search,
   FolderOpen,
 } from 'lucide-react';
@@ -20,19 +18,13 @@ import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
 import { ProjectGatekeeper } from './features/datasets/ProjectGatekeeper';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
-import { ExplainabilityHub } from './features/explainability/ExplainabilityHub';
-import { ClassroomHub } from './features/classrooms/ClassroomHub';
 import { DeploymentsHub } from './features/deployments/DeploymentsHub';
-import { PortfolioViewer } from './features/portfolios/PortfolioViewer';
 
 export type PlatformTab =
   | 'workspace'
   | 'code-studio'
   | 'training-results'
-  | 'explainability'
-  | 'classrooms'
-  | 'deployments'
-  | 'portfolios';
+  | 'deployments';
 
 export interface ToastMessage {
   id: string;
@@ -85,23 +77,17 @@ function AppContent() {
       workspace:          'dataset',
       'code-studio':      'pipeline',
       'training-results': 'evaluate',
-      explainability:     'evaluate',
-      classrooms:         'verify',
       deployments:        'deploy',
-      portfolios:         'certify',
     };
     const stage = tabToStage[tab];
     if (stage) setLifecycleStage(stage);
   };
 
   const navItems = [
-    { id: 'workspace',          label: 'Dataset & Profiler',        icon: <Database className="w-5 h-5" />     },
-    { id: 'code-studio',        label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />        },
-    { id: 'training-results',   label: 'Training Results',          icon: <BarChart2 className="w-5 h-5" />    },
-    { id: 'explainability',     label: 'Explainability & What-If',  icon: <Sparkles className="w-5 h-5" />    },
-    { id: 'classrooms',         label: 'Classrooms & Auditing',     icon: <GraduationCap className="w-5 h-5" /> },
-    { id: 'deployments',        label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />       },
-    { id: 'portfolios',         label: 'Portfolios & Verification',  icon: <Award className="w-5 h-5" />       },
+    { id: 'workspace',        label: 'Datasets & Profiler',       icon: <Database className="w-5 h-5" />  },
+    { id: 'code-studio',      label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />     },
+    { id: 'training-results', label: 'Training & Experiments',    icon: <BarChart2 className="w-5 h-5" /> },
+    { id: 'deployments',      label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />    },
   ];
 
   return (
@@ -465,27 +451,9 @@ function AppContent() {
                 </ErrorBoundary>
               </div>
 
-              <div style={{ display: activeTab === 'explainability' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-                <ErrorBoundary key="explainability" onReset={() => setActiveTab('workspace')}>
-                  <ExplainabilityHub />
-                </ErrorBoundary>
-              </div>
-
-              <div style={{ display: activeTab === 'classrooms' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-                <ErrorBoundary key="classrooms" onReset={() => setActiveTab('workspace')}>
-                  <ClassroomHub />
-                </ErrorBoundary>
-              </div>
-
               <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
                   <DeploymentsHub onShowToast={showToast} />
-                </ErrorBoundary>
-              </div>
-
-              <div style={{ display: activeTab === 'portfolios' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-                <ErrorBoundary key="portfolios" onReset={() => setActiveTab('workspace')}>
-                  <PortfolioViewer />
                 </ErrorBoundary>
               </div>
             </>
