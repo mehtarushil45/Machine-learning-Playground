@@ -610,7 +610,14 @@ def execute_ml_training_pipeline_sync(
                 "experiment_id": experiment_id,
                 "model_id":        model_id,
                 "cv_mean_score": cv_results.get("mean_score") if cv_results and not cv_results.get("skipped") else None,
-                "feature_importance": feature_importance[:5] if feature_importance else [],
+                "feature_importance": feature_importance[:10] if feature_importance else [],
+                "all_feature_importance": feature_importance if feature_importance else [],
+                "confusion_matrix": training_report.get("confusion_matrix"),
+                "roc_auc": training_report.get("roc_auc"),
+                "pr_auc": training_report.get("pr_auc"),
+                "classification_report": training_report.get("classification_report"),
+                "regression_metrics": training_report.get("regression_metrics"),
+                "training_duration_seconds": round(training_duration, 4),
                 # Sprint 5A additions
                 "model_version":   model_version,
                 # V5A additions

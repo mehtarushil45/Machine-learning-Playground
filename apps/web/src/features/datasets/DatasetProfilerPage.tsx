@@ -22,12 +22,14 @@ import {
   Play,
   RotateCcw,
   Search,
+  Shield,
   Table as TableIcon,
   Upload,
   X,
 } from 'lucide-react';
 import { useProject, type ActiveTrainingConfiguration } from '../../providers/ProjectContext';
 import { DataUpload } from './DataUpload';
+import { DataGovernanceCard } from './DataGovernanceCard';
 import { AlgorithmRecommendationPanel } from './AlgorithmRecommendationPanel';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { FeatureTargetSelector } from '../../components/shared/FeatureTargetSelector';
@@ -473,8 +475,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     setLifecycleStage,
   } = useProject();
 
-  /* ── View Toggle State (Workspace vs Preview data) ─────────────── */
-  const [activeView, setActiveView] = useState<'workspace' | 'preview'>('workspace');
+  /* ── View Toggle State (Workspace vs Preview data vs Governance) ─────────────── */
+  const [activeView, setActiveView] = useState<'workspace' | 'governance' | 'preview'>('workspace');
 
   /* ── Recommendation Provenance State ────────────────────────────── */
   const [recommendationProvenance, setRecommendationProvenance] = useState<{
@@ -1252,6 +1254,26 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                             <Layers style={{ width: 12, height: 12 }} />
                           </button>
                           <button
+                            onClick={() => setActiveView('governance')}
+                            aria-label="Data Governance & Leakage Guardrails"
+                            title="Governance & Leakage Guardrails"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 24,
+                              height: 22,
+                              borderRadius: 4,
+                              border: 'none',
+                              background: 'transparent',
+                              color: BB.muted,
+                              cursor: 'pointer',
+                              transition: 'all 150ms',
+                            }}
+                          >
+                            <Shield style={{ width: 12, height: 12 }} />
+                          </button>
+                          <button
                             onClick={() => setActiveView('preview')}
                             aria-label={`Preview Data — ${rowCount} rows`}
                             title={`Preview Data (${rowCount} rows)`}
@@ -1335,8 +1357,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: 6,
+                      gridTemplateColumns: 'repeat(6, 1fr)',
+                      gap: 4,
                       padding: '6px 8px',
                       borderRadius: 6,
                       background: BB.elevated,
@@ -1371,6 +1393,42 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         }}
                       >
                         {qualityBreakdown ? `${qualityBreakdown.score}/100` : '—'}
+                      </button>
+                    </div>
+                    <div>
+                      <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>ENGINE</span>
+                      <button
+                        onClick={() => setActiveView('governance')}
+                        title="DuckDB Out-of-Core Engine"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#4ade80',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: 0,
+                          fontSize: 10,
+                        }}
+                      >
+                        {profile?.engine === 'duckdb' ? '⚡ DUCK' : 'STREAM'}
+                      </button>
+                    </div>
+                    <div>
+                      <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>GUARD</span>
+                      <button
+                        onClick={() => setActiveView('governance')}
+                        title="View Governance & Leakage Guardrails"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: profile?.governance?.has_leakage ? '#ef4444' : '#22c55e',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: 0,
+                          fontSize: 10,
+                        }}
+                      >
+                        {profile?.governance?.has_leakage ? '⚠️ LEAK' : '🛡️ OK'}
                       </button>
                     </div>
                   </div>
@@ -2251,6 +2309,37 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   </button>
                 </div>
               </div>
+            </div>
+          ) : activeView === 'governance' ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <button
+                  onClick={() => setActiveView('workspace')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '6px 12px',
+                    borderRadius: 6,
+                    border: `1px solid ${BB.border}`,
+                    background: BB.surface,
+                    color: BB.text,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Layers style={{ width: 12, height: 12 }} />
+                  <span>Return to Workspace</span>
+                </button>
+              </div>
+              {profile ? (
+                <DataGovernanceCard profile={profile} />
+              ) : (
+                <div style={{ padding: 24, textAlign: 'center', color: BB.muted, fontSize: 13 }}>
+                  No dataset profile loaded. Upload or select a dataset to view data governance guardrails.
+                </div>
+              )}
             </div>
           ) : (
             /* ── C3: Full-Width Data Preview View ────────────────── */

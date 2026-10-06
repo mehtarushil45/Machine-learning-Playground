@@ -18,6 +18,7 @@ Core Endpoints:
 """
 
 import csv
+import hashlib
 import io
 import logging
 import os
@@ -53,6 +54,7 @@ from app.schemas.recommendation import (
     RecommendationJobResponse,
 )
 from app.ingestion.storage_backend import StorageError, get_configured_backend
+from app.services.duckdb_profiler import duckdb_profiler_service
 from app.services.health import health_service
 from app.services.ingestion_service import ingestion_service
 from app.services.profiler import TabularDataContainer, profiler_service
@@ -122,6 +124,9 @@ async def list_datasets(
                 row_count=ds.row_count,
                 column_count=ds.column_count,
                 status=ds.status.value if hasattr(ds.status, "value") else str(ds.status),
+                version=getattr(ds, "version", "v1") or "v1",
+                content_hash=getattr(ds, "content_hash", None),
+                file_format=getattr(ds, "file_format", "csv") or "csv",
                 organisation_id=ds.organisation_id,
                 user_id=ds.user_id,
                 created_at=ds.created_at,
@@ -182,6 +187,9 @@ async def get_dataset_by_id(
                     row_count=ds.row_count,
                     column_count=ds.column_count,
                     status=ds.status.value if hasattr(ds.status, "value") else str(ds.status),
+                    version=getattr(ds, "version", "v1") or "v1",
+                    content_hash=getattr(ds, "content_hash", None),
+                    file_format=getattr(ds, "file_format", "csv") or "csv",
                     organisation_id=ds.organisation_id,
                     user_id=ds.user_id,
                     created_at=ds.created_at,
@@ -231,12 +239,15 @@ async def upload_dataset(
             detail="No file was provided in the upload request.",
         )
 
-    # 1. Extension Validation
+    # 1. Extension Validation (CSV and Parquet)
     filename_lower = file.filename.lower()
-    if not filename_lower.endswith(".csv"):
+    is_parquet = filename_lower.endswith((".parquet", ".pq"))
+    is_csv = filename_lower.endswith(".csv")
+
+    if not (is_csv or is_parquet):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file format. Only CSV (.csv) files are allowed.",
+            detail="Unsupported file format. Only CSV (.csv) and Parquet (.parquet, .pq) files are allowed.",
         )
 
     # 2. MIME Type Validation (if header provided)
@@ -248,11 +259,14 @@ async def upload_dataset(
         "text/x-csv",
         "application/vnd.ms-excel",
         "application/octet-stream",
+        "application/vnd.apache.parquet",
+        "application/parquet",
+        "application/x-parquet",
     }
     if file.content_type and file.content_type.lower() not in allowed_mimes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid MIME type '{file.content_type}'. Only CSV files are supported.",
+            detail=f"Invalid MIME type '{file.content_type}'. Only CSV and Parquet files are supported.",
         )
 
     # 3. Read Content & Size Validation
@@ -268,7 +282,7 @@ async def upload_dataset(
     if size_bytes == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded CSV file is empty (0 bytes).",
+            detail="Uploaded file is empty (0 bytes).",
         )
 
     if size_bytes > settings.max_upload_size_bytes:
@@ -278,52 +292,77 @@ async def upload_dataset(
             detail=f"File size ({size_bytes} bytes) exceeds maximum limit of {max_mb} MB.",
         )
 
-    # 4. Decode Content & Parse CSV Structure
-    decoded_text = ""
-    for encoding in ["utf-8-sig", "utf-8", "iso-8859-1"]:
+    content_hash = hashlib.sha256(content).hexdigest()
+    version = "v1"
+    file_format = "parquet" if is_parquet else "csv"
+
+    # 4. Parse Structure based on format
+    if is_parquet:
         try:
-            decoded_text = content.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
+            import pyarrow.parquet as pq
 
-    if not decoded_text:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Malformed CSV file: Unable to decode file content with UTF-8 or ISO-8859-1.",
-        )
-
-    try:
-        sample_stream = io.StringIO(decoded_text)
-        reader = csv.reader(sample_stream)
-
-        # Read header row
-        header = next(reader, None)
-        if not header or not any(col.strip() for col in header):
+            pq_file = pq.ParquetFile(io.BytesIO(content))
+            columns = list(pq_file.schema_arrow.names)
+            row_count = int(pq_file.metadata.num_rows)
+            if row_count == 0 or len(columns) == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid Parquet structure: File contains no data rows or columns.",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Invalid CSV structure: File is missing a valid header row.",
+                detail=f"Malformed Parquet: Failed to parse tabular structure ({str(exc)}).",
+            ) from exc
+    else:
+        # Decode Content & Parse CSV Structure
+        decoded_text = ""
+        for encoding in ["utf-8-sig", "utf-8", "iso-8859-1"]:
+            try:
+                decoded_text = content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+
+        if not decoded_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Malformed CSV file: Unable to decode file content with UTF-8 or ISO-8859-1.",
             )
 
-        columns = [col.strip() for col in header if col.strip()]
+        try:
+            sample_stream = io.StringIO(decoded_text)
+            reader = csv.reader(sample_stream)
 
-        # Read data rows
-        data_rows = [row for row in reader if row and any(cell.strip() for cell in row)]
-        row_count = len(data_rows)
+            # Read header row
+            header = next(reader, None)
+            if not header or not any(col.strip() for col in header):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid CSV structure: File is missing a valid header row.",
+                )
 
-        if row_count == 0:
+            columns = [col.strip() for col in header if col.strip()]
+
+            # Read data rows
+            data_rows = [row for row in reader if row and any(cell.strip() for cell in row)]
+            row_count = len(data_rows)
+
+            if row_count == 0:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid CSV structure: File contains headers but no valid data rows.",
+                )
+
+        except HTTPException:
+            raise
+        except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Invalid CSV structure: File contains headers but no valid data rows.",
-            )
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Malformed CSV: Failed to parse tabular structure ({str(exc)}).",
-        ) from exc
+                detail=f"Malformed CSV: Failed to parse tabular structure ({str(exc)}).",
+            ) from exc
 
     # 5. Safe Filename & Storage — delegated to StorageBackend with Organisation Scoping
     dataset_id = uuid.uuid4()
@@ -383,13 +422,16 @@ async def upload_dataset(
             db_dataset = Dataset(
                 id=dataset_id,
                 name=safe_filename,
-                description=f"Uploaded CSV {safe_filename}",
+                description=f"Uploaded {file_format.upper()} {safe_filename}",
                 file_path=location.path,
                 file_size_bytes=size_bytes,
                 original_filename=file.filename,
                 row_count=row_count,
                 column_count=len(columns),
                 status=DatasetStatus.ready,
+                version=version,
+                content_hash=content_hash,
+                file_format=file_format,
                 organisation_id=current_user.organisation_id,
                 user_id=current_user.id,
             )
@@ -404,6 +446,9 @@ async def upload_dataset(
         size_bytes=size_bytes,
         uploaded_at=uploaded_at,
         status="uploaded",
+        version=version,
+        content_hash=content_hash,
+        file_format=file_format,
         row_count=row_count,
         column_count=len(columns),
         columns=columns,
@@ -418,6 +463,7 @@ async def upload_dataset(
 async def get_dataset_profile(
     dataset_id: str,
     current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> DatasetProfileResponse:
     """Analyze and return comprehensive schema, statistics, and quality profile for a dataset."""
     org_id_str = str(current_user.organisation_id)
@@ -426,6 +472,24 @@ async def get_dataset_profile(
     matched_filename = None
     matched_file_path = None
     prefix = f"{dataset_id}_"
+
+    # Query DB metadata if available
+    ds_version = "v1"
+    ds_content_hash = None
+    if db is not None:
+        try:
+            ds_uuid = uuid.UUID(dataset_id)
+            stmt = select(Dataset).where(
+                Dataset.id == ds_uuid,
+                Dataset.organisation_id == current_user.organisation_id,
+            )
+            res = await db.execute(stmt)
+            ds_record = res.scalar_one_or_none()
+            if ds_record:
+                ds_version = getattr(ds_record, "version", "v1") or "v1"
+                ds_content_hash = getattr(ds_record, "content_hash", None)
+        except Exception as db_exc:
+            logger.debug("Could not retrieve dataset DB record for profile metadata: %s", db_exc)
 
     # 1. Search in organisation-scoped upload directory
     if os.path.exists(org_dir):
@@ -462,6 +526,24 @@ async def get_dataset_profile(
             detail=f"Dataset with ID '{dataset_id}' was not found on server.",
         )
 
+    # Primary: DuckDB Out-of-Core Profiling (Sub-second streaming, zero host OOM, Leakage Guardrails)
+    try:
+        return duckdb_profiler_service.profile_file(
+            file_path=matched_file_path,
+            dataset_id=dataset_id,
+            filename=matched_filename or "dataset.csv",
+            version=ds_version,
+            content_hash=ds_content_hash,
+        )
+    except Exception as duck_exc:
+        logger.warning(
+            "DuckDB out-of-core profiling failed for '%s' (%s), falling back to in-memory reader: %s",
+            dataset_id,
+            matched_file_path,
+            duck_exc,
+        )
+
+    # Fallback: In-memory legacy CSV profiling
     try:
         size_bytes = os.path.getsize(matched_file_path)
         with open(matched_file_path, "r", encoding="utf-8-sig", errors="replace") as f:
@@ -477,7 +559,24 @@ async def get_dataset_profile(
             memory_usage_bytes=size_bytes,
         )
 
-        return profiler_service.profile(container)
+        legacy_profile = profiler_service.profile(container)
+        return DatasetProfileResponse(
+            dataset_id=legacy_profile.dataset_id,
+            filename=legacy_profile.filename,
+            row_count=legacy_profile.row_count,
+            column_count=legacy_profile.column_count,
+            file_format="csv",
+            engine="streaming-fallback",
+            version=ds_version,
+            content_hash=ds_content_hash,
+            memory_usage_bytes=legacy_profile.memory_usage_bytes,
+            duplicate_rows=legacy_profile.duplicate_rows,
+            duplicate_columns=legacy_profile.duplicate_columns,
+            empty_columns=legacy_profile.empty_columns,
+            total_missing_values=legacy_profile.total_missing_values,
+            columns=legacy_profile.columns,
+            governance=DataGovernanceReport(),
+        )
 
     except HTTPException:
         raise

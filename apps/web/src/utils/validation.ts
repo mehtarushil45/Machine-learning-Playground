@@ -8,10 +8,12 @@ export interface ValidationResult {
 export const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024 // 50 MB
 
 export function validateCsvFile(file: File): ValidationResult {
-  if (!file.name.toLowerCase().endsWith('.csv')) {
+  const name = file.name.toLowerCase()
+  const isSupported = name.endsWith('.csv') || name.endsWith('.parquet') || name.endsWith('.pq')
+  if (!isSupported) {
     return {
       valid: false,
-      message: 'Unsupported file format. Please upload a valid CSV (.csv) file.',
+      message: 'Unsupported file format. Please upload a valid CSV (.csv) or Parquet (.parquet) file.',
     }
   }
 

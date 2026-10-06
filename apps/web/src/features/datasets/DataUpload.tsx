@@ -10,8 +10,12 @@ export interface ApiUploadResponse {
   size_bytes: number
   uploaded_at: string
   status: string
+  version?: string
+  content_hash?: string
+  file_format?: string
   row_count?: number
   column_count?: number
+  columns?: string[]
 }
 
 export interface DataUploadProps {
@@ -181,43 +185,97 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
     setUploadedFileMeta(null)
     const fileValidation = validateCsvFile(file)
     if (!fileValidation.valid) {
-      setError(fileValidation.message ?? 'Invalid CSV file.')
+      setError(fileValidation.message ?? 'Invalid file format.')
       return
     }
+
+    const isParquet = file.name.toLowerCase().endsWith('.parquet') || file.name.toLowerCase().endsWith('.pq')
+
     try {
       setIsProcessing(true)
       setUploadProgress(20)
-      const dataset = await parseCsvFile(file)
-      setUploadProgress(60)
-      let apiResponse: ApiUploadResponse | null = null
-      try {
-        apiResponse = await uploadFileToApi(file)
-        setUploadProgress(90)
-      } catch (apiErr) {
-        if (apiErr instanceof Error) {
-          setError(`API Error: ${apiErr.message}`)
-          setIsProcessing(false)
-          setUploadProgress(0)
-          return
+
+      if (isParquet) {
+        // Direct stream to out-of-core backend
+        setUploadProgress(50)
+        let apiResponse: ApiUploadResponse | null = null
+        try {
+          apiResponse = await uploadFileToApi(file)
+          setUploadProgress(95)
+        } catch (apiErr) {
+          if (apiErr instanceof Error) {
+            setError(`API Error: ${apiErr.message}`)
+            setIsProcessing(false)
+            setUploadProgress(0)
+            return
+          }
         }
+
+        setUploadProgress(100)
+        const returnedCols: string[] = apiResponse?.columns ?? []
+        const finalMeta: ApiUploadResponse = apiResponse || {
+          dataset_id: `ds-${Date.now().toString(36)}`,
+          filename: file.name,
+          size_bytes: file.size,
+          uploaded_at: new Date().toISOString(),
+          status: 'uploaded',
+          version: 'v1',
+          file_format: 'parquet',
+          row_count: 0,
+          column_count: returnedCols.length,
+          columns: returnedCols,
+        }
+        setUploadedFileMeta(finalMeta)
+        const enrichedDataset: Dataset = {
+          rows: [],
+          columns: returnedCols,
+          fileName: file.name,
+          datasetId: finalMeta.dataset_id,
+          rowCount: finalMeta.row_count,
+          version: finalMeta.version || 'v1',
+          contentHash: finalMeta.content_hash,
+          fileFormat: 'parquet',
+        }
+        onDataLoaded(enrichedDataset)
+      } else {
+        // Standard CSV flow with client parse + backend storage
+        const dataset = await parseCsvFile(file)
+        setUploadProgress(60)
+        let apiResponse: ApiUploadResponse | null = null
+        try {
+          apiResponse = await uploadFileToApi(file)
+          setUploadProgress(90)
+        } catch (apiErr) {
+          if (apiErr instanceof Error) {
+            setError(`API Error: ${apiErr.message}`)
+            setIsProcessing(false)
+            setUploadProgress(0)
+            return
+          }
+        }
+        setUploadProgress(100)
+        const finalMeta: ApiUploadResponse = apiResponse || {
+          dataset_id: `ds-${Date.now().toString(36)}`,
+          filename: file.name,
+          size_bytes: file.size,
+          uploaded_at: new Date().toISOString(),
+          status: 'uploaded',
+          version: 'v1',
+          file_format: 'csv',
+          row_count: dataset.rows.length,
+          column_count: dataset.columns.length,
+        }
+        setUploadedFileMeta(finalMeta)
+        const enrichedDataset: Dataset = {
+          ...dataset,
+          datasetId: finalMeta.dataset_id,
+          rowCount: finalMeta.row_count ?? dataset.rows.length,
+          version: finalMeta.version || 'v1',
+          contentHash: finalMeta.content_hash,
+          fileFormat: 'csv',
+        }
+        onDataLoaded(enrichedDataset)
       }
-      setUploadProgress(100)
-      const finalMeta: ApiUploadResponse = apiResponse || {
-        dataset_id: `ds-${Date.now().toString(36)}`,
-        filename: file.name,
-        size_bytes: file.size,
-        uploaded_at: new Date().toISOString(),
-        status: 'uploaded',
-        row_count: dataset.rows.length,
-        column_count: dataset.columns.length,
-      }
-      setUploadedFileMeta(finalMeta)
-      const enrichedDataset: Dataset = {
-        ...dataset,
-        datasetId: finalMeta.dataset_id,
-        rowCount: finalMeta.row_count ?? dataset.rows.length,
-      }
-      onDataLoaded(enrichedDataset)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown parsing error.')
     } finally {
@@ -331,10 +389,10 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,.parquet,.pq"
           onChange={handleFileChange}
           style={{ display: 'none' }}
-          aria-label="Upload CSV File"
+          aria-label="Upload CSV or Parquet File"
         />
 
         {/* Drop Zone */}
@@ -347,7 +405,7 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            aria-label="Drag and drop CSV file here or press enter to browse"
+            aria-label="Drag and drop CSV or Parquet file here or press enter to browse"
             style={{
               padding: '32px 24px',
               display: 'flex',
@@ -386,10 +444,10 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
             </div>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: BB.text, marginBottom: 3 }}>
-                Drag & drop your CSV dataset here
+                Drag & drop your CSV or Parquet dataset here
               </div>
               <div style={{ fontSize: 11, color: BB.muted }}>
-                Supports CSV files up to 50 MB with header rows and numerical feature columns.
+                Supports CSV &amp; Parquet up to 50 MB with out-of-core DuckDB streaming and zero host OOM.
               </div>
             </div>
             <button

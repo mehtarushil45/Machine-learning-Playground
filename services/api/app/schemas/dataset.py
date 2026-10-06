@@ -20,6 +20,9 @@ class DatasetResponse(BaseModel):
     row_count: int | None = None
     column_count: int | None = None
     status: str
+    version: str = "v1"
+    content_hash: str | None = None
+    file_format: str = "csv"
     organisation_id: uuid.UUID
     user_id: uuid.UUID
     created_at: datetime
@@ -47,6 +50,9 @@ class DatasetUploadResponse(BaseModel):
     size_bytes: int
     uploaded_at: datetime
     status: str = "uploaded"
+    version: str = "v1"
+    content_hash: str | None = None
+    file_format: str = "csv"
     row_count: int | None = None
     column_count: int | None = None
     columns: list[str] = Field(default_factory=list)
@@ -87,6 +93,36 @@ class ColumnProfile(BaseModel):
     statistics: dict[str, Any] = Field(default_factory=dict)
 
 
+class DataLeakageFinding(BaseModel):
+    """Details of a potential target leakage anomaly."""
+
+    feature: str
+    target: str
+    correlation: float
+    severity: str = "critical"  # "critical" (>= 0.98) | "high" (>= 0.90)
+    recommendation: str
+
+
+class MulticollinearityFinding(BaseModel):
+    """Details of two strongly collinear features."""
+
+    feature_a: str
+    feature_b: str
+    correlation: float
+    recommendation: str
+
+
+class DataGovernanceReport(BaseModel):
+    """Enterprise governance, leakage detection, and imputation strategy report."""
+
+    has_leakage: bool = False
+    leaked_features: list[DataLeakageFinding] = Field(default_factory=list)
+    multicollinear_pairs: list[MulticollinearityFinding] = Field(default_factory=list)
+    constant_columns: list[str] = Field(default_factory=list)
+    identifier_columns: list[str] = Field(default_factory=list)
+    imputation_strategies: dict[str, str] = Field(default_factory=dict)
+
+
 class DatasetProfileResponse(BaseModel):
     """Structured profile response returned by GET /api/v1/datasets/{dataset_id}/profile."""
 
@@ -94,12 +130,17 @@ class DatasetProfileResponse(BaseModel):
     filename: str
     row_count: int
     column_count: int
+    file_format: str = "csv"
+    engine: str = "duckdb"
+    version: str = "v1"
+    content_hash: str | None = None
     memory_usage_bytes: int
     duplicate_rows: int
     duplicate_columns: int
     empty_columns: int
     total_missing_values: int
     columns: list[ColumnProfile] = Field(default_factory=list)
+    governance: DataGovernanceReport = Field(default_factory=DataGovernanceReport)
 
     model_config = {"from_attributes": True}
 

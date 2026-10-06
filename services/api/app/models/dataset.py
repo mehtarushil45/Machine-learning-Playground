@@ -38,6 +38,9 @@ class Dataset(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     column_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[DatasetStatus] = mapped_column(default=DatasetStatus.pending, nullable=False)
+    version: Mapped[str] = mapped_column(String(32), default="v1", nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    file_format: Mapped[str] = mapped_column(String(16), default="csv", nullable=False)
 
     # ── Multi-tenancy & ownership FKs ─────────────────────────────────────────
     organisation_id: Mapped[uuid.UUID] = mapped_column(

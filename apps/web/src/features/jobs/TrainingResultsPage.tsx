@@ -28,10 +28,14 @@ import {
   Sliders,
   Sparkles,
   Rocket,
+  Trophy,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails, subscribeToJobProgressSSE, pollJobUntilDone } from '../../services/jobService';
 import { LocalDeploymentService } from '../../services/localDeploymentService';
+import { ExperimentLeaderboard } from './ExperimentLeaderboard';
+import { ThresholdOptimizer } from './ThresholdOptimizer';
+import { FeatureImportanceCard } from './FeatureImportanceCard';
 import type { JobEntity } from '../../types/job';
 import type { PlatformTab } from '../../App';
 
@@ -288,6 +292,7 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
   } = useProject();
 
   const [job, setJob] = useState<JobEntity | null>(activeJob);
+  const [activeView, setActiveView] = useState<'overview' | 'leaderboard'>('overview');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDeploying, setIsDeploying] = useState(false);
   const fetchedRef = useRef<string | null>(null);
@@ -596,6 +601,11 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
     : false;
   const isTinyDataset = datasetRowCount !== undefined && datasetRowCount < 50;
   const showReliabilityWarning = hasUnreliableMetrics || isTinyDataset;
+  const isClassification =
+    (job.metadata?.problem_type as string)?.includes('classification') ||
+    (trainingConfig as any)?.task_type === 'classification' ||
+    trainingConfig?.algorithm?.includes('classifier') ||
+    (metrics && ('accuracy' in metrics || 'f1_score' in metrics || 'f1' in metrics));
 
   /* ── Ring display value ─────────────────────────────────────────────── */
   const ringValue = pk && typeof pv === 'number' ? toRingValue(pk, pv) : 0;
@@ -661,114 +671,200 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
             gap: 10,
           }}
         >
-          {/* File Tabs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {fileList.map((fileName) => {
-              const isActive = fileName === activeExperimentFile;
-              return (
-                <button
-                  key={fileName}
-                  onClick={() => handleSelectFile(fileName)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '5px 12px',
-                    borderRadius: 7,
-                    fontSize: 12,
-                    fontWeight: isActive ? 700 : 500,
-                    fontFamily: 'var(--font-mono)',
-                    cursor: 'pointer',
-                    border: isActive
-                      ? '1px solid rgba(138, 121, 202, 0.6)'
-                      : '1px solid rgba(255, 255, 255, 0.08)',
-                    background: isActive
-                      ? 'linear-gradient(135deg, rgba(138, 121, 202, 0.25) 0%, rgba(75, 59, 124, 0.4) 100%)'
-                      : 'rgba(255, 255, 255, 0.03)',
-                    color: isActive ? '#FFFFFF' : BB.muted,
-                    boxShadow: isActive ? '0 0 10px rgba(138, 121, 202, 0.35)' : 'none',
-                    transition: 'all 150ms ease',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      background: isActive ? BB.successLight : 'rgba(255, 255, 255, 0.2)',
-                    }}
-                  />
-                  {fileName}
-                </button>
-              );
-            })}
+          {/* Left: View Switcher (Overview vs Leaderboard) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                background: 'rgba(0, 0, 0, 0.4)',
+                padding: 3,
+                borderRadius: 8,
+                border: `1px solid ${BB.border}`,
+              }}
+            >
+              <button
+                onClick={() => setActiveView('overview')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: activeView === 'overview' ? 700 : 500,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background:
+                    activeView === 'overview'
+                      ? 'linear-gradient(135deg, rgba(138, 121, 202, 0.4) 0%, rgba(75, 59, 124, 0.6) 100%)'
+                      : 'transparent',
+                  color: activeView === 'overview' ? '#FFF' : BB.muted,
+                  boxShadow: activeView === 'overview' ? '0 0 10px rgba(138, 121, 202, 0.35)' : 'none',
+                  transition: 'all 120ms ease',
+                }}
+              >
+                <BarChart2 size={13} style={{ color: activeView === 'overview' ? BB.gold : 'inherit' }} />
+                <span>Run Overview</span>
+              </button>
+
+              <button
+                onClick={() => setActiveView('leaderboard')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '5px 12px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontWeight: activeView === 'leaderboard' ? 700 : 500,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background:
+                    activeView === 'leaderboard'
+                      ? 'linear-gradient(135deg, rgba(138, 121, 202, 0.4) 0%, rgba(75, 59, 124, 0.6) 100%)'
+                      : 'transparent',
+                  color: activeView === 'leaderboard' ? '#FFF' : BB.muted,
+                  boxShadow: activeView === 'leaderboard' ? '0 0 10px rgba(138, 121, 202, 0.35)' : 'none',
+                  transition: 'all 120ms ease',
+                }}
+              >
+                <Trophy size={13} style={{ color: activeView === 'leaderboard' ? BB.gold : 'inherit' }} />
+                <span>Leaderboard & Param Diff</span>
+              </button>
+            </div>
+
+            {/* In overview mode: File Tabs */}
+            {activeView === 'overview' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {fileList.map((fileName) => {
+                  const isActive = fileName === activeExperimentFile;
+                  return (
+                    <button
+                      key={fileName}
+                      onClick={() => handleSelectFile(fileName)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '5px 12px',
+                        borderRadius: 7,
+                        fontSize: 12,
+                        fontWeight: isActive ? 700 : 500,
+                        fontFamily: 'var(--font-mono)',
+                        cursor: 'pointer',
+                        border: isActive
+                          ? '1px solid rgba(138, 121, 202, 0.6)'
+                          : '1px solid rgba(255, 255, 255, 0.08)',
+                        background: isActive
+                          ? 'linear-gradient(135deg, rgba(138, 121, 202, 0.25) 0%, rgba(75, 59, 124, 0.4) 100%)'
+                          : 'rgba(255, 255, 255, 0.03)',
+                        color: isActive ? '#FFFFFF' : BB.muted,
+                        boxShadow: isActive ? '0 0 10px rgba(138, 121, 202, 0.35)' : 'none',
+                        transition: 'all 150ms ease',
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: isActive ? BB.successLight : 'rgba(255, 255, 255, 0.2)',
+                        }}
+                      />
+                      {fileName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Symbol-Only Refresh Button */}
-          <button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            title="Refresh Results and Sync File Changes"
-            aria-label="Refresh Results"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              border: `1px solid ${BB.border}`,
-              background: 'rgba(138, 121, 202, 0.12)',
-              color: '#FFFFFF',
-              cursor: isRefreshing ? 'not-allowed' : 'pointer',
-              transition: 'all 150ms ease',
-            }}
-          >
-            <RefreshCw
-              style={{
-                width: 14,
-                height: 14,
-                color: BB.primaryLight,
-                animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
-              }}
-            />
-          </button>
-
-          {/* 1-Click Deploy Model Action */}
-          {job.status === 'COMPLETED' && (
+          {/* Right Action buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* Symbol-Only Refresh Button */}
             <button
-              onClick={handleDeployModel}
-              disabled={isDeploying}
-              title="Deploy trained model artifact to a local serving endpoint"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              title="Refresh Results and Sync File Changes"
+              aria-label="Refresh Results"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 7,
-                padding: '6px 14px',
+                justifyContent: 'center',
+                width: 32,
+                height: 32,
                 borderRadius: 8,
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: isDeploying ? 'not-allowed' : 'pointer',
-                opacity: isDeploying ? 0.75 : 1,
-                border: '1px solid rgba(0, 245, 160, 0.4)',
-                background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18) 0%, rgba(0, 245, 160, 0.22) 100%)',
-                color: '#00F5A0',
-                boxShadow: '0 0 14px rgba(0, 245, 160, 0.2)',
+                border: `1px solid ${BB.border}`,
+                background: 'rgba(138, 121, 202, 0.12)',
+                color: '#FFFFFF',
+                cursor: isRefreshing ? 'not-allowed' : 'pointer',
                 transition: 'all 150ms ease',
               }}
             >
-              {isDeploying ? (
-                <>
-                  <RefreshCw style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> Deploying...
-                </>
-              ) : (
-                <>
-                  <Rocket style={{ width: 14, height: 14 }} /> Deploy Model
-                </>
-              )}
+              <RefreshCw
+                style={{
+                  width: 14,
+                  height: 14,
+                  color: BB.primaryLight,
+                  animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
+                }}
+              />
             </button>
-          )}
+
+            {/* 1-Click Deploy Model Action */}
+            {job.status === 'COMPLETED' && (
+              <button
+                onClick={handleDeployModel}
+                disabled={isDeploying}
+                title="Deploy trained model artifact to a local serving endpoint"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: isDeploying ? 'not-allowed' : 'pointer',
+                  opacity: isDeploying ? 0.75 : 1,
+                  border: '1px solid rgba(0, 245, 160, 0.4)',
+                  background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18) 0%, rgba(0, 245, 160, 0.22) 100%)',
+                  color: '#00F5A0',
+                  boxShadow: '0 0 14px rgba(0, 245, 160, 0.2)',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                {isDeploying ? (
+                  <>
+                    <RefreshCw style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> Deploying...
+                  </>
+                ) : (
+                  <>
+                    <Rocket style={{ width: 14, height: 14 }} /> Deploy Model
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
+
+        {activeView === 'leaderboard' ? (
+          <ExperimentLeaderboard
+            currentJob={job}
+            fileJobs={fileJobs}
+            activeExperimentFile={activeExperimentFile}
+            onSelectJob={(selected, file) => {
+              setJob(selected);
+              setActiveJob(selected);
+              if (file) setActiveExperimentFile(file);
+              setActiveView('overview');
+            }}
+            onDeployJob={handleDeployModel}
+            targetColumn={job.target_column || trainingConfig?.target_column}
+          />
+        ) : (
+          <>
 
         {/* Live Training In Progress Banner */}
         {isRunning && (
@@ -1275,6 +1371,27 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
               </div>
             )}
 
+            {/* ── Interactive Threshold Optimizer & Confusion Matrix (Classification) ── */}
+            {isClassification && job.status === 'COMPLETED' && (
+              <ThresholdOptimizer
+                job={job}
+                targetColumn={job.target_column || trainingConfig?.target_column || 'Target'}
+                baseMetrics={metrics}
+                confusionMatrix={job.metadata?.confusion_matrix as number[][] | undefined}
+              />
+            )}
+
+            {/* ── Feature Importance & Contribution Breakdown ── */}
+            {job.status === 'COMPLETED' && (
+              <FeatureImportanceCard
+                featureImportance={
+                  (job.metadata?.all_feature_importance as any) ||
+                  (job.metadata?.feature_importance as any)
+                }
+                featureColumns={featureCols}
+              />
+            )}
+
             {/* Feature Columns Used Badge Bar */}
             {featureCols.length > 0 && (
               <div
@@ -1529,6 +1646,8 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

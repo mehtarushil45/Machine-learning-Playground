@@ -19,6 +19,12 @@ export interface Dataset {
   datasetId?: string
   /** Optional row count for parsed or API datasets. */
   rowCount?: number
+  /** Immutable dataset version tag (e.g. "v1") */
+  version?: string
+  /** SHA-256 content fingerprint */
+  contentHash?: string
+  /** Format of dataset file */
+  fileFormat?: 'csv' | 'parquet' | string
 }
 
 export interface ColumnProfile {
@@ -43,17 +49,46 @@ export interface ColumnProfile {
   }
 }
 
+export interface DataLeakageFinding {
+  feature: string
+  target: string
+  correlation: number
+  severity: 'critical' | 'high' | string
+  recommendation: string
+}
+
+export interface MulticollinearityFinding {
+  feature_a: string
+  feature_b: string
+  correlation: number
+  recommendation: string
+}
+
+export interface DataGovernanceReport {
+  has_leakage: boolean
+  leaked_features: DataLeakageFinding[]
+  multicollinear_pairs: MulticollinearityFinding[]
+  constant_columns: string[]
+  identifier_columns: string[]
+  imputation_strategies: Record<string, string>
+}
+
 export interface DatasetProfile {
   dataset_id: string
   filename: string
   row_count: number
   column_count: number
+  file_format?: 'csv' | 'parquet' | string
+  engine?: 'duckdb' | string
+  version?: string
+  content_hash?: string | null
   memory_usage_bytes: number
   duplicate_rows: number
   duplicate_columns: number
   empty_columns: number
   total_missing_values: number
   columns: ColumnProfile[]
+  governance?: DataGovernanceReport
 }
 
 export interface HealthIssue {
