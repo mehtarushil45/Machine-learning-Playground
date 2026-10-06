@@ -14,7 +14,10 @@ import os
 import re
 from typing import Any
 
-import duckdb
+try:
+    import duckdb
+except ImportError:
+    duckdb = None  # type: ignore
 
 from app.schemas.dataset import (
     ColumnProfile,
@@ -64,6 +67,9 @@ class DuckDBProfilerEngine:
         """Profile CSV or Parquet file out-of-core using streaming DuckDB engine."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Dataset file not found: {file_path}")
+
+        if duckdb is None:
+            raise RuntimeError("DuckDB engine is not installed. Install duckdb to enable out-of-core profiling.")
 
         file_size_bytes = os.path.getsize(file_path)
         is_parquet = file_path.lower().endswith((".parquet", ".pq"))

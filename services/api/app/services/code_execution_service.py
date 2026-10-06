@@ -33,6 +33,24 @@ _DEFAULT_TIMEOUT_SECONDS = 90
 _EXECUTIONS: Dict[str, "ExecutionRecord"] = {}
 
 
+def is_redis_available(host: Optional[str] = None, port: Optional[int] = None, timeout: float = 0.5) -> bool:
+    """Check if Redis broker is available for Celery / PubSub."""
+    if os.environ.get("USE_CELERY", "").lower() in ("false", "0", "no"):
+        return False
+    try:
+        if host is None or port is None:
+            from urllib.parse import urlparse
+            from app.config import settings
+            parsed = urlparse(settings.redis_url)
+            host = host or parsed.hostname or "localhost"
+            port = port or parsed.port or 6379
+        import socket
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 @dataclass
 class ExecutionRecord:
     exec_id:     str
@@ -48,6 +66,7 @@ class ExecutionRecord:
     artifacts:           List[str]         = field(default_factory=list)
     registered_model_id: Optional[str]     = None
     error:               Optional[str]     = None
+    is_celery:           bool              = False
     _queue:              "asyncio.Queue[Optional[str]]" = field(default_factory=asyncio.Queue)
     _process:            Optional[asyncio.subprocess.Process] = None
     _sandbox:            Optional[str]     = None
@@ -95,6 +114,7 @@ async def start_execution(
     filename: str = "train.py",
     timeout: int = _DEFAULT_TIMEOUT_SECONDS,
     extra_env: Optional[Dict[str, str]] = None,
+    prefer_celery: Optional[bool] = None,
 ) -> ExecutionRecord:
     exec_id = str(uuid.uuid4())
     rec = ExecutionRecord(
@@ -105,6 +125,29 @@ async def start_execution(
         filename=filename,
     )
     _EXECUTIONS[exec_id] = rec
+
+    # Check Celery dispatch availability
+    should_use_celery = prefer_celery if prefer_celery is not None else (
+        os.environ.get("USE_CELERY", "1").lower() not in ("false", "0", "no") and is_redis_available()
+    )
+
+    if should_use_celery:
+        try:
+            from services.worker.tasks.code_execution_task import execute_code_sandbox
+            rec.is_celery = True
+            execute_code_sandbox.delay(
+                exec_id=exec_id,
+                code=code,
+                filename=filename,
+                dataset_id=dataset_id,
+                timeout=timeout,
+            )
+            logger.info("Dispatched code execution %s to Celery worker sandbox.", exec_id)
+            return rec
+        except Exception as exc:
+            logger.warning("Celery dispatch failed: %s. Falling back to local execution sandbox.", exc)
+            rec.is_celery = False
+
     asyncio.create_task(_run_execution(rec, timeout=timeout, extra_env=extra_env or {}))
     return rec
 
@@ -317,70 +360,184 @@ async def _run_execution(
 
 
 async def stop_execution(exec_id: str) -> bool:
-    rec = _EXECUTIONS.get(exec_id)
-    if rec is None or rec._process is None:
+    rec = get_execution(exec_id)
+    if rec is None:
         return False
-    try:
-        rec._process.terminate()
+    # If local process running
+    if rec._process is not None:
         try:
-            await asyncio.wait_for(rec._process.wait(), timeout=3)
-        except asyncio.TimeoutError:
-            rec._process.kill()
+            rec._process.terminate()
+            try:
+                await asyncio.wait_for(rec._process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                rec._process.kill()
+            rec.status = "stopped"
+            await rec._queue.put("[ML Playground] Stopped by user.")
+            await rec._queue.put(None)
+            return True
+        except Exception:
+            return False
+
+    # Publish stop event to Redis if Celery/Redis
+    try:
+        from app.redis_client import get_redis
+        redis_client = await get_redis()
+        import json
+        stop_evt = json.dumps({"type": "system", "data": "[ML Playground] Execution stopped by user."})
+        await redis_client.publish(f"mlpg:exec:stream:{exec_id}", stop_evt)
+        await redis_client.rpush(f"mlpg:exec:logs:{exec_id}", stop_evt)
         rec.status = "stopped"
-        await rec._queue.put("[ML Playground] Stopped by user.")
-        await rec._queue.put(None)
         return True
     except Exception:
         return False
 
 
-async def stream_execution(exec_id: str) -> AsyncGenerator[str, None]:
-    import json as _json
-    rec = _EXECUTIONS.get(exec_id)
+async def stream_execution_events(exec_id: str) -> AsyncGenerator[Dict[str, Any], None]:
+    """Yield parsed execution event dicts from Redis pub/sub or in-memory queue."""
+    import json
+    rec = get_execution(exec_id)
     if rec is None:
-        payload = _json.dumps({"type": "error", "error": f"Execution {exec_id} not found."})
-        yield f"data: {payload}\n\n"
+        yield {"type": "error", "error": f"Execution {exec_id} not found."}
         return
 
+    # 1. Attempt Redis pub/sub streaming if available
+    try:
+        from app.redis_client import get_redis
+        redis_client = await get_redis()
+
+        # Replay any buffered logs
+        logs = await redis_client.lrange(f"mlpg:exec:logs:{exec_id}", 0, -1)
+        terminal_seen = False
+        for raw in logs:
+            try:
+                event = json.loads(raw)
+                yield event
+                if event.get("type") in ("exit", "error"):
+                    terminal_seen = True
+                    break
+            except Exception:
+                pass
+
+        if terminal_seen:
+            return
+
+        # Subscribe to real-time pubsub stream
+        pubsub = redis_client.pubsub()
+        await pubsub.subscribe(f"mlpg:exec:stream:{exec_id}")
+        try:
+            idle_ticks = 0
+            while True:
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=2.0)
+                if msg and msg.get("type") == "message":
+                    idle_ticks = 0
+                    raw_data = msg.get("data")
+                    if raw_data:
+                        try:
+                            event = json.loads(raw_data)
+                            yield event
+                            if event.get("type") in ("exit", "error"):
+                                break
+                        except Exception:
+                            pass
+                else:
+                    idle_ticks += 1
+                    # Check if execution finished in redis record
+                    latest_rec = get_execution(exec_id)
+                    if latest_rec and latest_rec.status in ("completed", "failed", "stopped"):
+                        duration = None
+                        if latest_rec.started_at and latest_rec.finished_at:
+                            duration = round(latest_rec.finished_at - latest_rec.started_at, 2)
+                        yield {
+                            "type": "exit",
+                            "exit_code": latest_rec.exit_code,
+                            "status": latest_rec.status,
+                            "duration_seconds": duration,
+                            "artifacts": latest_rec.artifacts,
+                            "model_id": latest_rec.registered_model_id,
+                        }
+                        break
+                    yield {"type": "heartbeat"}
+                    if idle_ticks >= 60:  # Timeout without messages
+                        break
+        finally:
+            await pubsub.unsubscribe(f"mlpg:exec:stream:{exec_id}")
+            await pubsub.close()
+        return
+    except Exception as exc:
+        logger.debug("Redis stream unavailable, falling back to local queue: %s", exc)
+
+    # 2. Local fallback via in-memory queue
     while True:
         try:
             line = await asyncio.wait_for(rec._queue.get(), timeout=30)
         except asyncio.TimeoutError:
-            yield f"data: {_json.dumps({'type': 'heartbeat'})}\n\n"
+            yield {"type": "heartbeat"}
             if rec.status not in ("queued", "running"):
                 break
             continue
 
         if line is None:
-            # Compute duration for the exit event
             duration = None
             if rec.started_at and rec.finished_at:
                 duration = round(rec.finished_at - rec.started_at, 2)
-            payload = _json.dumps({
+            yield {
                 "type": "exit",
                 "exit_code": rec.exit_code,
                 "status": rec.status,
                 "duration_seconds": duration,
                 "artifacts": rec.artifacts,
                 "model_id": rec.registered_model_id,
-            })
-            yield f"data: {payload}\n\n"
+            }
             break
 
-        # Classify the line type based on prefix
         if line.startswith("[stderr] "):
-            payload = _json.dumps({"type": "stderr", "data": line[9:]})
+            yield {"type": "stderr", "data": line[9:]}
         elif line.startswith("[ML Playground]"):
-            payload = _json.dumps({"type": "system", "data": line})
+            yield {"type": "system", "data": line}
         elif line.startswith("[ERROR]") or line.startswith("[Error]"):
-            payload = _json.dumps({"type": "error", "error": line})
+            yield {"type": "error", "error": line}
         else:
-            payload = _json.dumps({"type": "stdout", "data": line})
-        yield f"data: {payload}\n\n"
+            yield {"type": "stdout", "data": line}
+
+
+async def stream_execution(exec_id: str) -> AsyncGenerator[str, None]:
+    import json as _json
+    async for event in stream_execution_events(exec_id):
+        yield f"data: {_json.dumps(event)}\n\n"
 
 
 def get_execution(exec_id: str) -> Optional[ExecutionRecord]:
-    return _EXECUTIONS.get(exec_id)
+    rec = _EXECUTIONS.get(exec_id)
+    # Check Redis for record if available
+    try:
+        import json
+        import redis
+        from app.config import settings
+        r = redis.from_url(settings.redis_url, decode_responses=True, socket_timeout=0.5)
+        raw = r.get(f"mlpg:exec:record:{exec_id}")
+        if raw:
+            data = json.loads(raw)
+            if rec is None:
+                rec = ExecutionRecord(
+                    exec_id=exec_id,
+                    status=data.get("status", "unknown"),
+                    code=data.get("code", ""),
+                    dataset_id=data.get("dataset_id"),
+                    filename=data.get("filename", "train.py"),
+                )
+                _EXECUTIONS[exec_id] = rec
+            rec.status = data.get("status", rec.status)
+            rec.started_at = data.get("started_at", rec.started_at)
+            rec.finished_at = data.get("finished_at", rec.finished_at)
+            rec.exit_code = data.get("exit_code", rec.exit_code)
+            rec.stdout = data.get("stdout", rec.stdout)
+            rec.stderr = data.get("stderr", rec.stderr)
+            rec.artifacts = data.get("artifacts", rec.artifacts)
+            rec.registered_model_id = data.get("registered_model_id", rec.registered_model_id)
+            rec.error = data.get("error", rec.error)
+    except Exception:
+        pass
+    return rec
 
 
 def list_executions() -> List[Dict[str, Any]]:

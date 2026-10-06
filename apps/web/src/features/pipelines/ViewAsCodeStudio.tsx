@@ -29,6 +29,7 @@ import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
+import { MonacoCodeStudioEditor } from './MonacoCodeStudioEditor';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -88,7 +89,7 @@ interface LogEntry {
 }
 
 /* ── High-Precision Python Syntax Highlighter Tokenizer ────────────────── */
-function highlightPythonLine(line: string) {
+export function highlightPythonLine(line: string) {
   const cleanLine = line.replace(/\r$/, '');
   if (!cleanLine.trim()) return null;
 
@@ -646,11 +647,9 @@ export function ViewAsCodeStudio({
   const [copilotChat, setCopilotChat] = useState<{ id: string; role: 'user' | 'assistant'; text: string }[]>([]);
 
   /* ── DOM Refs ────────────────────────────────────────────────────── */
-  const editorRef = useRef<HTMLTextAreaElement>(null);
-  const preRef = useRef<HTMLPreElement>(null);
-  const gutterRef = useRef<HTMLDivElement>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const webSocketRef = useRef<WebSocket | null>(null);
   const lastJobIdRef = useRef<string | null>(null);
 
   /* ── Canonical Pipeline Config Derivations ────────────────────────── */
@@ -710,6 +709,9 @@ export function ViewAsCodeStudio({
     return () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
+      }
+      if (webSocketRef.current) {
+        webSocketRef.current.close();
       }
     };
   }, []);
@@ -970,32 +972,7 @@ export function ViewAsCodeStudio({
     deleteExperimentFile(name);
   }, [deleteExperimentFile]);
 
-  /* ── Code Editor Interactive Handlers ────────────────────────────── */
-  const handleEditorChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    updateExperimentFileCode(currentFile, val);
-    markFileModified(currentFile);
-  }, [currentFile, updateExperimentFileCode, markFileModified]);
 
-  const handleEditorSelect = useCallback(() => {
-    if (!editorRef.current) return;
-    const selStart = editorRef.current.selectionStart;
-    const textBefore = displayedCode.substring(0, selStart);
-    const lines = textBefore.split('\n');
-    setCursorPos({ line: lines.length, col: lines[lines.length - 1].length + 1 });
-  }, [displayedCode]);
-
-  const handleEditorScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
-    const top = e.currentTarget.scrollTop;
-    const left = e.currentTarget.scrollLeft;
-    if (preRef.current) {
-      preRef.current.scrollTop = top;
-      preRef.current.scrollLeft = left;
-    }
-    if (gutterRef.current) {
-      gutterRef.current.scrollTop = top;
-    }
-  }, []);
 
   const handleCopyCode = async () => {
     if (!displayedCode) return;
@@ -1015,7 +992,6 @@ export function ViewAsCodeStudio({
       return;
     }
     setIsFormatting(true);
-    const cursorOffset = editorRef.current?.selectionStart ?? 0;
 
     try {
       const res = await CodeExecutionService.formatCode(displayedCode);
@@ -1026,12 +1002,6 @@ export function ViewAsCodeStudio({
       if (res.changed && res.code) {
         updateExperimentFileCode(currentFile, res.code);
         markFileModified(currentFile);
-        setTimeout(() => {
-          if (editorRef.current) {
-            const nextPos = Math.min(cursorOffset, res.code.length);
-            editorRef.current.setSelectionRange(nextPos, nextPos);
-          }
-        }, 0);
         onShowToast?.('Code Formatted', 'Formatted with Black (PEP 8).', 'success');
       } else {
         onShowToast?.('Code Clean', 'Code is already properly formatted.', 'info');
@@ -1263,6 +1233,12 @@ export function ViewAsCodeStudio({
   const handleStopExecution = async () => {
     if (!execId) return;
     try {
+      if (webSocketRef.current && webSocketRef.current.readyState === WebSocket.OPEN) {
+        try {
+          webSocketRef.current.send(JSON.stringify({ action: 'stop' }));
+        } catch {}
+        webSocketRef.current.close();
+      }
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
@@ -1300,93 +1276,7 @@ export function ViewAsCodeStudio({
     }
   };
 
-  /* ── Keyboard Shortcuts ──────────────────────────────────────────── */
-  const handleEditorKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Ctrl+S: Save
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-      e.preventDefault();
-      markFileModified(currentFile);
-      onShowToast?.('Saved', `${currentFile} saved.`, 'info');
-      return;
-    }
-    // Ctrl+Enter: Run
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      handleRunCode();
-      return;
-    }
-    // Ctrl+F: Find
-    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-      e.preventDefault();
-      setIsFindOpen((o) => !o);
-      return;
-    }
-    // Ctrl+`: Toggle Terminal
-    if ((e.ctrlKey || e.metaKey) && e.key === '`') {
-      e.preventDefault();
-      setBottomPanelOpen((o) => !o);
-      return;
-    }
-    // Tab: Indent 4 spaces
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const ta = e.currentTarget;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      const val = ta.value;
 
-      if (e.shiftKey) {
-        const lineStart = val.lastIndexOf('\n', start - 1) + 1;
-        const leading = val.slice(lineStart, lineStart + 4);
-        let spaces = 0;
-        for (let i = 0; i < leading.length; i++) {
-          if (leading[i] === ' ') spaces++;
-          else break;
-        }
-        if (spaces > 0) {
-          const nextVal = val.slice(0, lineStart) + val.slice(lineStart + spaces);
-          updateExperimentFileCode(currentFile, nextVal);
-          markFileModified(currentFile);
-          setTimeout(() => {
-            ta.selectionStart = Math.max(lineStart, start - spaces);
-            ta.selectionEnd = Math.max(lineStart, end - spaces);
-          }, 0);
-        }
-      } else {
-        const nextVal = val.substring(0, start) + '    ' + val.substring(end);
-        updateExperimentFileCode(currentFile, nextVal);
-        markFileModified(currentFile);
-        setTimeout(() => {
-          ta.selectionStart = ta.selectionEnd = start + 4;
-        }, 0);
-      }
-      return;
-    }
-    // Enter: Auto-indent matching previous line
-    if (e.key === 'Enter') {
-      const ta = e.currentTarget;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      const val = ta.value;
-      const lineStart = val.lastIndexOf('\n', start - 1) + 1;
-      const currentLine = val.substring(lineStart, start);
-      const match = currentLine.match(/^[ \t]*/);
-      let indent = match ? match[0] : '';
-      if (currentLine.trim().endsWith(':')) {
-        indent += '    ';
-      }
-      if (indent.length > 0) {
-        e.preventDefault();
-        const insert = '\n' + indent;
-        const nextVal = val.substring(0, start) + insert + val.substring(end);
-        updateExperimentFileCode(currentFile, nextVal);
-        markFileModified(currentFile);
-        setTimeout(() => {
-          ta.selectionStart = ta.selectionEnd = start + insert.length;
-        }, 0);
-      }
-    }
-  };
 
   /* ── Find in Code Handler ────────────────────────────────────────── */
   useEffect(() => {
@@ -1408,13 +1298,9 @@ export function ViewAsCodeStudio({
   }, [findQuery, displayedCode]);
 
   const jumpToMatch = (index: number) => {
-    if (findMatches.length === 0 || !editorRef.current) return;
+    if (findMatches.length === 0) return;
     const targetIdx = (index + findMatches.length) % findMatches.length;
     setFindMatchIdx(targetIdx);
-    const start = findMatches[targetIdx];
-    const end = start + findQuery.length;
-    editorRef.current.focus();
-    editorRef.current.setSelectionRange(start, end);
   };
 
   /* ── AI Copilot Context Cards ────────────────────────────────────── */
@@ -1509,18 +1395,6 @@ export function ViewAsCodeStudio({
       return (s[a.severity] ?? 3) - (s[b.severity] ?? 3) || a.line - b.line;
     });
   }, [displayedCode, serverDiagnostics, runtimeDiagnostics]);
-
-  const diagnosticsByLine = useMemo(() => {
-    const map = new Map<number, Diagnostic>();
-    allDiagnostics.forEach(d => {
-      if (!map.has(d.line)) { map.set(d.line, d); return; }
-      const ex = map.get(d.line)!;
-      if ((d.severity === 'error' && ex.severity !== 'error') ||
-          (d.severity === 'warning' && ex.severity === 'info'))
-        map.set(d.line, d);
-    });
-    return map;
-  }, [allDiagnostics]);
 
   const errorCount = allDiagnostics.filter(d => d.severity === 'error').length;
   const warnCount  = allDiagnostics.filter(d => d.severity === 'warning').length;
@@ -2145,159 +2019,24 @@ export function ViewAsCodeStudio({
               </div>
             )}
 
-            {/* Line Numbers Gutter */}
-            <div
-              ref={gutterRef}
-              aria-hidden="true"
-              style={{
-                width: 52,
-                minWidth: 52,
-                flexShrink: 0,
-                background: BB.surface,
-                borderRight: `1px solid ${BB.border}`,
-                overflow: 'hidden',
-                userSelect: 'none',
-                padding: '12px 0 140px',
-                boxSizing: 'border-box',
-              }}
-            >
-              {codeLines.map((_, idx) => {
-                const lineNum  = idx + 1;
-                const isCurrent = cursorPos.line === lineNum;
-                const diag     = diagnosticsByLine.get(lineNum);
-                const diagColor = diag
-                  ? diag.severity === 'error'   ? '#EF4444'
-                  : diag.severity === 'warning' ? '#F59E0B'
-                  : '#818CF8'
-                  : null;
-                return (
-                  <div
-                    key={idx}
-                    title={diag?.message}
-                    style={{
-                      height: 22,
-                      lineHeight: '22px',
-                      textAlign: 'right',
-                      paddingRight: 8,
-                      fontSize: 12,
-                      fontFamily: 'Consolas, Monaco, monospace',
-                      color: isCurrent ? BB.gold : diag ? diagColor! : '#5C5478',
-                      fontWeight: isCurrent ? 700 : 400,
-                      background: isCurrent
-                        ? 'rgba(201,162,75,0.08)'
-                        : diag?.severity === 'error'
-                        ? 'rgba(239,68,68,0.08)'
-                        : 'transparent',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'flex-end',
-                      gap: 4,
-                      cursor: diag ? 'help' : 'default',
-                    }}
-                  >
-                    {diag && (
-                      <span style={{
-                        width: 6, height: 6, borderRadius: '50%',
-                        background: diagColor!, flexShrink: 0,
-                        boxShadow: `0 0 4px ${diagColor}80`,
-                      }} />
-                    )}
-                    {lineNum}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Editor Textarea & Highlight Surface */}
+            {/* Enterprise Monaco Code Studio Editor Engine */}
             <div style={{ flex: 1, height: '100%', position: 'relative', overflow: 'hidden' }}>
-              {/* Syntax Highlighted Pre (decorative behind transparent textarea) */}
-              <pre
-                ref={preRef}
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  margin: 0,
-                  padding: '12px 16px 140px 16px',
-                  overflow: 'hidden',
-                  pointerEvents: 'none',
-                  fontFamily: 'Consolas, Monaco, monospace',
-                  fontSize: 12.5,
-                  lineHeight: '22px',
-                  tabSize: 4,
-                  whiteSpace: 'pre',
-                  boxSizing: 'border-box',
-                  background: BB.codeBg,
-                  zIndex: 1,
+              <MonacoCodeStudioEditor
+                code={displayedCode}
+                filename={currentFile}
+                diagnostics={allDiagnostics}
+                onChange={(newCode) => {
+                  updateExperimentFileCode(currentFile, newCode);
+                  markFileModified(currentFile);
                 }}
-              >
-                {codeLines.map((line, idx) => {
-                  const lineNum   = idx + 1;
-                  const isCurrent = cursorPos.line === lineNum;
-                  const diag      = diagnosticsByLine.get(lineNum);
-                  return (
-                    <div
-                      key={idx}
-                      style={{
-                        height: 22,
-                        lineHeight: '22px',
-                        whiteSpace: 'pre',
-                        background: diag?.severity === 'error'
-                          ? 'rgba(239,68,68,0.07)'
-                          : diag?.severity === 'warning'
-                          ? 'rgba(245,158,11,0.05)'
-                          : isCurrent
-                          ? 'rgba(255,255,255,0.02)'
-                          : 'transparent',
-                        borderLeft: diag?.severity === 'error'
-                          ? '2px solid rgba(239,68,68,0.6)'
-                          : diag?.severity === 'warning'
-                          ? '2px solid rgba(245,158,11,0.5)'
-                          : '2px solid transparent',
-                      }}
-                    >
-                      {highlightPythonLine(line) ?? ' '}
-                    </div>
-                  );
-                })}
-              </pre>
-
-              {/* Editable Transparent Textarea Overlay (receives all user input & drives scrolling) */}
-              <textarea
-                ref={editorRef}
-                value={displayedCode}
-                onChange={handleEditorChange}
-                onKeyDown={handleEditorKeyDown}
-                onSelect={handleEditorSelect}
-                onClick={handleEditorSelect}
-                onScroll={handleEditorScroll}
-                spellCheck={false}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  width: '100%',
-                  height: '100%',
-                  padding: '12px 16px 140px 16px',
-                  margin: 0,
-                  overflow: 'auto',
-                  resize: 'none',
-                  background: 'transparent',
-                  color: 'transparent',
-                  caretColor: '#F5F1EC',
-                  WebkitTextFillColor: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  fontFamily: 'Consolas, Monaco, monospace',
-                  fontSize: 12.5,
-                  lineHeight: '22px',
-                  tabSize: 4,
-                  whiteSpace: 'pre',
-                  boxSizing: 'border-box',
-                  zIndex: 2,
+                onCursorChange={(pos) => setCursorPos(pos)}
+                onRunCode={handleRunCode}
+                onSave={() => {
+                  markFileModified(currentFile);
+                  onShowToast?.('Saved', `${currentFile} saved.`, 'info');
                 }}
+                onToggleTerminal={() => setBottomPanelOpen((o) => !o)}
+                minimapEnabled={true}
               />
             </div>
           </div>
@@ -2694,14 +2433,7 @@ export function ViewAsCodeStudio({
                                   key={i}
                                   title={d.message}
                                   onClick={() => {
-                                    // Jump editor to the line
-                                    if (editorRef.current) {
-                                      const lines = displayedCode.split('\n');
-                                      let offset = 0;
-                                      for (let j = 0; j < d.line - 1; j++) offset += lines[j].length + 1;
-                                      editorRef.current.focus();
-                                      editorRef.current.setSelectionRange(offset, offset + (lines[d.line - 1]?.length ?? 0));
-                                    }
+                                    setCursorPos({ line: d.line, col: d.col });
                                   }}
                                   style={{
                                     padding: '4px 12px 4px 16px',

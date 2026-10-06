@@ -12,9 +12,10 @@ POST /api/v1/code-execution/format            -- format Python code (Black / PEP
 from __future__ import annotations
 
 import ast
+import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,6 +27,7 @@ from app.services.code_execution_service import (
     start_execution,
     stop_execution,
     stream_execution,
+    stream_execution_events,
 )
 from app.services.code_linter_service import lint_code
 
@@ -230,6 +232,45 @@ async def stream_output(exec_id: str) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.websocket(
+    "/{exec_id}/ws",
+)
+async def websocket_output(websocket: WebSocket, exec_id: str) -> None:
+    """Stream execution stdout/stderr over WebSocket with real-time interactive control."""
+    await websocket.accept()
+    if get_execution(exec_id) is None:
+        await websocket.send_json({"type": "error", "error": f"Execution '{exec_id}' not found."})
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    # Background task to listen for client commands (e.g. stop)
+    async def listen_client():
+        try:
+            while True:
+                msg = await websocket.receive_json()
+                if isinstance(msg, dict) and msg.get("action") == "stop":
+                    await stop_execution(exec_id)
+        except Exception:
+            pass
+
+    client_task = asyncio.create_task(listen_client())
+    try:
+        async for event in stream_execution_events(exec_id):
+            await websocket.send_json(event)
+            if event.get("type") in ("exit", "error"):
+                break
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        client_task.cancel()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @router.post(

@@ -117,6 +117,7 @@ celery_app = Celery(
         "services.worker.tasks.ingestion_task",
         "services.worker.tasks.health_task",
         "services.worker.tasks.recommendation_task",
+        "services.worker.tasks.code_execution_task",
     ],
 )
 

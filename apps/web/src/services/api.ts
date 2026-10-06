@@ -407,5 +407,14 @@ export const CodeExecutionService = {
    * The caller is responsible for creating the EventSource connection.
    */
   streamUrl: (execId: string) => `/api/v1/code-execution/${execId}/stream`,
+
+  /**
+   * Returns the WebSocket stream URL for a given exec_id.
+   */
+  wsStreamUrl: (execId: string) => {
+    if (typeof window === 'undefined') return `/api/v1/code-execution/${execId}/ws`;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/api/v1/code-execution/${execId}/ws`;
+  },
 };
 
