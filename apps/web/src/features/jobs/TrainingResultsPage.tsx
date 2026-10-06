@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails, subscribeToJobProgressSSE, pollJobUntilDone } from '../../services/jobService';
+import { LocalDeploymentService } from '../../services/localDeploymentService';
 import type { JobEntity } from '../../types/job';
 import type { PlatformTab } from '../../App';
 
@@ -265,7 +266,7 @@ function parsePipelineCode(code: string): {
 }
 
 interface TrainingResultsPageProps {
-  onNavigate: (tab: PlatformTab) => void;
+  onNavigate: (tab: PlatformTab, deploymentId?: string) => void;
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'error') => void;
 }
 
@@ -288,7 +289,33 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
 
   const [job, setJob] = useState<JobEntity | null>(activeJob);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
   const fetchedRef = useRef<string | null>(null);
+
+  const handleDeployModel = async () => {
+    if (!job || job.status !== 'COMPLETED') return;
+    setIsDeploying(true);
+    try {
+      const dep = await LocalDeploymentService.create(
+        job.job_id,
+        `${job.algorithm || 'Model'} Service`
+      );
+      onShowToast?.(
+        'Model Deployed!',
+        `${job.algorithm || 'Model'} endpoint is live and ready for testing.`,
+        'success'
+      );
+      onNavigate('deployments', dep.deployment_id);
+    } catch (err: any) {
+      onShowToast?.(
+        'Deployment Failed',
+        err?.detail || err?.message || 'Could not instantiate local serving endpoint.',
+        'error'
+      );
+    } finally {
+      setIsDeploying(false);
+    }
+  };
 
   // Synchronize state with context
   useEffect(() => {
@@ -322,6 +349,11 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
         if (!ok) return;
         setJob((prev) => {
           if (!prev) return prev;
+          // Guard: If job has already completed or reached terminal state, do not regress back to non-terminal
+          const term = ['COMPLETED', 'FAILED', 'CANCELLED'];
+          if (term.includes(prev.status) && !term.includes(live.status)) {
+            return prev;
+          }
           const n = {
             ...prev,
             status: live.status,
@@ -332,6 +364,18 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
           setActiveJob(n);
           if (setFileJob && activeExperimentFile) {
             setFileJob(activeExperimentFile, n);
+          }
+          if (live.status === 'COMPLETED' && fetchedRef.current !== prev.job_id) {
+            fetchedRef.current = prev.job_id;
+            fetchJobDetails(prev.job_id).then((full) => {
+              if (full && ok) {
+                setJob(full);
+                setActiveJob(full);
+                if (setFileJob && activeExperimentFile) {
+                  setFileJob(activeExperimentFile, full);
+                }
+              }
+            }).catch(() => {});
           }
           return n;
         });
@@ -678,7 +722,8 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
           {/* 1-Click Deploy Model Action */}
           {job.status === 'COMPLETED' && (
             <button
-              onClick={() => onNavigate('deployments')}
+              onClick={handleDeployModel}
+              disabled={isDeploying}
               title="Deploy trained model artifact to a local serving endpoint"
               style={{
                 display: 'flex',
@@ -688,7 +733,8 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                 borderRadius: 8,
                 fontSize: 12,
                 fontWeight: 700,
-                cursor: 'pointer',
+                cursor: isDeploying ? 'not-allowed' : 'pointer',
+                opacity: isDeploying ? 0.75 : 1,
                 border: '1px solid rgba(0, 245, 160, 0.4)',
                 background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18) 0%, rgba(0, 245, 160, 0.22) 100%)',
                 color: '#00F5A0',
@@ -696,7 +742,15 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                 transition: 'all 150ms ease',
               }}
             >
-              <Rocket style={{ width: 14, height: 14 }} /> Deploy Model
+              {isDeploying ? (
+                <>
+                  <RefreshCw style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> Deploying...
+                </>
+              ) : (
+                <>
+                  <Rocket style={{ width: 14, height: 14 }} /> Deploy Model
+                </>
+              )}
             </button>
           )}
         </div>

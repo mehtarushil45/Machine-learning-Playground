@@ -21,9 +21,11 @@ import {
   ArrowUp,
   ArrowDown,
   Wand2,
+  Rocket,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService } from '../../services/api';
+import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
@@ -56,7 +58,7 @@ const BB = {
 export interface ViewAsCodeStudioProps {
   isActive?: boolean;
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
-  onNavigate?: (tab: string) => void;
+  onNavigate?: (tab: string, deploymentId?: string) => void;
   isCopilotOpen?: boolean;
   onToggleCopilot?: () => void;
 }
@@ -419,9 +421,9 @@ function analyzeCode(code: string): Diagnostic[] {
     const trimmed = raw.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
 
-    // Line too long (PEP 8 E501)
+    // Line too long (PEP 8 E501 hint)
     if (raw.length > 120)
-      results.push({ line: num, col: 121, severity: 'warning', message: `Line too long (${raw.length} > 120 chars) — E501`, source: 'static' });
+      results.push({ line: num, col: 121, severity: 'info', message: `Line length hint (${raw.length} > 120 chars) — E501`, source: 'static' });
 
     // Mixed tabs and spaces (E101)
     const leading = raw.match(/^(\s+)/);
@@ -459,31 +461,90 @@ function analyzeCode(code: string): Diagnostic[] {
   return results;
 }
 
-/* ── Runtime Error Parser (Python traceback → Diagnostics) ─────────── */
-function parseRuntimeErrors(outputLines: string[]): Diagnostic[] {
+/* ── Runtime Error Parser (Python traceback → Clean User-Facing Diagnostics) ─────────── */
+function parseRuntimeErrors(
+  outputLines: string[],
+  activeFilename: string = '',
+  totalEditorLines: number = 0
+): Diagnostic[] {
   const results: Diagnostic[] = [];
-  const seen = new Set<number>();
-  let lastError = '';
 
-  for (let i = 0; i < outputLines.length; i++) {
-    const raw = outputLines[i].replace(/^\[stderr\]\s?/, '');
-    if (/^[A-Z][a-zA-Z]+(Error|Exception|Warning):/.test(raw)) lastError = raw;
+  // 1. Locate the terminal exception / error line from python stderr
+  let fatalErrorMsg = '';
+  for (let i = outputLines.length - 1; i >= 0; i--) {
+    const raw = outputLines[i].replace(/^\[stderr\]\s?/, '').trim();
+    if (/^[A-Z][a-zA-Z]*(?:Error|Exception):/.test(raw)) {
+      fatalErrorMsg = raw;
+      break;
+    }
+  }
 
-    const m = raw.match(/File "([^"]+)", line (\d+)/);
-    if (!m) continue;
-    const lineNum = parseInt(m[2]);
-    if (lineNum <= 0 || seen.has(lineNum)) continue;
-    seen.add(lineNum);
-
-    let msg = lastError;
-    if (!msg) {
-      for (let j = i + 1; j < Math.min(i + 8, outputLines.length); j++) {
-        const next = outputLines[j].replace(/^\[stderr\]\s?/, '');
-        if (/^[A-Z][a-zA-Z]+(Error|Exception|Warning):/.test(next)) { msg = next; lastError = msg; break; }
+  if (!fatalErrorMsg) {
+    // If no explicit Exception header, check for syntax error indicators
+    for (let i = outputLines.length - 1; i >= 0; i--) {
+      const raw = outputLines[i].replace(/^\[stderr\]\s?/, '').trim();
+      if (/SyntaxError:|IndentationError:|TabError:/.test(raw)) {
+        fatalErrorMsg = raw;
+        break;
       }
     }
-    results.push({ line: lineNum, col: 1, severity: 'error', message: msg || `Runtime error at line ${lineNum}`, source: 'runtime' });
   }
+
+  // 2. Track the most recent user-code frame in traceback (ignoring site-packages/internal libs)
+  let lastUserLine: number | null = null;
+
+  for (let i = 0; i < outputLines.length; i++) {
+    const raw = outputLines[i].replace(/^\[stderr\]\s?/, '').trim();
+    const m = raw.match(/File "([^"]+)", line (\d+)/);
+    if (!m) continue;
+
+    const filePath = m[1];
+    const lineNum = parseInt(m[2], 10);
+    if (isNaN(lineNum) || lineNum <= 0) continue;
+
+    const normPath = filePath.replace(/\\/g, '/');
+    const baseName = normPath.split('/').pop() || '';
+
+    const isSystemLib =
+      normPath.includes('site-packages') ||
+      normPath.includes('dist-packages') ||
+      normPath.includes('/lib/') ||
+      normPath.includes('\\lib\\') ||
+      normPath.includes('<frozen') ||
+      normPath.includes('<string>');
+
+    const isTargetFile =
+      !isSystemLib &&
+      (activeFilename
+        ? baseName === activeFilename || normPath.endsWith(`/${activeFilename}`)
+        : !normPath.includes('/lib/'));
+
+    if (isTargetFile) {
+      if (totalEditorLines > 0 && lineNum > totalEditorLines) continue;
+      lastUserLine = lineNum;
+    }
+  }
+
+  // If a fatal error and user-code line were identified, link to editor line
+  if (lastUserLine !== null && fatalErrorMsg) {
+    results.push({
+      line: lastUserLine,
+      col: 1,
+      severity: 'error',
+      message: fatalErrorMsg,
+      source: 'runtime',
+    });
+  } else if (fatalErrorMsg) {
+    // Fallback: attach error to line 1 of active file
+    results.push({
+      line: 1,
+      col: 1,
+      severity: 'error',
+      message: fatalErrorMsg,
+      source: 'runtime',
+    });
+  }
+
   return results;
 }
 
@@ -571,6 +632,8 @@ export function ViewAsCodeStudio({
   const [execStatus, setExecStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped'>('idle');
   const [outputLines, setOutputLines] = useState<string[]>([]);
   const [execArtifacts, setExecArtifacts] = useState<string[]>([]);
+  const [execModelId, setExecModelId] = useState<string | null>(null);
+  const [isDeployingArtifact, setIsDeployingArtifact] = useState<boolean>(false);
   const [execDuration, setExecDuration] = useState<number | null>(null);
   const [execExitCode, setExecExitCode] = useState<number | null>(null);
   const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<Diagnostic[]>([]);
@@ -603,6 +666,15 @@ export function ViewAsCodeStudio({
   const currentFile = activeExperimentFile || openTabs[0] || 'pipeline_generated.py';
   const effectiveTabs = openTabs.length > 0 ? openTabs : [currentFile];
   const displayedCode = experimentFiles[currentFile] ?? generatedCode ?? '';
+
+  const hasLegacyPipeline = useMemo(() => {
+    if (!displayedCode) return false;
+    return (
+      displayedCode.includes("('num', numeric_transformer, feature_cols)") ||
+      displayedCode.includes('("num", numeric_transformer, feature_cols)') ||
+      (displayedCode.includes("numeric_transformer, feature_cols") && !displayedCode.includes("numeric_features"))
+    );
+  }, [displayedCode]);
 
   /* ── Validation ─────────────────────────────────────────────────── */
   const validationErrors = useMemo<string[]>(() => {
@@ -983,6 +1055,8 @@ export function ViewAsCodeStudio({
     setExecExitCode(null);
     setExecDuration(null);
     setExecArtifacts([]);
+    setExecModelId(null);
+    setIsDeployingArtifact(false);
     setRuntimeDiagnostics([]);
     setLogEntries([
       makeLog('system', `Execution started: '${currentFile}'`),
@@ -1042,6 +1116,7 @@ export function ViewAsCodeStudio({
             setExecExitCode(exitCode);
             setExecDuration(dur);
             setExecArtifacts(arts);
+            if (data.model_id) setExecModelId(data.model_id);
             const newStatus = exitCode === 0 ? 'completed' : 'failed';
             setExecStatus(newStatus);
             setLogEntries(prev => [
@@ -1050,10 +1125,14 @@ export function ViewAsCodeStudio({
                 `Process exited with code ${exitCode} in ${dur.toFixed(2)}s`),
               ...(arts.length > 0 ? [makeLog('info', `Artifacts saved: ${arts.join(', ')}`)] : []),
             ]);
-            // Parse traceback → inline error markers
-            const errDiags = parseRuntimeErrors(allOutputRef);
-            setRuntimeDiagnostics(errDiags);
-            if (errDiags.length > 0) setBottomTab('problems');
+            // Parse traceback → inline error markers (only on failure)
+            if (exitCode === 0) {
+              setRuntimeDiagnostics([]);
+            } else {
+              const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
+              setRuntimeDiagnostics(errDiags);
+              if (errDiags.length > 0) setBottomTab('problems');
+            }
             es.close();
 
           } else if (data.type === 'error') {
@@ -1063,7 +1142,7 @@ export function ViewAsCodeStudio({
             setLogEntries(prev => [...prev, makeLog('error', data.error)]);
             setExecStatus('failed');
             setExecDuration((Date.now() - startTime) / 1000);
-            const errDiags = parseRuntimeErrors(allOutputRef);
+            const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
             setRuntimeDiagnostics(errDiags);
             if (errDiags.length > 0) setBottomTab('problems');
             es.close();
@@ -1086,13 +1165,18 @@ export function ViewAsCodeStudio({
             setExecDuration(finalRes.duration_seconds ?? null);
             setExecExitCode(finalRes.exit_code ?? null);
             if (finalRes.artifacts) setExecArtifacts(finalRes.artifacts);
+            if (finalRes.model_id) setExecModelId(finalRes.model_id);
             const allLines = [
               ...(finalRes.stdout ? finalRes.stdout.split('\n') : []),
               ...(finalRes.stderr ? finalRes.stderr.split('\n').map(l => `[stderr] ${l}`) : []),
             ];
-            const errDiags = parseRuntimeErrors(allLines);
-            setRuntimeDiagnostics(errDiags);
-            if (errDiags.length > 0) setBottomTab('problems');
+            if (finalRes.exit_code === 0 || finalRes.status === 'completed') {
+              setRuntimeDiagnostics([]);
+            } else {
+              const errDiags = parseRuntimeErrors(allLines, currentFile, displayedCode.split('\n').length);
+              setRuntimeDiagnostics(errDiags);
+              if (errDiags.length > 0) setBottomTab('problems');
+            }
           }).catch(() => {});
           es.close();
           return;
@@ -1128,9 +1212,14 @@ export function ViewAsCodeStudio({
             setExecExitCode(finalRes.exit_code ?? (finalRes.status === 'completed' ? 0 : null));
             setExecDuration(finalRes.duration_seconds ?? (Date.now() - startTime) / 1000);
             if (finalRes.artifacts) setExecArtifacts(finalRes.artifacts);
-            const errDiags = parseRuntimeErrors(allOutputRef);
-            setRuntimeDiagnostics(errDiags);
-            if (errDiags.length > 0) setBottomTab('problems');
+            if (finalRes.model_id) setExecModelId(finalRes.model_id);
+            if (finalRes.exit_code === 0 || finalRes.status === 'completed') {
+              setRuntimeDiagnostics([]);
+            } else {
+              const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
+              setRuntimeDiagnostics(errDiags);
+              if (errDiags.length > 0) setBottomTab('problems');
+            }
             setLogEntries(prev => [...prev,
               makeLog(st === 'completed' ? 'info' : 'error',
                 `Stream ended — final status: ${st}${finalRes.exit_code != null ? ` (exit ${finalRes.exit_code})` : ''}`),
@@ -1169,6 +1258,32 @@ export function ViewAsCodeStudio({
       setOutputLines((p) => [...p, '[ML Playground] Execution stopped by user.']);
     } catch (err: any) {
       setOutputLines((p) => [...p, `[Error] Failed to stop execution: ${err.message}`]);
+    }
+  };
+
+  const handleDeployFromCodeStudio = async () => {
+    setIsDeployingArtifact(true);
+    try {
+      const targetModelId = execModelId || (execId ? `model-exec-${execId.slice(0, 8)}` : null);
+      const dep = await LocalDeploymentService.create({
+        modelId: targetModelId || undefined,
+        jobId: !targetModelId ? (activeJob?.job_id || undefined) : undefined,
+        name: `${currentFile.replace(/\.py$/, '')} Service`,
+      });
+      onShowToast?.(
+        'Model Deployed!',
+        `Serving endpoint for ${currentFile} is live in Deployment Studio.`,
+        'success'
+      );
+      onNavigate?.('deployments', dep.deployment_id);
+    } catch (err: any) {
+      onShowToast?.(
+        'Deployment Failed',
+        err?.detail || err?.message || 'Could not instantiate local serving endpoint.',
+        'error'
+      );
+    } finally {
+      setIsDeployingArtifact(false);
     }
   };
 
@@ -1357,6 +1472,46 @@ export function ViewAsCodeStudio({
     }, 450);
   };
 
+  /* ── Lines for Code Editor ───────────────────────────────────────── */
+  const codeLines = displayedCode.split('\n');
+  const experimentFileList = Object.keys(experimentFiles).map((name) => ({ name }));
+
+  /* ── Diagnostic Computations (Single Source of Truth: server + runtime) ─ */
+  const allDiagnostics = useMemo(() => {
+    // If buffer is empty, immediately return empty diagnostics (clean empty-state)
+    if (!displayedCode || !displayedCode.trim()) return [];
+
+    const seen = new Map<string, Diagnostic>();
+    // Primary source: real server-side AST and pyflakes diagnostics.
+    // Client-side analyzeCode serves as initial pre-check while server request is in flight
+    const activeDiagnostics = serverDiagnostics.length > 0 ? serverDiagnostics : analyzeCode(displayedCode);
+
+    [...activeDiagnostics, ...runtimeDiagnostics].forEach((d) => {
+      const key = `${d.line}:${d.message}`;
+      if (!seen.has(key)) seen.set(key, d);
+    });
+
+    return Array.from(seen.values()).sort((a, b) => {
+      const s: Record<string, number> = { error: 0, warning: 1, info: 2 };
+      return (s[a.severity] ?? 3) - (s[b.severity] ?? 3) || a.line - b.line;
+    });
+  }, [displayedCode, serverDiagnostics, runtimeDiagnostics]);
+
+  const diagnosticsByLine = useMemo(() => {
+    const map = new Map<number, Diagnostic>();
+    allDiagnostics.forEach(d => {
+      if (!map.has(d.line)) { map.set(d.line, d); return; }
+      const ex = map.get(d.line)!;
+      if ((d.severity === 'error' && ex.severity !== 'error') ||
+          (d.severity === 'warning' && ex.severity === 'info'))
+        map.set(d.line, d);
+    });
+    return map;
+  }, [allDiagnostics]);
+
+  const errorCount = allDiagnostics.filter(d => d.severity === 'error').length;
+  const warnCount  = allDiagnostics.filter(d => d.severity === 'warning').length;
+
   /* ── Accessible Empty State ──────────────────────────────────────── */
   if (!hasUsableConfig) {
     return (
@@ -1421,46 +1576,6 @@ export function ViewAsCodeStudio({
       </div>
     );
   }
-
-  /* ── Lines for Code Editor ───────────────────────────────────────── */
-  const codeLines = displayedCode.split('\n');
-  const experimentFileList = Object.keys(experimentFiles).map((name) => ({ name }));
-
-  /* ── Diagnostic Computations (Single Source of Truth: server + runtime) ─ */
-  const allDiagnostics = useMemo(() => {
-    // If buffer is empty, immediately return empty diagnostics (clean empty-state)
-    if (!displayedCode || !displayedCode.trim()) return [];
-
-    const seen = new Map<string, Diagnostic>();
-    // Primary source: real server-side AST and pyflakes diagnostics.
-    // Client-side analyzeCode serves as initial pre-check while server request is in flight
-    const activeDiagnostics = serverDiagnostics.length > 0 ? serverDiagnostics : analyzeCode(displayedCode);
-
-    [...activeDiagnostics, ...runtimeDiagnostics].forEach((d) => {
-      const key = `${d.line}:${d.message}`;
-      if (!seen.has(key)) seen.set(key, d);
-    });
-
-    return Array.from(seen.values()).sort((a, b) => {
-      const s: Record<string, number> = { error: 0, warning: 1, info: 2 };
-      return (s[a.severity] ?? 3) - (s[b.severity] ?? 3) || a.line - b.line;
-    });
-  }, [displayedCode, serverDiagnostics, runtimeDiagnostics]);
-
-  const diagnosticsByLine = useMemo(() => {
-    const map = new Map<number, Diagnostic>();
-    allDiagnostics.forEach(d => {
-      if (!map.has(d.line)) { map.set(d.line, d); return; }
-      const ex = map.get(d.line)!;
-      if ((d.severity === 'error' && ex.severity !== 'error') ||
-          (d.severity === 'warning' && ex.severity === 'info'))
-        map.set(d.line, d);
-    });
-    return map;
-  }, [allDiagnostics]);
-
-  const errorCount = allDiagnostics.filter(d => d.severity === 'error').length;
-  const warnCount  = allDiagnostics.filter(d => d.severity === 'warning').length;
 
   return (
     <div
@@ -1764,6 +1879,38 @@ export function ViewAsCodeStudio({
               <span>Run</span>
             </button>
           )}
+
+          {/* Quick Deploy Button when artifact is ready */}
+          {execArtifacts.some((a) => a.endsWith('.joblib') || a.endsWith('.pkl')) && (
+            <button
+              onClick={handleDeployFromCodeStudio}
+              disabled={isDeployingArtifact}
+              aria-label="Deploy model from Code Studio"
+              title="Deploy trained model artifact to a serving endpoint"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 12px',
+                borderRadius: 5,
+                border: '1px solid rgba(0, 245, 160, 0.5)',
+                background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18), rgba(0, 245, 160, 0.22))',
+                color: '#00F5A0',
+                fontSize: 11.5,
+                fontWeight: 700,
+                cursor: isDeployingArtifact ? 'not-allowed' : 'pointer',
+                boxShadow: '0 0 10px rgba(0, 245, 160, 0.2)',
+                transition: 'all 120ms ease',
+              }}
+            >
+              {isDeployingArtifact ? (
+                <RefreshCw style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
+              ) : (
+                <Rocket style={{ width: 12, height: 12 }} />
+              )}
+              <span>{isDeployingArtifact ? 'Deploying...' : 'Deploy Model'}</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -1874,6 +2021,52 @@ export function ViewAsCodeStudio({
                 style={{ background: 'transparent', border: 'none', color: BB.muted, cursor: 'pointer', padding: 2, marginLeft: 'auto' }}
               >
                 <X style={{ width: 13, height: 13 }} />
+              </button>
+            </div>
+          )}
+
+          {/* Legacy Pipeline Code Detection & 1-Click Upgrade Banner */}
+          {hasLegacyPipeline && (
+            <div
+              style={{
+                margin: '6px 14px 4px',
+                padding: '7px 14px',
+                background: 'rgba(245, 158, 11, 0.12)',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: '#FCD34D' }}>
+                <span style={{ fontSize: 14 }}>⚠️</span>
+                <span>
+                  <strong>Legacy Pipeline Code Detected:</strong> Non-numeric features are not separated from numeric transformers. This will cause <code>ValueError</code> on text/category data.
+                </span>
+              </div>
+              <button
+                onClick={() => generatePipelineCode(currentFile)}
+                disabled={isGenerating}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 5,
+                  background: 'linear-gradient(135deg, #F59E0B, #D97706)',
+                  color: '#000',
+                  fontWeight: 700,
+                  fontSize: 11,
+                  border: 'none',
+                  cursor: isGenerating ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <RefreshCw size={11} style={{ animation: isGenerating ? 'spin 1s linear infinite' : 'none' }} />
+                <span>Fix & Upgrade Pipeline</span>
               </button>
             </div>
           )}
@@ -2416,20 +2609,50 @@ export function ViewAsCodeStudio({
                       <div
                         style={{
                           margin: '8px 16px',
-                          padding: '8px 12px',
+                          padding: '10px 14px',
                           background: 'rgba(34,197,94,0.08)',
                           border: '1px solid rgba(34,197,94,0.25)',
-                          borderRadius: 6,
+                          borderRadius: 8,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 16,
                         }}
                       >
-                        <div style={{ fontSize: 11, fontWeight: 700, color: BB.success, marginBottom: 4 }}>
-                          Artifacts Produced:
-                        </div>
-                        {execArtifacts.map((a) => (
-                          <div key={a} style={{ fontSize: 11, fontFamily: 'Consolas, Monaco, monospace', color: BB.text }}>
-                            • {a}
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: BB.success, marginBottom: 4 }}>
+                            Artifacts Produced:
                           </div>
-                        ))}
+                          {execArtifacts.map((a) => (
+                            <div key={a} style={{ fontSize: 11, fontFamily: 'Consolas, Monaco, monospace', color: BB.text }}>
+                              • {a}
+                            </div>
+                          ))}
+                        </div>
+                        {execArtifacts.some((a) => a.endsWith('.joblib') || a.endsWith('.pkl')) && (
+                          <button
+                            onClick={handleDeployFromCodeStudio}
+                            disabled={isDeployingArtifact}
+                            style={{
+                              padding: '6px 14px',
+                              borderRadius: 6,
+                              border: '1px solid rgba(0, 245, 160, 0.5)',
+                              background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.2), rgba(0, 245, 160, 0.25))',
+                              color: '#00F5A0',
+                              fontWeight: 700,
+                              fontSize: 11.5,
+                              cursor: isDeployingArtifact ? 'not-allowed' : 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              boxShadow: '0 0 10px rgba(0, 245, 160, 0.25)',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            <Rocket style={{ width: 13, height: 13 }} />
+                            <span>{isDeployingArtifact ? 'Deploying...' : 'Deploy Model'}</span>
+                          </button>
+                        )}
                       </div>
                     )}
                     <div ref={outputEndRef} />

@@ -345,6 +345,7 @@ export interface ExecutionResult {
   artifacts:        string[];
   duration_seconds: number | null;
   error:            string | null;
+  model_id?:        string | null;
 }
 
 export interface FormatResponse {

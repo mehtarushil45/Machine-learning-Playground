@@ -7,9 +7,10 @@ from pydantic import BaseModel, Field
 
 
 class LocalDeploymentCreate(BaseModel):
-    """Request payload to create a local deployment from a completed training job."""
+    """Request payload to create a local deployment from a completed training job or registered model."""
 
-    job_id: str = Field(..., description="ID of a COMPLETED training job")
+    job_id: Optional[str] = Field(None, description="ID of a COMPLETED training job")
+    model_id: Optional[str] = Field(None, description="ID of a registered model from ModelRegistry")
     name: str = Field("Local Deployment", max_length=255, description="Display name for the deployment")
     configuration: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Custom serving configuration")
 

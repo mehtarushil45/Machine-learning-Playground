@@ -14,11 +14,21 @@ import uuid
 import pytest
 from fastapi import HTTPException
 
-from app.database import AsyncSessionLocal
+from app.database import AsyncSessionLocal, engine
 from app.models.local_deployment import LocalDeployment, LocalDeploymentStatus
 from app.models.local_prediction_history import LocalPredictionHistory
 import app.services.local_deployment_service as svc
 from app.schemas.local_deployment import LocalPredictRequest, LocalDeploymentRedeploy
+
+
+@pytest.fixture(autouse=True)
+def dispose_db_engine():
+    yield
+    import asyncio
+    try:
+        asyncio.run(engine.dispose())
+    except Exception:
+        pass
 
 
 @pytest.mark.asyncio

@@ -641,6 +641,17 @@ class JobService:
                 raise
             except (ValueError, Exception) as db_exc:
                 logger.warning("DB get_job lookup failed for %s: %s", job_id, db_exc)
+        else:
+            try:
+                job_uuid = uuid.UUID(job_id)
+                async with AsyncSessionLocal() as session:
+                    stmt = select(Job).where(Job.id == job_uuid, Job.is_deleted == False)
+                    res = await session.execute(stmt)
+                    db_job = res.scalar_one_or_none()
+            except HTTPException:
+                raise
+            except (ValueError, Exception) as db_exc:
+                logger.warning("AsyncSessionLocal get_job lookup failed for %s: %s", job_id, db_exc)
 
         if db_job is not None:
             _assert_owner(db_job, user_id)

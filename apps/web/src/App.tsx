@@ -53,6 +53,7 @@ function AppContent() {
   const { setLifecycleStage, isProjectInitialized, dataset, activeExperimentFile, resetProject } = useProject();
 
   const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
+  const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [hoveredNav, setHoveredNav] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState<string>('');
@@ -71,8 +72,11 @@ function AppContent() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const handleNavigate = (tab: PlatformTab) => {
+  const handleNavigate = (tab: PlatformTab, deploymentId?: string) => {
     setActiveTab(tab);
+    if (deploymentId) {
+      setActiveDeploymentId(deploymentId);
+    }
     const tabToStage: Partial<Record<PlatformTab, LifecycleStage>> = {
       workspace:          'dataset',
       'code-studio':      'pipeline',
@@ -435,7 +439,7 @@ function AppContent() {
                   <ViewAsCodeStudio
                     isActive={activeTab === 'code-studio'}
                     onShowToast={showToast}
-                    onNavigate={(tab) => handleNavigate(tab as PlatformTab)}
+                    onNavigate={(tab, depId) => handleNavigate(tab as PlatformTab, depId)}
                     isCopilotOpen={isCopilotOpen}
                     onToggleCopilot={() => setIsCopilotOpen((prev) => !prev)}
                   />
@@ -453,7 +457,10 @@ function AppContent() {
 
               <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
-                  <DeploymentsHub onShowToast={showToast} />
+                  <DeploymentsHub
+                    initialDeploymentId={activeDeploymentId}
+                    onShowToast={showToast}
+                  />
                 </ErrorBoundary>
               </div>
             </>

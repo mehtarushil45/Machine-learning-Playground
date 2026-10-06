@@ -94,11 +94,29 @@ def _build_input_schema(
         bool_cols = set(getattr(loaded_model, "boolean_columns", []))
         categories_map = dict(getattr(loaded_model, "categories_map", {}))
 
+        # Direct pipeline introspection if not already populated
+        pipe = getattr(loaded_model, "pipeline", loaded_model)
+        prep = getattr(pipe, "named_steps", {}).get("preprocessor") if hasattr(pipe, "named_steps") else None
+        trans_list = getattr(prep, "transformers_", None) or getattr(prep, "transformers", None)
+        if trans_list:
+            for tname, trans, cols in trans_list:
+                if isinstance(cols, (list, tuple, set)):
+                    str_cols = [str(c) for c in cols]
+                    if tname in ("categorical", "cat", "boolean") or "cat" in str(tname).lower():
+                        cat_cols.update(str_cols)
+                        encoder = getattr(trans, "named_steps", {}).get("encoder") if hasattr(trans, "named_steps") else trans
+                        if encoder and hasattr(encoder, "categories_"):
+                            for c, cats in zip(str_cols, encoder.categories_):
+                                categories_map[c] = [str(x) for x in cats]
+
     # 2. Lineage / registry metadata fallback
-    lineage = model_registry_meta.get("lineage", {}) if isinstance(model_registry_meta, dict) else {}
-    if not cat_cols and isinstance(lineage, dict):
-        lineage_cats = lineage.get("categorical_columns") or []
-        cat_cols.update(lineage_cats)
+    if isinstance(model_registry_meta, dict):
+        lineage = model_registry_meta.get("lineage", {})
+        if isinstance(lineage, dict):
+            lineage_cats = lineage.get("categorical_columns") or []
+            cat_cols.update(lineage_cats)
+        direct_cats = model_registry_meta.get("categorical_columns") or []
+        cat_cols.update(direct_cats)
 
     schema: Dict[str, Any] = {}
     sample_inputs: Dict[str, Any] = {}
@@ -254,8 +272,8 @@ async def _get_deployment(
 ) -> LocalDeployment:
     """Fetch deployment by UUID or raise 404."""
     try:
-        dep_uuid = uuid.UUID(deployment_id)
-    except ValueError:
+        dep_uuid = deployment_id if isinstance(deployment_id, uuid.UUID) else uuid.UUID(str(deployment_id))
+    except (ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Local deployment '{deployment_id}' not found.",
@@ -289,69 +307,78 @@ async def create_local_deployment(
     from app.ml.inference_engine import load_model, ModelNotFoundError
 
     logs: List[Dict[str, Any]] = []
-    logs.append(_log_entry(f"Initiating deployment for training job '{payload.job_id}'...", event="DEPLOYMENT_CREATED"))
 
-    # 1. Validate Job is COMPLETED
-    job_model_id: Optional[str] = None
+    # 1. Resolve model_id and Validate Source
+    job_model_id: Optional[str] = payload.model_id
+    effective_job_id: str = payload.job_id or ""
     job_dataset_id: str = ""
     job_status: str = ""
 
-    in_mem = _JOBS_STORE.get(payload.job_id)
-    if in_mem:
-        job_status = in_mem.status
-        job_dataset_id = in_mem.dataset_id or ""
-        job_model_id = in_mem.metadata.get("model_id") if in_mem.metadata else None
+    if payload.job_id:
+        logs.append(_log_entry(f"Initiating deployment for training job '{payload.job_id}'...", event="DEPLOYMENT_CREATED"))
+        in_mem = _JOBS_STORE.get(payload.job_id)
+        if in_mem:
+            job_status = in_mem.status
+            job_dataset_id = in_mem.dataset_id or ""
+            job_model_id = in_mem.metadata.get("model_id") if in_mem.metadata else job_model_id
 
-    if not in_mem or not job_model_id:
-        try:
-            from app.database import AsyncSessionLocal
-            from app.models.job import Job
-            async with AsyncSessionLocal() as _db:
-                try:
-                    job_uuid = uuid.UUID(payload.job_id)
-                except ValueError:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Job '{payload.job_id}' not found.",
-                    )
-                res = await _db.execute(select(Job).where(Job.id == job_uuid, Job.is_deleted == False))
-                db_job = res.scalar_one_or_none()
-                if db_job:
-                    job_status = db_job.status
-                    job_dataset_id = str(db_job.dataset_id) if db_job.dataset_id else ""
-                    meta = db_job.job_metadata or {}
-                    job_model_id = meta.get("model_id")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.warning("DB job lookup failed: %s", exc)
+        if not in_mem or not job_model_id:
+            try:
+                from app.database import AsyncSessionLocal
+                from app.models.job import Job
+                async with AsyncSessionLocal() as _db:
+                    try:
+                        job_uuid = uuid.UUID(payload.job_id)
+                    except ValueError:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Job '{payload.job_id}' not found.",
+                        )
+                    res = await _db.execute(select(Job).where(Job.id == job_uuid, Job.is_deleted == False))
+                    db_job = res.scalar_one_or_none()
+                    if db_job:
+                        job_status = db_job.status
+                        job_dataset_id = str(db_job.dataset_id) if db_job.dataset_id else ""
+                        meta = db_job.job_metadata or {}
+                        job_model_id = meta.get("model_id") or job_model_id
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.warning("DB job lookup failed: %s", exc)
 
-    if not job_status:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Training job '{payload.job_id}' not found.",
-        )
+        if not job_status:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Training job '{payload.job_id}' not found.",
+            )
 
-    if job_status != _JOB_COMPLETED_STATUS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Job '{payload.job_id}' has status '{job_status}'. Only COMPLETED jobs can be deployed.",
-        )
+        if job_status != _JOB_COMPLETED_STATUS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Job '{payload.job_id}' has status '{job_status}'. Only COMPLETED jobs can be deployed.",
+            )
 
-    if not job_model_id:
-        reg_model = get_model_by_job_id(payload.job_id)
-        if reg_model:
-            job_model_id = reg_model.get("model_id")
-        elif get_model_by_id(f"model-{payload.job_id[:8]}"):
-            job_model_id = f"model-{payload.job_id[:8]}"
+        if not job_model_id:
+            reg_model = get_model_by_job_id(payload.job_id)
+            if reg_model:
+                job_model_id = reg_model.get("model_id")
+            elif get_model_by_id(f"model-{payload.job_id[:8]}"):
+                job_model_id = f"model-{payload.job_id[:8]}"
 
-    if not job_model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Job '{payload.job_id}' completed but no model_id was registered.",
-        )
-
-    logs.append(_log_entry(f"Training run validated: COMPLETED. Model ID: {job_model_id}", event="ARTIFACT_RESOLVED"))
+        if not job_model_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Job '{payload.job_id}' completed but no model_id was registered.",
+            )
+        logs.append(_log_entry(f"Training run validated: COMPLETED. Model ID: {job_model_id}", event="ARTIFACT_RESOLVED"))
+    else:
+        if not job_model_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either job_id or model_id must be provided to create a deployment.",
+            )
+        logs.append(_log_entry(f"Initiating deployment for registered model '{job_model_id}'...", event="DEPLOYMENT_CREATED"))
+        effective_job_id = f"custom-{job_model_id}"
 
     # 2. Model Registry Metadata & Version
     registry_meta = get_model_by_id(job_model_id)
@@ -429,7 +456,7 @@ async def create_local_deployment(
 
     dep = LocalDeployment(
         id=dep_id,
-        job_id=payload.job_id,
+        job_id=effective_job_id,
         model_id=job_model_id,
         model_version=model_version,
         artifact_id=artifact_id,
@@ -801,26 +828,29 @@ async def predict_local(
         )
 
     validation_errors: List[str] = []
-    # Always rebuild the live schema from the loaded model at prediction time.
-    # This fixes existing deployments whose DB schema was built without model introspection
-    # (all columns defaulted to "numeric", rejecting legitimate categorical string values).
-    try:
-        from app.ml.inference_engine import load_model as _load_for_validation
-        from app.ml.model_registry import get_model_by_id as _reg_for_validation
-        import pandas as _pd_val
-        _lm = _load_for_validation(model_id=dep.model_id)
-        _rm = _reg_for_validation(dep.model_id) or {}
-        _ds = None
+    # Check if a rich input schema already exists on the deployment
+    stored_schema = dep.input_schema or {}
+    schema = dict(stored_schema)
+    if not schema or all(v.get("type") == "numeric" for v in schema.values()):
         try:
-            from services.worker.core.dataset_loader import find_dataset_path as _fdp
-            _cp = _fdp(dep.dataset_id)
-            if _cp and os.path.exists(_cp):
-                _ds = _pd_val.read_csv(_cp, nrows=50)
+            from app.ml.inference_engine import load_model as _load_for_validation
+            from app.ml.model_registry import get_model_by_id as _reg_for_validation
+            import pandas as _pd_val
+            _lm = _load_for_validation(model_id=dep.model_id)
+            _rm = _reg_for_validation(dep.model_id) or {}
+            _ds = None
+            try:
+                from services.worker.core.dataset_loader import find_dataset_path as _fdp
+                _cp = _fdp(dep.dataset_id)
+                if _cp and os.path.exists(_cp):
+                    _ds = _pd_val.read_csv(_cp, nrows=50)
+            except Exception:
+                pass
+            rebuilt, _ = _build_input_schema(dep.feature_columns or [], _rm, loaded_model=_lm, dataset_sample=_ds)
+            if rebuilt:
+                schema = rebuilt
         except Exception:
             pass
-        schema, _ = _build_input_schema(dep.feature_columns or [], _rm, loaded_model=_lm, dataset_sample=_ds)
-    except Exception:
-        schema = dep.input_schema or {}
 
     for col in dep.feature_columns:
         val = payload.inputs.get(col)

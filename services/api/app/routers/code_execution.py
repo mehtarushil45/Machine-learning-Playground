@@ -61,6 +61,7 @@ class ExecutionResult(BaseModel):
     artifacts:        list[str]
     duration_seconds: Optional[float]
     error:            Optional[str]
+    model_id:         Optional[str] = None
 
 
 class FormatRequest(BaseModel):
@@ -271,6 +272,7 @@ async def get_result(exec_id: str) -> ExecutionResult:
         artifacts=rec.artifacts,
         duration_seconds=duration,
         error=rec.error,
+        model_id=rec.registered_model_id,
     )
 
 

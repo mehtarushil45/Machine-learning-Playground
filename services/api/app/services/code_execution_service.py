@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import logging
+import re
+import shutil
 
 logger = logging.getLogger("apex_ml.code_execution")
 
@@ -43,11 +45,12 @@ class ExecutionRecord:
     exit_code:   Optional[int]     = None
     stdout:      str               = ""
     stderr:      str               = ""
-    artifacts:   List[str]         = field(default_factory=list)
-    error:       Optional[str]     = None
-    _queue:      "asyncio.Queue[Optional[str]]" = field(default_factory=asyncio.Queue)
-    _process:    Optional[asyncio.subprocess.Process] = None
-    _sandbox:    Optional[str]     = None
+    artifacts:           List[str]         = field(default_factory=list)
+    registered_model_id: Optional[str]     = None
+    error:               Optional[str]     = None
+    _queue:              "asyncio.Queue[Optional[str]]" = field(default_factory=asyncio.Queue)
+    _process:            Optional[asyncio.subprocess.Process] = None
+    _sandbox:            Optional[str]     = None
 
 
 def _detect_artifacts(sandbox: str) -> List[str]:
@@ -129,6 +132,54 @@ async def _run_execution(
         await rec._queue.put(None)
         return
 
+    # Stage dataset CSV into execution sandbox so pd.read_csv resolves correctly
+    try:
+        from services.worker.core.dataset_loader import find_dataset_path, UPLOADS_DIR
+
+        src_csv: Optional[str] = None
+        if rec.dataset_id:
+            try:
+                src_csv = find_dataset_path(rec.dataset_id)
+            except Exception as d_exc:
+                logger.debug("Dataset path lookup failed for %s: %s", rec.dataset_id, d_exc)
+
+        # Inspect Python source for referenced CSV filenames (e.g. pd.read_csv('housing.csv'))
+        csv_refs = re.findall(r'[\'"]([^\'"]+\.csv)[\'"]', rec.code)
+
+        if not src_csv and csv_refs and os.path.exists(UPLOADS_DIR):
+            for ref in csv_refs:
+                ref_base = os.path.basename(ref)
+                cand = os.path.join(UPLOADS_DIR, ref_base)
+                if os.path.isfile(cand):
+                    src_csv = cand
+                    break
+                for fname in os.listdir(UPLOADS_DIR):
+                    if fname.endswith(".csv") and (ref_base in fname or fname in ref_base):
+                        src_csv = os.path.join(UPLOADS_DIR, fname)
+                        break
+                if src_csv:
+                    break
+
+        if src_csv and os.path.isfile(src_csv):
+            base_name = os.path.basename(src_csv)
+            dest_base = os.path.join(sandbox, base_name)
+            if not os.path.exists(dest_base):
+                shutil.copy2(src_csv, dest_base)
+
+            # Ensure generic 'dataset.csv' fallback exists
+            dest_canonical = os.path.join(sandbox, "dataset.csv")
+            if not os.path.exists(dest_canonical):
+                shutil.copy2(src_csv, dest_canonical)
+
+            # Ensure all CSV names referenced in code are present
+            for ref in csv_refs:
+                ref_name = os.path.basename(ref)
+                ref_dest = os.path.join(sandbox, ref_name)
+                if not os.path.exists(ref_dest):
+                    shutil.copy2(src_csv, ref_dest)
+    except Exception as stage_exc:
+        logger.warning("Error staging dataset files into execution sandbox: %s", stage_exc)
+
     # Clean, isolated execution environment: strip database credentials, tokens, secrets
     _SENSITIVE_PREFIXES = ("DATABASE", "REDIS", "POSTGRES", "AWS", "SECRET", "JWT", "CELERY", "S3", "MINIO", "TOKEN", "API_KEY", "PASSWORD")
     env = {
@@ -177,6 +228,70 @@ async def _run_execution(
             await rec._queue.put("[ML Playground] Completed (exit 0).")
             if rec.artifacts:
                 await rec._queue.put(f"[ML Playground] Artifacts: {', '.join(rec.artifacts)}")
+                for art in rec.artifacts:
+                    if art.endswith(".joblib") or art.endswith(".pkl"):
+                        try:
+                            from app.ml.model_registry import register_model, _REGISTRY_ROOT
+                            art_src = os.path.join(sandbox, art)
+                            model_id = f"model-exec-{rec.exec_id[:8]}"
+                            dest_dir = os.path.join(_REGISTRY_ROOT, model_id)
+                            os.makedirs(dest_dir, exist_ok=True)
+                            dest_model_path = os.path.join(dest_dir, "model.joblib")
+                            shutil.copy2(art_src, dest_model_path)
+
+                            # Introspect trained pipeline
+                            algo_name = "Code Studio Pipeline"
+                            feat_cols: List[str] = []
+                            cat_cols: List[str] = []
+                            num_cols: List[str] = []
+                            try:
+                                import joblib
+                                pipe = joblib.load(art_src)
+                                if hasattr(pipe, "named_steps"):
+                                    for step_key in ("estimator", "classifier", "regressor"):
+                                        if step_key in pipe.named_steps:
+                                            algo_name = type(pipe.named_steps[step_key]).__name__
+                                            break
+                                    if "preprocessor" in pipe.named_steps:
+                                        prep = pipe.named_steps["preprocessor"]
+                                        trans_list = getattr(prep, "transformers_", None) or getattr(prep, "transformers", None)
+                                        if trans_list:
+                                            for tname, _, cols in trans_list:
+                                                if isinstance(cols, (list, tuple, set)):
+                                                    c_list = [str(c) for c in cols]
+                                                    feat_cols.extend(c_list)
+                                                    if tname in ("categorical", "cat", "boolean") or "cat" in str(tname).lower():
+                                                        cat_cols.extend(c_list)
+                                                    elif tname in ("numeric", "num") or "num" in str(tname).lower():
+                                                        num_cols.extend(c_list)
+                            except Exception:
+                                pass
+
+                            register_model({
+                                "model_id": model_id,
+                                "job_id": f"exec-{rec.exec_id[:8]}",
+                                "algorithm": algo_name,
+                                "model_path": dest_model_path,
+                                "dataset_id": rec.dataset_id or "dataset.csv",
+                                "problem_type": "classification" if "classifier" in algo_name.lower() or "forest" in algo_name.lower() else "regression",
+                                "feature_columns": feat_cols,
+                                "categorical_columns": cat_cols,
+                                "numeric_columns": num_cols,
+                                "lineage": {
+                                    "feature_columns": feat_cols,
+                                    "categorical_columns": cat_cols,
+                                    "numeric_columns": num_cols,
+                                },
+                                "target_column": "target",
+                                "status": "ACTIVE",
+                                "owner": "code-studio",
+                                "description": f"Model trained via Code Studio execution ({rec.filename})",
+                            })
+                            rec.registered_model_id = model_id
+                            await rec._queue.put(f"[ML Playground] Model registered in Model Registry: {model_id}")
+                            break
+                        except Exception as reg_exc:
+                            logger.warning("Failed to auto-register code execution model: %s", reg_exc)
         else:
             rec.status = "failed"
             await rec._queue.put(f"[ML Playground] Failed (exit {proc.returncode}).")
@@ -247,6 +362,7 @@ async def stream_execution(exec_id: str) -> AsyncGenerator[str, None]:
                 "status": rec.status,
                 "duration_seconds": duration,
                 "artifacts": rec.artifacts,
+                "model_id": rec.registered_model_id,
             })
             yield f"data: {payload}\n\n"
             break

@@ -155,7 +155,7 @@ async def _generate_job_progress_sse(job_id: str, user_id: str):
                 return
 
             yield f"event: progress\ndata: {payload}\n\n"
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.75)
     except (asyncio.CancelledError, GeneratorExit):
         raise
     except Exception as exc:

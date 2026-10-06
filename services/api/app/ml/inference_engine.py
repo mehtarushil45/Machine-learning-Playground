@@ -106,18 +106,20 @@ class ModelContainer:
         self.categories_map: Dict[str, List[str]] = {}
 
         preprocessor = getattr(model_pipeline, "named_steps", {}).get("preprocessor")
-        if preprocessor and hasattr(preprocessor, "transformers_"):
-            for name, trans, cols in preprocessor.transformers_:
-                if name == "numeric":
-                    self.numeric_columns.extend(cols)
-                elif name in ("categorical", "boolean"):
-                    self.categorical_columns.extend(cols)
-                    encoder = getattr(trans, "named_steps", {}).get("encoder")
+        transformers_list = getattr(preprocessor, "transformers_", None) or getattr(preprocessor, "transformers", None)
+        if transformers_list:
+            for name, trans, cols in transformers_list:
+                str_cols = [str(c) for c in cols] if isinstance(cols, (list, tuple, set)) else []
+                if name in ("numeric", "num"):
+                    self.numeric_columns.extend(str_cols)
+                elif name in ("categorical", "cat", "boolean") or "cat" in str(name).lower():
+                    self.categorical_columns.extend(str_cols)
+                    encoder = getattr(trans, "named_steps", {}).get("encoder") if hasattr(trans, "named_steps") else trans
                     if encoder and hasattr(encoder, "categories_"):
-                        for c, cats in zip(cols, encoder.categories_):
+                        for c, cats in zip(str_cols, encoder.categories_):
                             self.categories_map[c] = [str(x) for x in cats]
                 elif name == "boolean":
-                    self.boolean_columns.extend(cols)
+                    self.boolean_columns.extend(str_cols)
 
 
 class ValidationResult:

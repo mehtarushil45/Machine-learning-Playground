@@ -142,6 +142,13 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
     fetchRegistry();
   }, [fetchDeployments, fetchRegistry]);
 
+  useEffect(() => {
+    if (initialDeploymentId) {
+      setActiveDeploymentId(initialDeploymentId);
+      setHubTab('endpoints');
+    }
+  }, [initialDeploymentId]);
+
   // Model Registry Actions
   const handlePromote = async (modelId: string) => {
     setRegistryActionLoading((prev) => ({ ...prev, [modelId]: true }));
@@ -183,16 +190,13 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
   };
 
   const handleDeployModel = async (model: RegisteredModel) => {
-    if (!model.job_id) {
-      onShowToast?.('Cannot Deploy', 'This registered model does not have a linked training run.', 'error');
-      return;
-    }
     setRegistryActionLoading((prev) => ({ ...prev, [model.model_id]: true }));
     try {
-      const dep = await LocalDeploymentService.create(
-        model.job_id,
-        `${model.algorithm} Service`
-      );
+      const dep = await LocalDeploymentService.create({
+        jobId: model.job_id || undefined,
+        modelId: model.model_id,
+        name: `${model.algorithm} Service`,
+      });
       onShowToast?.('Serving Endpoint Created!', `${model.algorithm} is live and ready for inference.`, 'success');
       await fetchDeployments();
       setActiveDeploymentId(dep.deployment_id);
@@ -1669,7 +1673,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                         {isAct && !activeDep && (
                           <button
                             onClick={() => handleDeployModel(model)}
-                            disabled={isBusy || !model.job_id}
+                            disabled={isBusy}
                             style={{
                               padding: '7px 13px',
                               borderRadius: 8,

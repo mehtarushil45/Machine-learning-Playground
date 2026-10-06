@@ -137,13 +137,13 @@ def _check_pep8_and_patterns(code: str) -> List[DiagnosticItem]:
         if not trimmed or trimmed.startswith("#"):
             continue
 
-        # E501: Line length > 120
+        # E501: Line length > 120 (informational hint, not an error/warning badge)
         if len(raw_line) > 120:
             results.append(
                 DiagnosticItem(
                     line=line_num,
                     col=121,
-                    severity="warning",
+                    severity="info",
                     message=f"Line too long ({len(raw_line)} > 120 characters) -- E501",
                     source="pep8",
                     code="E501",

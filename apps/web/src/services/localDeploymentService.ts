@@ -153,14 +153,30 @@ function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
 
 export const LocalDeploymentService = {
   /**
-   * Create a local deployment from a completed training job.
+   * Create a local deployment from a completed training job or registered model.
    * Returns RUNNING status if artifact is found and model loads successfully.
    */
-  create: (jobId: string, name = 'Local Deployment', configuration?: Record<string, any>): Promise<LocalDeploymentResponse> =>
-    request<LocalDeploymentResponse>('/local-deployments', {
+  create: (
+    source: string | { jobId?: string; modelId?: string; name?: string; configuration?: Record<string, any> },
+    name = 'Local Deployment',
+    configuration?: Record<string, any>
+  ): Promise<LocalDeploymentResponse> => {
+    let payload: Record<string, any>;
+    if (typeof source === 'object' && source !== null) {
+      payload = {
+        job_id: source.jobId,
+        model_id: source.modelId,
+        name: source.name || name,
+        configuration: source.configuration || configuration,
+      };
+    } else {
+      payload = { job_id: source, name, configuration };
+    }
+    return request<LocalDeploymentResponse>('/local-deployments', {
       method: 'POST',
-      body: JSON.stringify({ job_id: jobId, name, configuration }),
-    }),
+      body: JSON.stringify(payload),
+    });
+  },
 
   /** List all deployments owned by the current user. */
   list: (): Promise<LocalDeploymentResponse[]> =>

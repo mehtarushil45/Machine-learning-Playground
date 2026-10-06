@@ -270,6 +270,8 @@ def generate_python_code(
         "from sklearn.model_selection import train_test_split",
         "from sklearn.compose import ColumnTransformer",
         "from sklearn.pipeline import Pipeline",
+        "from sklearn.impute import SimpleImputer",
+        "from sklearn.preprocessing import OneHotEncoder",
     ]
 
     steps_explanation: List[CodeStepExplanation] = []
@@ -310,9 +312,14 @@ def generate_python_code(
 dataset_path = "{pipeline.dataset_name}"
 df = pd.read_csv(dataset_path)
 
+# Ensure target column is present and drop records where target is missing
+target_col = "{pipeline.target_column}"
+if target_col in df.columns:
+    df = df.dropna(subset=[target_col])
+
 # Separate input features and target column
 feature_cols = {pipeline.feature_columns}
-target_col = "{pipeline.target_column}"
+feature_cols = [c for c in feature_cols if c in df.columns and c != target_col]
 
 X = df[feature_cols]
 y = df[target_col]"""
@@ -331,7 +338,6 @@ y = df[target_col]"""
     step_counter += 1
 
     # Step 2: Data Preprocessing
-    transformers_code: List[str] = []
     imputer_node = _find_node_by_category(pipeline.nodes, ["missing_value_handler", "imputer"])
     scaler_node = _find_node_by_category(pipeline.nodes, ["scaler", "scaling"])
     encoder_node = _find_node_by_category(pipeline.nodes, ["encoder", "encoding"])
@@ -379,14 +385,28 @@ y = df[target_col]"""
             num_steps.append("('scaler', StandardScaler())")
 
     step2_code = f"""# --- Step 2: Build Preprocessing Pipeline ---
-numeric_transformer = Pipeline(steps=[
-    {', '.join(num_steps)}
-])
+# Partition features into numeric and categorical subsets dynamically
+numeric_features = [col for col in feature_cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])]
+categorical_features = [col for col in feature_cols if col in df.columns and col not in numeric_features]
+
+transformers = []
+
+if numeric_features:
+    numeric_transformer = Pipeline(steps=[
+        {', '.join(num_steps)}
+    ])
+    transformers.append(('numeric', numeric_transformer, numeric_features))
+
+if categorical_features:
+    categorical_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+    ])
+    transformers.append(('categorical', categorical_transformer, categorical_features))
 
 preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', numeric_transformer, feature_cols)
-    ]
+    transformers=transformers,
+    remainder='drop'
 )"""
 
     code_blocks.append("\n" + step2_code)
@@ -396,7 +416,7 @@ preprocessor = ColumnTransformer(
             node_id="preprocessing",
             node_type="preprocessing",
             title="Configure Preprocessing Transformers",
-            explanation="Imputes missing values and scales numeric feature columns to prepare data for model training.",
+            explanation="Imputes and scales numeric features, and one-hot encodes categorical features without data type mismatch errors.",
             code_snippet=step2_code,
         )
     )
@@ -426,22 +446,45 @@ X_train, X_test, y_train, y_test = train_test_split(
     step_counter += 1
 
     # Step 4: Model Instantiation & Pipeline Fit
-    algo_params_str = ""
+    algo_params_dict = {}
     if algo_node and algo_node.params:
-        params_items = []
+        ignored_keys = {
+            "algorithm", "type", "name", "test_size", "split",
+            "validation_split", "target", "target_column", "dataset", "dataset_name",
+            "label", "metrics", "scoring", "shuffle", "stratify"
+        }
         for k, v in algo_node.params.items():
-            if k not in ("algorithm", "type"):
-                if isinstance(v, str):
-                    params_items.append(f"{k}='{v}'")
-                else:
-                    params_items.append(f"{k}={v}")
-        if params_items:
-            algo_params_str = ", " + ", ".join(params_items)
+            if k in ("random_state", "random_seed"):
+                try:
+                    random_seed = int(v)
+                except (ValueError, TypeError):
+                    pass
+            elif k not in ignored_keys:
+                algo_params_dict[k] = v
+
+    params_items = []
+    for k, v in algo_params_dict.items():
+        if isinstance(v, str):
+            params_items.append(f"{k}='{v}'")
+        else:
+            params_items.append(f"{k}={v}")
+
+    no_random_state_algos = {
+        "KNeighborsClassifier", "KNeighborsRegressor",
+        "LinearRegression", "GaussianNB", "SVR"
+    }
+    if algo_class_name in no_random_state_algos:
+        instantiation = f"{algo_class_name}({', '.join(params_items)})"
+    else:
+        instantiation_parts = [f"random_state={random_seed}"] + params_items
+        instantiation = f"{algo_class_name}({', '.join(instantiation_parts)})"
+
+    step_name = "classifier" if algo_type == "classification" else "regressor"
 
     step4_code = f"""# --- Step 4: Model Pipeline Fit ---
 model_pipeline = Pipeline(steps=[
     ('preprocessor', preprocessor),
-    ('classifier', {algo_class_name}(random_state={random_seed}{algo_params_str}))
+    ('{step_name}', {instantiation})
 ])
 
 # Train model pipeline
