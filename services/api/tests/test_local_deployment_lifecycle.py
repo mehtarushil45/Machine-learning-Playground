@@ -102,13 +102,17 @@ async def test_local_deployment_lifecycle_end_to_end():
             import app.ml.inference_engine as ie
             orig_load_model = ie.load_model
             orig_predict = ie.predict
-            ie.load_model = lambda **kwargs: None
-            ie.predict = lambda data, model_id: {
-                "prediction": "Passed",
-                "confidence": 0.94,
-                "probabilities": {"Passed": 0.94, "Failed": 0.06},
-                "latency_ms": 1.4,
-            }
+            setattr(ie, "load_model", lambda **kwargs: None)
+            setattr(
+                ie,
+                "predict",
+                lambda data, model_id=None, **kwargs: {
+                    "prediction": "Passed",
+                    "confidence": 0.94,
+                    "probabilities": {"Passed": 0.94, "Failed": 0.06},
+                    "latency_ms": 1.4,
+                },
+            )
 
             try:
                 # 5a. Test Start

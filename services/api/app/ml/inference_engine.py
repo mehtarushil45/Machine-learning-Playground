@@ -740,7 +740,11 @@ def predict_batch(
         output_df = df_input.copy()
         output_df["prediction"] = raw_predictions
         if any(c is not None for c in raw_confidences):
-            output_df["confidence"] = raw_confidences
+            output_df["confidence"] = pd.Series(
+                [c if c is not None else np.nan for c in raw_confidences],
+                index=output_df.index,
+                dtype=float,
+            )
 
         output_df.to_csv(csv_path, index=False)
         csv_url = f"/api/v1/predict/download/{csv_filename}"

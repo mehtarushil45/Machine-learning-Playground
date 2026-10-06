@@ -73,8 +73,15 @@ def training_data_path():
         }
     )
     frame.loc[[3, 12, 40], "feature_b"] = np.nan
-    frame["classification_target"] = np.where(frame.feature_a + frame.feature_b > 10, "high", "low")
-    frame["regression_target"] = 3 * frame.feature_a - 0.5 * frame.feature_b + rng.normal(scale=0.1, size=rows)
+    frame["classification_target"] = [
+        "high" if (a + b > 10) else "low"
+        for a, b in zip(frame["feature_a"], frame["feature_b"])
+    ]
+    noise_list = list(rng.normal(scale=0.1, size=rows))
+    frame["regression_target"] = [
+        float(3 * a - 0.5 * b + n)
+        for a, b, n in zip(frame["feature_a"], frame["feature_b"], noise_list)
+    ]
     uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
     uploads_dir.mkdir(exist_ok=True)
     path = uploads_dir / f"test-training-options-{uuid.uuid4().hex}.csv"

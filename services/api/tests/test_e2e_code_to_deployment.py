@@ -67,7 +67,7 @@ async def test_full_pipeline_code_to_deployment_lifecycle():
         for _ in range(30):
             await asyncio.sleep(1)
             rec = get_execution(record.exec_id)
-            if rec.status in ("completed", "failed", "timeout"):
+            if rec is not None and rec.status in ("completed", "failed", "timeout"):
                 assert rec.status == "completed", f"Execution failed with error: {rec.error} | stderr: {rec.stderr}"
                 assert rec.exit_code == 0
                 assert "trained_model_pipeline.joblib" in rec.artifacts

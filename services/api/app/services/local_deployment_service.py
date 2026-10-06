@@ -267,12 +267,12 @@ def _to_response(dep: LocalDeployment) -> LocalDeploymentResponse:
 
 
 async def _get_deployment(
-    deployment_id: str,
+    deployment_id: str | uuid.UUID,
     db: AsyncSession,
 ) -> LocalDeployment:
     """Fetch deployment by UUID or raise 404."""
     try:
-        dep_uuid = deployment_id if isinstance(deployment_id, uuid.UUID) else uuid.UUID(str(deployment_id))
+        dep_uuid = deployment_id if isinstance(deployment_id, uuid.UUID) else uuid.UUID(deployment_id)
     except (ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
