@@ -667,14 +667,20 @@ export function ViewAsCodeStudio({
   const effectiveTabs = openTabs.length > 0 ? openTabs : [currentFile];
   const displayedCode = experimentFiles[currentFile] ?? generatedCode ?? '';
 
-  const hasLegacyPipeline = useMemo(() => {
-    if (!displayedCode) return false;
-    return (
-      displayedCode.includes("('num', numeric_transformer, feature_cols)") ||
-      displayedCode.includes('("num", numeric_transformer, feature_cols)') ||
-      (displayedCode.includes("numeric_transformer, feature_cols") && !displayedCode.includes("numeric_features"))
-    );
-  }, [displayedCode]);
+  // Auto-clean unused numpy import if present on classification pipelines
+  useEffect(() => {
+    if (!displayedCode) return;
+    if (
+      displayedCode.includes('import numpy as np') &&
+      !displayedCode.includes('np.') &&
+      !displayedCode.includes('numpy.')
+    ) {
+      const cleaned = displayedCode.replace(/^[ \t]*import numpy as np\r?\n?/m, '');
+      if (cleaned !== displayedCode) {
+        updateExperimentFileCode(currentFile, cleaned);
+      }
+    }
+  }, [displayedCode, currentFile, updateExperimentFileCode]);
 
   /* ── Validation ─────────────────────────────────────────────────── */
   const validationErrors = useMemo<string[]>(() => {
@@ -721,16 +727,23 @@ export function ViewAsCodeStudio({
     const timer = setTimeout(async () => {
       try {
         const res = await CodeExecutionService.lintCode(displayedCode, currentFile);
-        const mapped: Diagnostic[] = (res.diagnostics || []).map((d) => ({
-          line: d.line,
-          col: d.col,
-          end_line: d.end_line,
-          end_col: d.end_col,
-          severity: d.severity,
-          message: d.message,
-          source: d.source,
-          code: d.code,
-        }));
+        const mapped: Diagnostic[] = (res.diagnostics || [])
+          .filter((d: any) => {
+            if (d.message?.includes("'numpy as np' imported but unused") && !displayedCode.includes("np.")) {
+              return false;
+            }
+            return true;
+          })
+          .map((d) => ({
+            line: d.line,
+            col: d.col,
+            end_line: d.end_line,
+            end_col: d.end_col,
+            severity: d.severity,
+            message: d.message,
+            source: d.source,
+            code: d.code,
+          }));
         setServerDiagnostics(mapped);
       } catch {
         // Fallback to client-side static analysis if server is unreachable
@@ -2025,51 +2038,35 @@ export function ViewAsCodeStudio({
             </div>
           )}
 
-          {/* Legacy Pipeline Code Detection & 1-Click Upgrade Banner */}
-          {hasLegacyPipeline && (
-            <div
-              style={{
-                margin: '6px 14px 4px',
-                padding: '7px 14px',
-                background: 'rgba(245, 158, 11, 0.12)',
-                border: '1px solid rgba(245, 158, 11, 0.35)',
-                borderRadius: 6,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                flexShrink: 0,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: '#FCD34D' }}>
-                <span style={{ fontSize: 14 }}>⚠️</span>
-                <span>
-                  <strong>Legacy Pipeline Code Detected:</strong> Non-numeric features are not separated from numeric transformers. This will cause <code>ValueError</code> on text/category data.
-                </span>
-              </div>
-              <button
-                onClick={() => generatePipelineCode(currentFile)}
-                disabled={isGenerating}
-                style={{
-                  padding: '4px 12px',
-                  borderRadius: 5,
-                  background: 'linear-gradient(135deg, #F59E0B, #D97706)',
-                  color: '#000',
-                  fontWeight: 700,
-                  fontSize: 11,
-                  border: 'none',
-                  cursor: isGenerating ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <RefreshCw size={11} style={{ animation: isGenerating ? 'spin 1s linear infinite' : 'none' }} />
-                <span>Fix & Upgrade Pipeline</span>
-              </button>
-            </div>
-          )}
+
+
+          {/* Breadcrumb Navigation Bar (Real IDE aesthetic) */}
+          <div
+            style={{
+              height: 25,
+              flexShrink: 0,
+              background: 'rgba(12, 10, 24, 0.95)',
+              borderBottom: `1px solid rgba(255, 255, 255, 0.06)`,
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 14px',
+              fontSize: 11,
+              fontFamily: 'Consolas, Monaco, monospace',
+              color: BB.muted,
+              gap: 6,
+              userSelect: 'none',
+            }}
+          >
+            <FolderOpen style={{ width: 12, height: 12, color: BB.gold }} />
+            <span>workspace</span>
+            <ChevronRight style={{ width: 10, height: 10, opacity: 0.5 }} />
+            <span>src</span>
+            <ChevronRight style={{ width: 10, height: 10, opacity: 0.5 }} />
+            <span>pipeline</span>
+            <ChevronRight style={{ width: 10, height: 10, opacity: 0.5 }} />
+            <FileCode style={{ width: 12, height: 12, color: '#38BDF8' }} />
+            <span style={{ color: BB.text, fontWeight: 600 }}>{currentFile}</span>
+          </div>
 
           {/* ── IDE CODE EDITOR CONTAINER (Flex 1, with synchronized gutter & textarea) ── */}
           <div
@@ -2361,9 +2358,14 @@ export function ViewAsCodeStudio({
                     <Activity style={{ width: 11, height: 11 }} />
                     <span>Checking…</span>
                   </>
+                ) : errorCount === 0 && warnCount === 0 ? (
+                  <>
+                    <Check style={{ width: 11, height: 11, color: BB.success }} />
+                    <span style={{ color: BB.success }}>0 problems</span>
+                  </>
                 ) : (
                   <>
-                    <TriangleAlert style={{ width: 11, height: 11 }} />
+                    <TriangleAlert style={{ width: 11, height: 11, color: errorCount > 0 ? '#EF4444' : '#F59E0B' }} />
                     <span>{errorCount} errors, {warnCount} warnings</span>
                   </>
                 )}
@@ -2504,7 +2506,13 @@ export function ViewAsCodeStudio({
                     }}
                   >
                     {tab === 'output' && <Terminal style={{ width: 12, height: 12 }} />}
-                    {tab === 'problems' && <TriangleAlert style={{ width: 12, height: 12 }} />}
+                    {tab === 'problems' && (
+                      (errorCount + warnCount) > 0 ? (
+                        <TriangleAlert style={{ width: 12, height: 12, color: errorCount > 0 ? '#EF4444' : '#F59E0B' }} />
+                      ) : (
+                        <Check style={{ width: 12, height: 12, color: BB.success }} />
+                      )
+                    )}
                     {tab === 'logs' && <ScrollText style={{ width: 12, height: 12 }} />}
                     {tab === 'debug' && <Activity style={{ width: 12, height: 12 }} />}
                     <span>{tab}</span>

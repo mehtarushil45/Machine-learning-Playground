@@ -265,7 +265,6 @@ def generate_python_code(
     """
     imports: List[str] = [
         "import pandas as pd",
-        "import numpy as np",
         "import joblib",
         "from sklearn.model_selection import train_test_split",
         "from sklearn.compose import ColumnTransformer",
@@ -517,6 +516,7 @@ print("\\nClassification Report:\\n", classification_report(y_test, y_pred))
 joblib.dump(model_pipeline, "trained_model_pipeline.joblib")
 print("Saved model pipeline to 'trained_model_pipeline.joblib'")"""
         else:
+            imports.append("import numpy as np")
             imports.append("from sklearn.metrics import mean_squared_error, r2_score")
             step5_code = """# --- Step 5: Evaluate & Save Model ---
 y_pred = model_pipeline.predict(X_test)
@@ -540,6 +540,13 @@ print("Saved model pipeline to 'trained_model_pipeline.joblib'")"""
                 code_snippet=step5_code,
             )
         )
+
+    # Dynamic check: Ensure numpy is imported if and only if np. is referenced
+    combined_body = "\n".join(code_blocks)
+    if "np." in combined_body and "import numpy as np" not in imports:
+        imports.append("import numpy as np")
+    elif "np." not in combined_body and "import numpy as np" in imports:
+        imports.remove("import numpy as np")
 
     # Deduplicate imports
     unique_imports = sorted(set(imports))

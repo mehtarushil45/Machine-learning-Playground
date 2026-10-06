@@ -98,3 +98,38 @@ def test_local_deployment_create_schema_model_first():
     )
     assert dep_job.job_id == "job_12345"
     assert dep_job.model_id is None
+
+
+def test_code_generator_imports_clean_no_unused_numpy():
+    """Verify classification code does not import unused numpy, avoiding pyflakes warnings."""
+    dag_clf = PipelineDAG(
+        dataset_name="data.csv",
+        target_column="course",
+        feature_columns=["study_hours", "attendance"],
+        nodes=[
+            PipelineNodeConfig(
+                node_id="model-1",
+                type="model_trainer",
+                name="Classifier",
+                params={"algorithm": "random_forest_classifier"},
+            ),
+        ],
+    )
+    resp_clf = generate_python_code(dag_clf)
+    assert "import numpy as np" not in resp_clf.python_code
+
+    dag_reg = PipelineDAG(
+        dataset_name="data.csv",
+        target_column="score",
+        feature_columns=["study_hours", "attendance"],
+        nodes=[
+            PipelineNodeConfig(
+                node_id="model-1",
+                type="model_trainer",
+                name="Regressor",
+                params={"algorithm": "random_forest_regressor"},
+            ),
+        ],
+    )
+    resp_reg = generate_python_code(dag_reg)
+    assert "import numpy as np" in resp_reg.python_code

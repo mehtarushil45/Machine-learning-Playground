@@ -49,6 +49,7 @@ import {
   type ModelLineage,
 } from '../../services/modelRegistryService';
 import { DeploymentStudio } from './DeploymentStudio';
+import { useProject } from '../../providers/ProjectContext';
 
 interface DeploymentsHubProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'error') => void;
@@ -73,6 +74,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
   onShowToast,
   initialDeploymentId,
 }) => {
+  const { activeJob, selectedTarget } = useProject();
   const [deployments, setDeployments] = useState<LocalDeploymentResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
@@ -220,12 +222,18 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
     }
   };
 
-  // Synchronize initialDeploymentId prop
+  // Synchronize initialDeploymentId prop & activeJob
   useEffect(() => {
     if (initialDeploymentId) {
       setActiveDeploymentId(initialDeploymentId);
+      setHubTab('endpoints');
+    } else if (activeJob?.job_id && deployments.length > 0) {
+      const match = deployments.find((d) => d.job_id === activeJob.job_id);
+      if (match) {
+        setActiveDeploymentId(match.deployment_id);
+      }
     }
-  }, [initialDeploymentId]);
+  }, [initialDeploymentId, activeJob?.job_id, deployments]);
 
 
   /* ── Filtered Deployments ── */
@@ -453,7 +461,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                 >
                   {deployments.map((d) => (
                     <option key={d.deployment_id} value={d.deployment_id}>
-                      {d.name} ({d.model_version}) — {d.status}
+                      {d.name} — Target: {d.target_column || 'unknown'} ({d.status})
                     </option>
                   ))}
                 </select>
@@ -641,8 +649,89 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
 
       {hubTab === 'endpoints' ? (
         <>
+          {/* ── Active Project Model Ready to Deploy Banner ── */}
+          {activeJob?.status === 'COMPLETED' && !deployments.some((d) => d.job_id === activeJob.job_id) && (
+            <div
+              style={{
+                marginBottom: 20,
+                padding: '14px 20px',
+                background: 'linear-gradient(135deg, rgba(0, 245, 160, 0.12) 0%, rgba(0, 212, 255, 0.08) 100%)',
+                border: '1px solid rgba(0, 245, 160, 0.35)',
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 16,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 8,
+                    background: 'rgba(0, 245, 160, 0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#00F5A0',
+                  }}
+                >
+                  <Rocket size={18} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#FFFFFF' }}>
+                    Active Trained Model Ready to Deploy
+                  </div>
+                  <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>
+                    Algorithm: <strong style={{ color: '#00F5A0' }}>{activeJob.algorithm}</strong> • Target Column: <strong style={{ color: '#FCD34D' }}>{activeJob.target_column || selectedTarget}</strong> • Features: {activeJob.feature_columns?.length || 0}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={async () => {
+                  try {
+                    const dep = await LocalDeploymentService.create(
+                      activeJob.job_id,
+                      `${activeJob.algorithm || 'Model'} Service`
+                    );
+                    onShowToast?.(
+                      'Serving Endpoint Created!',
+                      `${activeJob.algorithm} endpoint is live for ${activeJob.target_column || selectedTarget}.`,
+                      'success'
+                    );
+                    await fetchDeployments();
+                    setActiveDeploymentId(dep.deployment_id);
+                  } catch (err: any) {
+                    onShowToast?.('Deployment Failed', err?.detail || err?.message, 'error');
+                  }
+                }}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 8,
+                  background: 'linear-gradient(135deg, #00F5A0 0%, #00D4FF 100%)',
+                  color: '#050B14',
+                  fontWeight: 800,
+                  fontSize: 12,
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  boxShadow: '0 0 16px rgba(0, 245, 160, 0.35)',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                <Rocket size={14} />
+                <span>Deploy Model to Serving Endpoint</span>
+              </button>
+            </div>
+          )}
+
           {/* ── Metrics Bar ── */}
-      <div
+          <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',

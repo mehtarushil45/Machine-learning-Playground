@@ -162,7 +162,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const [dataset,           setDataset]           = useState<Dataset | null>(initial.dataset ?? null);
   const [selectedFeatures,  setSelectedFeatures]  = useState<string[]>(initial.selectedFeatures ?? []);
-  const [selectedTarget,    setSelectedTarget]    = useState<string | null>(initial.selectedTarget ?? null);
+  const [selectedTarget,    setSelectedTargetState] = useState<string | null>(initial.selectedTarget ?? null);
   const [trainingConfig,    setTrainingConfig]    = useState<ActiveTrainingConfiguration | null>(initial.trainingConfig ?? null);
   const [inferredTaskType,  setInferredTaskType]  = useState<'classification' | 'regression' | null>(
     (initial as any).inferredTaskType ?? null,
@@ -182,10 +182,23 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     Array.isArray((initial as any).generatedFiles) ? (initial as any).generatedFiles : [],
   );
 
+  const setSelectedTarget = useCallback((t: string | null) => {
+    setSelectedTargetState(t);
+    if (t) {
+      setTrainingConfig((prev) => (prev ? { ...prev, target_column: t } : null));
+    }
+  }, []);
+
   const setActiveJob = useCallback((j: JobEntity | null) => {
     setActiveJobState(j);
-    if (j && activeExperimentFile) {
-      setFileJobs((prev) => ({ ...prev, [activeExperimentFile]: j }));
+    if (j) {
+      if (j.target_column) {
+        setSelectedTargetState(j.target_column);
+        setTrainingConfig((prev) => (prev ? { ...prev, target_column: j.target_column } : null));
+      }
+      if (activeExperimentFile) {
+        setFileJobs((prev) => ({ ...prev, [activeExperimentFile]: j }));
+      }
     }
   }, [activeExperimentFile]);
 

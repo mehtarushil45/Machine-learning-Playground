@@ -1,21 +1,29 @@
+---
+trigger: always_on
+---
+
 # ML Playground Product Constitution
 
 ## 1. Product Identity & Quality Standards
+
 - **Startup-Grade Platform**: ML Playground is a startup-grade ML platform, not a student project. Everything built must reflect production-grade rigor, scalability, and polish.
 - **Uniqueness & Differentiation**: We aim to compete with the best ML platforms, but must NOT copy or mix their features into a generic platform. Product identity, uniqueness, and focused UX take precedence over feature parity.
 - **Core Priorities**: Product identity, uniqueness, UX, ML correctness, reliability, and quality are strictly higher priority than sheer feature count.
 
 ## 2. ML Correctness & Rigor
+
 - **No Silent Invalidity**: Never silently allow an invalid ML decision or configuration. Errors, invalid pipeline configurations, and unsupported data formats or parameters must be explicitly caught, validated, and reported.
 - **Verification & Testing**: Never claim a feature is complete without verification and tests. Every pipeline, component, and model workflow must be demonstrably verified.
 
 ## 3. Architecture & Code Evolution
+
 - **Inspect & Reuse**: Before changing code, inspect the existing architecture and reuse it where appropriate. Do not reinvent existing patterns or add redundant abstractions.
 - **Preserve Working Functionality**: Preserve working functionality unless a change is intentionally approved.
 - **No Monolithic Refactors**: Never perform a large refactor or implement an entire phase at once.
 - **Smallest Safe Changes**: Prefer the smallest safe change that moves the product toward its strategic goal.
 
 ## 4. Incremental Engineering Workflow
+
 Always work incrementally following the disciplined cycle:
 **Audit** → **Plan** → **Implement** → **Test** → **Review** → **Commit**
 
@@ -27,9 +35,9 @@ Always work incrementally following the disciplined cycle:
 6. **Commit**: Finalize and document the change cleanly.
 
 ## 5. Technical Decision-Making & Investigation
+
 - **Investigate When Uncertain**: When uncertain, investigate and report before implementing. Never make unverified assumptions.
 - **Constructive Challenge**: Challenge product or technical decisions when evidence suggests a better approach, cleaner architecture, or superior user experience.
-
 
 Enterprise ML Platform Architecture (100k+ Users)
 Building an enterprise ML platform capable of serving hundreds of thousands of users (competing with Databricks, AWS SageMaker Studio, Snowflake ML, and Weights & Biases) requires shifting from a monolithic, in-memory web app to a distributed, decoupled MLOps operating system.
@@ -98,14 +106,14 @@ Enforces immutable audit lineage: once a model is trained on v1, v1 cannot be mu
 Pillar 2: Enterprise Code Studio (Decoupled Compute & Real IDE)
 A toy platform runs user scripts as local child processes on the web server. An enterprise platform isolates every user's execution in a resource-capped, ephemeral sandbox.
 
-1. Decoupled Compute Architecture
+3. Decoupled Compute Architecture
 Worker Pool / Celery Task Runners:
 Clicking "Run" dispatches a job message to a Redis/RabbitMQ queue.
 Dedicated worker processes (or ephemeral Docker/Kubernetes containers) pick up the job. The web API remains completely responsive even under heavy execution loads.
 Hardware Isolation & Quotas (cgroups):
 Strict resource boundaries per user execution: 2 vCPUs, 4GB RAM, 120s timeout, and 500MB scratch disk quota.
 Subprocesses are spawned in read-only filesystems with temporary /tmp overlays, protecting server files and environment secrets.
-2. Professional Editor Capabilities
+4. Professional Editor Capabilities
 Monaco Editor Engine (VS Code core):
 Integrate Monaco for full multi-cursor editing, bracket matching, code folding, minimap, and find/replace regex.
 Language Server Protocol (LSP) / Pyright:
@@ -119,19 +127,19 @@ Built-in Git branch, commit, diff, and remote push/pull to GitHub or GitLab.
 Pillar 3: Enterprise Training Results & Model Registry
 Enterprise data scientists run hundreds of experiments. The Results page must act like MLflow, Weights & Biases, and Neptune combined.
 
-1. Multi-Run Experiment Leaderboard
+5. Multi-Run Experiment Leaderboard
 Run Comparison Matrix:
 Compare up to 5 runs side-by-side with color-coded diffs across hyperparameters (learning_rate, n_estimators, max_depth) and evaluation metrics (ROC-AUC, PR-AUC, Log Loss, F1-Score, Inference Latency (ms)).
 Interactive Parallel Coordinates Plot:
 Visualize high-dimensional hyperparameter tuning paths (e.g. visualizing how max_depth vs. min_samples_split drives F1-Score).
-2. Deep Diagnostic Evaluation
+6. Deep Diagnostic Evaluation
 Interactive Confusion Matrix:
 Toggle between absolute counts, row-normalized (recall), and column-normalized (precision). Click on any quadrant to inspect sample misclassifications.
 Threshold Optimizer (ROC / PR Curve):
 Dynamic slider to adjust the classification decision threshold from 0.0 to 1.0, showing real-time impact on Precision, Recall, and False Positive Rate.
 Feature Importance & SHAP Integrated in Place:
 Permutation feature importance and SHAP beeswarm summary plots computed directly on the test split and stored with the run artifact.
-3. Formal Model Registry (Governance Gateway)
+7. Formal Model Registry (Governance Gateway)
 Standardized Model Artifact Package (MLflow format):
 Model weights (model.joblib or model.onnx).
 Serialized preprocessing pipeline (preprocessor.joblib).
@@ -143,19 +151,19 @@ Formal promotion workflow: Experiment $\rightarrow$ Candidate (Staging) $\righta
 Pillar 4: Enterprise Model Deployment & Production MLOps
 In enterprise systems, deployment is not just a form with input fields; it is high-availability serving, batch scoring, and real-time monitoring.
 
-1. High-Throughput Batch CSV Scoring Engine
+8. High-Throughput Batch CSV Scoring Engine
 Bulk Inference Processing:
 Drag-and-drop an unlabeled 100k-row CSV or Parquet file.
 Worker processes score rows in parallel chunks.
 Export/download the enriched dataset with predicted_label, probability_distribution, and prediction_timestamp.
-2. Production REST API Endpoints
+9. Production REST API Endpoints
 Low-Latency Serving Engine:
 Optimized inference engine utilizing ONNX Runtime or vectorized Scikit-Learn pipelines.
 Dedicated inference route: POST /api/v1/deployments/{endpoint_name}/invocations.
 Input schema validation enforcing strict types (numeric ranges, valid categorical strings) with informative error payloads.
 Copy-Paste Production SDKs:
 Auto-generated, authenticated client code in Python (requests / httpx), cURL, Node.js (TypeScript), Go, and Java.
-3. Real-Time Telemetry & Data Drift Monitoring
+10. Real-Time Telemetry & Data Drift Monitoring
 Performance Metrics Dashboard:
 Live charts tracking Throughput (req/sec), P50 / P95 / P99 Latency (ms), and HTTP 2xx / 4xx / 5xx Error Rates.
 Automated Data Drift Detection:
@@ -198,22 +206,22 @@ To support lakhs of concurrent users reliably, the system must be decoupled into
 Step-by-Step Implementation Roadmap
 Here is how we can roll this out systematically:
 
-Milestone	Deliverables	Target Outcome
-Milestone 1: Navigation & Architecture Pruning	• Remove classrooms & portfolios from top-level UI and routing.
+Milestone Deliverables Target Outcome
+Milestone 1: Navigation & Architecture Pruning • Remove classrooms & portfolios from top-level UI and routing.
 • Clean primary navigation down to the 4 core pillars: Data, Studio, Results, Deployments.
-• Ensure zero dead links or broken dependencies.	Clean, laser-focused professional enterprise interface.
-Milestone 2: Batch Inference & Model Registry (Deployments)	• Build drag-and-drop Bulk CSV scoring engine with exportable results.
+• Ensure zero dead links or broken dependencies. Clean, laser-focused professional enterprise interface.
+Milestone 2: Batch Inference & Model Registry (Deployments) • Build drag-and-drop Bulk CSV scoring engine with exportable results.
 • Implement Model Registry with Lifecycle stages (Champion, Staging, Archived).
-• Add P95/P99 latency & inference telemetry logging.	Production-grade deployment and batch scoring capabilities.
-Milestone 3: Deep Experiment Tracking & Leaderboard (Results)	• Multi-run side-by-side comparison table with hyperparameter diffs.
+• Add P95/P99 latency & inference telemetry logging. Production-grade deployment and batch scoring capabilities.
+Milestone 3: Deep Experiment Tracking & Leaderboard (Results) • Multi-run side-by-side comparison table with hyperparameter diffs.
 • Interactive threshold tuner on ROC/PR curves.
-• Embed real SHAP feature importance directly into Results.	Weights & Biases / MLflow caliber experiment tracking.
-Milestone 4: Dataset Engine & DuckDB Profiling (Datasets)	• Integrate DuckDB/Polars for streaming out-of-core profiling.
+• Embed real SHAP feature importance directly into Results. Weights & Biases / MLflow caliber experiment tracking.
+Milestone 4: Dataset Engine & DuckDB Profiling (Datasets) • Integrate DuckDB/Polars for streaming out-of-core profiling.
 • Automated data leakage and multicollinearity detector.
-• Parquet support and immutable dataset versioning.	Zero OOM crashes on large files with instant profiling.
-Milestone 5: Monaco & Distributed Compute (Code Studio)	• Migrate Code Studio editor to Monaco with Python syntax services.
+• Parquet support and immutable dataset versioning. Zero OOM crashes on large files with instant profiling.
+Milestone 5: Monaco & Distributed Compute (Code Studio) • Migrate Code Studio editor to Monaco with Python syntax services.
 • Queue code execution through Celery/Redis worker sandboxes.
-• Live WebSocket execution log streaming.	Indestructible cloud IDE architecture.
+• Live WebSocket execution log streaming. Indestructible cloud IDE architecture.
 Next Action
 To begin this transformation, we can start with Milestone 1 & Milestone 2:
 

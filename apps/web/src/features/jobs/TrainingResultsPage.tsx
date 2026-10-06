@@ -344,6 +344,21 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
     }
     let ok = true;
     const ctrl = new AbortController();
+
+    // Immediate check if job completed while tab was in background
+    fetchJobDetails(job.job_id)
+      .then((fresh) => {
+        if (fresh && ok && terminal.includes(fresh.status)) {
+          setJob(fresh);
+          setActiveJob(fresh);
+          if (setFileJob && activeExperimentFile) {
+            setFileJob(activeExperimentFile, fresh);
+          }
+          ctrl.abort();
+        }
+      })
+      .catch(() => {});
+
     const unsub = subscribeToJobProgressSSE(job.job_id, {
       onProgress: (live) => {
         if (!ok) return;
