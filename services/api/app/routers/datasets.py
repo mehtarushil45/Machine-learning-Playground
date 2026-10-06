@@ -39,6 +39,7 @@ from app.dependencies import CurrentUser, get_db
 from app.models.dataset import Dataset, DatasetStatus
 from app.rate_limiter import limiter
 from app.schemas.dataset import (
+    DataGovernanceReport,
     DatasetHealthResponse,
     DatasetListResponse,
     DatasetProfileResponse,
@@ -463,7 +464,7 @@ async def upload_dataset(
 async def get_dataset_profile(
     dataset_id: str,
     current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    db: Annotated[Optional[AsyncSession], Depends(get_db)] = None,
 ) -> DatasetProfileResponse:
     """Analyze and return comprehensive schema, statistics, and quality profile for a dataset."""
     org_id_str = str(current_user.organisation_id)

@@ -8,7 +8,9 @@ import uuid
 import pandas as pd
 import pytest
 
-from app.services.duckdb_profiler import duckdb_profiler_service
+from app.services.duckdb_profiler import duckdb_profiler_service, duckdb
+
+pytestmark = pytest.mark.skipif(duckdb is None, reason="duckdb engine not available on this platform")
 
 
 def test_duckdb_profiler_csv_basic():

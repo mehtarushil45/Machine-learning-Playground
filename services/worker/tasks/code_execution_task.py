@@ -255,6 +255,7 @@ def execute_code_sandbox(
     error_msg: Optional[str] = None
     artifacts: List[str] = []
     model_id: Optional[str] = None
+    proc: Optional[subprocess.Popen] = None
 
     try:
         proc = subprocess.Popen(

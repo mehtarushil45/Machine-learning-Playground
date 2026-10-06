@@ -92,7 +92,8 @@ class DuckDBProfilerEngine:
             con.execute(f"CREATE VIEW dataset_view AS SELECT * FROM {scan_clause};")
 
             # 1. Basic Dimensions
-            row_count = int(con.execute("SELECT COUNT(*) FROM dataset_view;").fetchone()[0])
+            row_count_res = con.execute("SELECT COUNT(*) FROM dataset_view;").fetchone()
+            row_count = int(row_count_res[0]) if row_count_res is not None else 0
             columns_desc = con.execute("DESCRIBE dataset_view;").fetchall()
             # columns_desc is [(col_name, col_type, null, key, default, extra), ...]
             column_names = [row[0] for row in columns_desc]
@@ -123,9 +124,10 @@ class DuckDBProfilerEngine:
             if row_count > 0:
                 try:
                     escaped_cols = ", ".join(escape_sql_identifier(c) for c in column_names)
-                    distinct_rows = con.execute(
+                    distinct_res = con.execute(
                         f"SELECT COUNT(*) FROM (SELECT DISTINCT {escaped_cols} FROM dataset_view);"
-                    ).fetchone()[0]
+                    ).fetchone()
+                    distinct_rows = int(distinct_res[0]) if distinct_res is not None else row_count
                     duplicate_rows = max(0, row_count - distinct_rows)
                 except Exception as exc:
                     logger.debug("Distinct row count skipped or failed: %s", exc)
@@ -152,9 +154,13 @@ class DuckDBProfilerEngine:
                         COUNT(DISTINCT {escaped_col}) AS unique_cnt
                     FROM dataset_view;
                 """
-                missing_cnt, unique_cnt = con.execute(stats_query).fetchone()
-                missing_cnt = int(missing_cnt or 0)
-                unique_cnt = int(unique_cnt or 0)
+                stats_res = con.execute(stats_query).fetchone()
+                if stats_res is not None:
+                    missing_cnt = int(stats_res[0] or 0)
+                    unique_cnt = int(stats_res[1] or 0)
+                else:
+                    missing_cnt = 0
+                    unique_cnt = 0
                 total_missing_values += missing_cnt
 
                 if missing_cnt == row_count:
@@ -216,7 +222,11 @@ class DuckDBProfilerEngine:
                         FROM dataset_view
                         WHERE {escaped_col} IS NOT NULL;
                     """
-                    mean_val, std_val, min_val, max_val, var_val, med_val = con.execute(num_stats_query).fetchone()
+                    num_stats_res = con.execute(num_stats_query).fetchone()
+                    if num_stats_res is not None:
+                        mean_val, std_val, min_val, max_val, var_val, med_val = num_stats_res
+                    else:
+                        mean_val, std_val, min_val, max_val, var_val, med_val = None, None, None, None, None, None
 
                     def _safe_float(v: Any) -> float | None:
                         if v is None:
@@ -308,9 +318,10 @@ class DuckDBProfilerEngine:
                         continue
                     try:
                         escaped_num = escape_sql_identifier(num_col)
-                        corr_val = con.execute(
+                        corr_res = con.execute(
                             f"SELECT corr({escaped_num}, {escaped_target}) FROM dataset_view;"
-                        ).fetchone()[0]
+                        ).fetchone()
+                        corr_val = corr_res[0] if corr_res is not None else None
 
                         if corr_val is not None:
                             abs_corr = abs(float(corr_val))
@@ -348,9 +359,10 @@ class DuckDBProfilerEngine:
                     try:
                         escaped_a = escape_sql_identifier(col_a)
                         escaped_b = escape_sql_identifier(col_b)
-                        pair_corr = con.execute(
+                        pair_res = con.execute(
                             f"SELECT corr({escaped_a}, {escaped_b}) FROM dataset_view;"
-                        ).fetchone()[0]
+                        ).fetchone()
+                        pair_corr = pair_res[0] if pair_res is not None else None
                         if pair_corr is not None:
                             abs_pair_corr = abs(float(pair_corr))
                             if abs_pair_corr >= 0.95:
