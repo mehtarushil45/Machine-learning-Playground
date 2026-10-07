@@ -207,7 +207,7 @@ def execute_ml_training_pipeline_sync(
     tuning_strategy: Optional[str] = config.get("tuning_strategy")
     tuning_n_iter: int = int(config.get("tuning_n_iter", 20))
 
-    test_ratio: float = max(0.05, min(0.5, 1.0 - split_ratio))
+    test_ratio: float = round(max(0.05, min(0.5, 1.0 - split_ratio)), 4)
 
     experiment_id: str = str(uuid.uuid4())
 

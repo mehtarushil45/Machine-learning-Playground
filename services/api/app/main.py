@@ -130,6 +130,7 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix=API_V1_PREFIX)
 app.include_router(datasets.router, prefix=API_V1_PREFIX)
 app.include_router(jobs.router, prefix=API_V1_PREFIX)
+app.include_router(models.router, prefix=API_V1_PREFIX)  # V5A: Model Versioning & Lineage
 app.include_router(experiments.router, prefix=API_V1_PREFIX)
 app.include_router(predictions.router, prefix=API_V1_PREFIX)
 app.include_router(classrooms.router, prefix=API_V1_PREFIX)
@@ -137,7 +138,6 @@ app.include_router(portfolios.router, prefix=API_V1_PREFIX)
 app.include_router(pipelines.router, prefix=API_V1_PREFIX)
 app.include_router(explainability.router, prefix=API_V1_PREFIX)
 app.include_router(deployments.router, prefix=API_V1_PREFIX)
-app.include_router(models.router, prefix=API_V1_PREFIX)  # V5A: Model Versioning & Lineage
 app.include_router(notifications.router, prefix=API_V1_PREFIX)
 app.include_router(algorithms.router, prefix=API_V1_PREFIX)
 

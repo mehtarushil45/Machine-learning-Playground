@@ -216,7 +216,7 @@ function Step2CreateFile({ dataset, onBack, onConfirm }: { dataset: Dataset; onB
 
 /* ── MAIN GATEKEEPER ─────────────────────────────────────────────────── */
 export function ProjectGatekeeper() {
-  const { initializeProject, staleDatasetWarning, clearStaleDatasetWarning } = useProject();
+  const { initializeProject, staleDatasetWarning, clearStaleDatasetWarning, isValidatingDataset } = useProject();
   const [pendingDataset, setPendingDataset] = useState<Dataset | null>(null);
   const step = pendingDataset ? 2 : 1;
 
@@ -265,8 +265,36 @@ export function ProjectGatekeeper() {
             </button>
           </div>
         )}
-        {/* Step indicator */}
-        <div style={{ marginBottom:28 }}>
+        {isValidatingDataset ? (
+          <div
+            data-testid="dataset-validating-spinner"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 12,
+              padding: '40px 20px',
+              color: BB.muted,
+              fontSize: 12,
+            }}
+          >
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                border: '2px solid rgba(138, 121, 202, 0.2)',
+                borderTopColor: BB.primaryLight,
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }}
+            />
+            <span>Verifying dataset on server...</span>
+          </div>
+        ) : (
+          <>
+            {/* Step indicator */}
+            <div style={{ marginBottom:28 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16 }}>
             {[1,2].map((s) => (
               <div key={s} style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -297,6 +325,8 @@ export function ProjectGatekeeper() {
           ? <Step1Upload onComplete={setPendingDataset} />
           : <Step2CreateFile dataset={pendingDataset!} onBack={() => setPendingDataset(null)}
               onConfirm={(name) => { if (pendingDataset) initializeProject(pendingDataset, name); }} />}
+          </>
+        )}
       </div>
     </div>
   );

@@ -119,6 +119,8 @@ interface ProjectContextValue extends ProjectState {
   staleDatasetWarning:   string | null;
   /** Clear stale dataset warning */
   clearStaleDatasetWarning: () => void;
+  /** True while verifying a persisted dataset on startup */
+  isValidatingDataset:   boolean;
 }
 
 
@@ -190,33 +192,52 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [staleDatasetWarning, setStaleDatasetWarning] = useState<string | null>(null);
   const clearStaleDatasetWarning = useCallback(() => setStaleDatasetWarning(null), []);
 
+  const needsInitialValidation = Boolean(
+    initial.dataset?.datasetId &&
+    initial.dataset.datasetId.includes('-') &&
+    !initial.dataset.datasetId.startsWith('client-') &&
+    !initial.dataset.datasetId.startsWith('ds-')
+  );
+  const [isValidatingDataset, setIsValidatingDataset] = useState<boolean>(needsInitialValidation);
+
   // Auto-heal: verify persisted dataset still exists on backend; if server 404s, clear ghost state
   useEffect(() => {
     if (initial.dataset?.datasetId) {
       const dsId = initial.dataset.datasetId;
       if (dsId.includes('-') && !dsId.startsWith('client-') && !dsId.startsWith('ds-')) {
-        apiClient.get(`/datasets/${dsId}`).catch((err: any) => {
-          const isNotFound =
-            err?.status === 404 ||
-            (err instanceof ApiError && err.status === 404) ||
-            (err?.message && (err.message.includes('404') || err.message.toLowerCase().includes('not found')));
-          if (isNotFound) {
-            console.warn(`Persisted dataset ${dsId} no longer exists on backend server. Auto-clearing stale state.`);
-            setDataset(null);
-            setTrainingConfig(null);
-            setSelectedFeatures([]);
-            setSelectedTargetState(null);
-            setActiveJobState(null);
-            setFileJobs({});
-            setStaleDatasetWarning(
-              'Your previous dataset is no longer available on the server. Please re-upload your dataset to continue.'
-            );
-            try {
-              localStorage.removeItem(STORAGE_KEY);
-            } catch {}
-          }
-        });
+        apiClient.get(`/datasets/${dsId}`)
+          .then(() => {
+            setIsValidatingDataset(false);
+          })
+          .catch((err: any) => {
+            const isNotFound =
+              err?.status === 404 ||
+              (err instanceof ApiError && err.status === 404) ||
+              (err?.message && (err.message.includes('404') || err.message.toLowerCase().includes('not found')));
+            if (isNotFound) {
+              console.warn(`Persisted dataset ${dsId} no longer exists on backend server. Auto-clearing stale state.`);
+              setDataset(null);
+              setTrainingConfig(null);
+              setSelectedFeatures([]);
+              setSelectedTargetState(null);
+              setActiveJobState(null);
+              setFileJobs({});
+              setExperimentFiles({});
+              setActiveExperimentFile('');
+              setStaleDatasetWarning(
+                'Your previous dataset is no longer available on the server. Please re-upload your dataset to continue.'
+              );
+              try {
+                localStorage.removeItem(STORAGE_KEY);
+              } catch {}
+            }
+            setIsValidatingDataset(false);
+          });
+      } else {
+        setIsValidatingDataset(false);
       }
+    } else {
+      setIsValidatingDataset(false);
     }
   }, []);
 
@@ -370,14 +391,57 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
   const loadDataset = useCallback((d: Dataset) => {
     setStaleDatasetWarning(null);
-    setDataset(d);
-    setSelectedFeatures([]);
-    setSelectedTarget(null);
-    setTrainingConfig(null);
-    setInferredTaskType(null);
-    setActiveJob(null);
-    setLifecycleStage('dataset');
-  }, [setActiveJob]);
+    const dsId = d.datasetId;
+    const isBackend = Boolean(dsId && dsId.includes('-') && !dsId.startsWith('client-') && !dsId.startsWith('ds-'));
+    if (isBackend) {
+      setIsValidatingDataset(true);
+      apiClient.get(`/datasets/${dsId}`)
+        .then(() => {
+          setDataset(d);
+          setSelectedFeatures([]);
+          setSelectedTarget(null);
+          setTrainingConfig(null);
+          setInferredTaskType(null);
+          setActiveJob(null);
+          setLifecycleStage('dataset');
+        })
+        .catch((err: any) => {
+          const isNotFound =
+            err?.status === 404 ||
+            (err instanceof ApiError && err.status === 404) ||
+            (err?.message && (err.message.includes('404') || err.message.toLowerCase().includes('not found')));
+          if (isNotFound) {
+            setDataset(null);
+            setSelectedFeatures([]);
+            setSelectedTarget(null);
+            setTrainingConfig(null);
+            setInferredTaskType(null);
+            setActiveJob(null);
+            setLifecycleStage('dataset');
+            setStaleDatasetWarning('Selected dataset is not available on the server. Please re-upload.');
+          } else {
+            setDataset(d);
+            setSelectedFeatures([]);
+            setSelectedTarget(null);
+            setTrainingConfig(null);
+            setInferredTaskType(null);
+            setActiveJob(null);
+            setLifecycleStage('dataset');
+          }
+        })
+        .finally(() => {
+          setIsValidatingDataset(false);
+        });
+    } else {
+      setDataset(d);
+      setSelectedFeatures([]);
+      setSelectedTarget(null);
+      setTrainingConfig(null);
+      setInferredTaskType(null);
+      setActiveJob(null);
+      setLifecycleStage('dataset');
+    }
+  }, [setActiveJob, setSelectedTarget]);
 
   const resetProject = useCallback(() => {
     setStaleDatasetWarning(null);
@@ -402,13 +466,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Derived flag: true only when both dataset AND a named experiment file are present.
-  const isProjectInitialized = Boolean(dataset && activeExperimentFile && activeExperimentFile.length > 0);
+  // Derived flag: true only when not validating AND both dataset AND a named experiment file are present.
+  const isProjectInitialized = Boolean(
+    !isValidatingDataset && dataset && activeExperimentFile && activeExperimentFile.length > 0
+  );
 
   return (
     <ProjectContext.Provider
       value={{
         isProjectInitialized,
+        isValidatingDataset,
         dataset,
         selectedFeatures,
         selectedTarget,
