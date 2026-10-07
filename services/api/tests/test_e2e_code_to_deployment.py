@@ -60,7 +60,7 @@ async def test_full_pipeline_code_to_deployment_lifecycle():
         gen = generate_python_code(dag)
         assert gen.is_valid_syntax is True, "Generated Python code must be syntactically valid"
 
-        record = await start_execution(code=gen.python_code, filename="experiment_test_full_flow.py")
+        record = await start_execution(code=gen.python_code, filename="experiment_test_full_flow.py", prefer_celery=False)
         assert record.exec_id is not None
 
         model_id = None

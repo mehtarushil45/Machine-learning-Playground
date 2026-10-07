@@ -307,6 +307,14 @@ def generate_python_code(
         imports.append("from sklearn.ensemble import RandomForestClassifier")
 
     # Step 1: Load Data
+    if pipeline.feature_columns:
+        formatted_feature_list = "[\n" + ",\n".join(
+            "    " + ", ".join(f"'{col}'" for col in pipeline.feature_columns[i : i + 4])
+            for i in range(0, len(pipeline.feature_columns), 4)
+        ) + ",\n]"
+    else:
+        formatted_feature_list = "[]"
+
     step1_code = f"""# --- Step 1: Load Dataset ---
 dataset_path = "{pipeline.dataset_name}"
 df = pd.read_csv(dataset_path)
@@ -317,7 +325,7 @@ if target_col in df.columns:
     df = df.dropna(subset=[target_col])
 
 # Separate input features and target column
-feature_cols = {pipeline.feature_columns}
+feature_cols = {formatted_feature_list}
 feature_cols = [c for c in feature_cols if c in df.columns and c != target_col]
 
 X = df[feature_cols]
@@ -385,8 +393,12 @@ y = df[target_col]"""
 
     step2_code = f"""# --- Step 2: Build Preprocessing Pipeline ---
 # Partition features into numeric and categorical subsets dynamically
-numeric_features = [col for col in feature_cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])]
-categorical_features = [col for col in feature_cols if col in df.columns and col not in numeric_features]
+numeric_features = [
+    col for col in feature_cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])
+]
+categorical_features = [
+    col for col in feature_cols if col in df.columns and col not in numeric_features
+]
 
 transformers = []
 
@@ -510,7 +522,7 @@ model_pipeline.fit(X_train, y_train)"""
 y_pred = model_pipeline.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred)
 print(f"Test Accuracy: {accuracy:.4f}")
-print("\\nClassification Report:\\n", classification_report(y_test, y_pred))
+print("\\nClassification Report:\\n", classification_report(y_test, y_pred, zero_division=0))
 
 # Save trained pipeline artifact
 joblib.dump(model_pipeline, "trained_model_pipeline.joblib")
@@ -551,6 +563,15 @@ print("Saved model pipeline to 'trained_model_pipeline.joblib'")"""
     # Deduplicate imports
     unique_imports = sorted(set(imports))
     full_script = "\n".join(unique_imports) + "\n\n" + "\n".join(code_blocks)
+
+    # Format cleanly with Black (PEP 8)
+    try:
+        import black
+        formatted_script = black.format_str(full_script, mode=black.Mode())
+        if formatted_script.strip():
+            full_script = formatted_script
+    except Exception:
+        pass
 
     # Syntax Validation via AST Parsing
     is_valid_syntax = False

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 import {
@@ -59,18 +59,24 @@ function AppContent() {
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
 
-  const showToast = (
+  const showToast = useCallback((
     title: string,
     description?: string,
     type: 'success' | 'info' | 'error' = 'success',
   ) => {
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, title, description, type }]);
-  };
+    setToasts((prev) => {
+      // Prevent duplicate stacked notifications with identical title and description
+      const exists = prev.some((t) => t.title === title && t.description === description && t.type === type);
+      if (exists) return prev;
+      const next = [...prev, { id, title, description, type }];
+      return next.slice(-4);
+    });
+  }, []);
 
-  const removeToast = (id: string) => {
+  const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+  }, []);
 
   const handleNavigate = (tab: PlatformTab, deploymentId?: string) => {
     setActiveTab(tab);
@@ -458,6 +464,7 @@ function AppContent() {
               <div style={{ display: activeTab === 'deployments' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <ErrorBoundary key="deployments" onReset={() => setActiveTab('workspace')}>
                   <DeploymentsHub
+                    isActive={activeTab === 'deployments'}
                     initialDeploymentId={activeDeploymentId}
                     onShowToast={showToast}
                   />

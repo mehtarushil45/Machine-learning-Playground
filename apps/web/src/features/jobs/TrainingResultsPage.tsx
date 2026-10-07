@@ -38,6 +38,7 @@ import { ThresholdOptimizer } from './ThresholdOptimizer';
 import { FeatureImportanceCard } from './FeatureImportanceCard';
 import type { JobEntity } from '../../types/job';
 import type { PlatformTab } from '../../App';
+import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
 
 /* ── Premium High-Contrast Design Tokens ─────────────────────────────────────── */
 const BB = {
@@ -204,69 +205,10 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 /**
- * Parse python code from an experiment file to extract algorithm, scaler, imputer, and split settings.
+ * Parse python code from an experiment file to extract target, algorithm, scaler, imputer, and split settings.
  */
-function parsePipelineCode(code: string): {
-  algorithm?: string;
-  scaler?: string;
-  imputer?: string;
-  testSplit?: number;
-  seed?: number;
-} {
-  const result: {
-    algorithm?: string;
-    scaler?: string;
-    imputer?: string;
-    testSplit?: number;
-    seed?: number;
-  } = {};
-
-  if (!code) return result;
-
-  // Algorithm extraction
-  if (/RandomForestClassifier/i.test(code)) result.algorithm = 'random_forest_classifier';
-  else if (/RandomForestRegressor/i.test(code)) result.algorithm = 'random_forest_regressor';
-  else if (/GradientBoostingClassifier/i.test(code)) result.algorithm = 'gradient_boosting_classifier';
-  else if (/GradientBoostingRegressor/i.test(code)) result.algorithm = 'gradient_boosting_regressor';
-  else if (/DecisionTreeClassifier/i.test(code)) result.algorithm = 'decision_tree_classifier';
-  else if (/DecisionTreeRegressor/i.test(code)) result.algorithm = 'decision_tree_regressor';
-  else if (/LogisticRegression/i.test(code)) result.algorithm = 'logistic_regression';
-  else if (/LinearRegression/i.test(code)) result.algorithm = 'linear_regression';
-  else if (/Ridge/i.test(code)) result.algorithm = 'ridge';
-  else if (/Lasso/i.test(code)) result.algorithm = 'lasso';
-  else if (/SVC/i.test(code)) result.algorithm = 'svc';
-  else if (/SVR/i.test(code)) result.algorithm = 'svr';
-  else if (/KNeighborsClassifier/i.test(code)) result.algorithm = 'k_nearest_neighbors';
-
-  // Scaler extraction
-  if (/StandardScaler/i.test(code)) result.scaler = 'standard_scaler';
-  else if (/MinMaxScaler/i.test(code)) result.scaler = 'min_max_scaler';
-  else if (/RobustScaler/i.test(code)) result.scaler = 'robust_scaler';
-  else if (/MaxAbsScaler/i.test(code)) result.scaler = 'max_abs_scaler';
-
-  // Imputer extraction
-  const impMatch = code.match(/SimpleImputer\s*\([^)]*strategy\s*=\s*['"]([^'"]+)['"]/i);
-  if (impMatch && impMatch[1]) {
-    result.imputer = impMatch[1].toLowerCase();
-  }
-
-  // Split extraction
-  const splitMatch = code.match(/test_size\s*=\s*([0-9.]+)/i);
-  if (splitMatch && splitMatch[1]) {
-    const val = parseFloat(splitMatch[1]);
-    if (!isNaN(val) && val > 0 && val < 1) {
-      result.testSplit = 1 - val;
-    }
-  }
-
-  // Random seed extraction
-  const seedMatch = code.match(/random_state\s*=\s*([0-9]+)/i);
-  if (seedMatch && seedMatch[1]) {
-    const s = parseInt(seedMatch[1], 10);
-    if (!isNaN(s)) result.seed = s;
-  }
-
-  return result;
+function parsePipelineCode(code: string) {
+  return parsePipelineTargetAndConfig(code);
 }
 
 interface TrainingResultsPageProps {
@@ -289,6 +231,8 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
     setActiveExperimentFile,
     fileJobs,
     setFileJob,
+    setSelectedTarget,
+    setSelectedFeatures,
   } = useProject();
 
   const [job, setJob] = useState<JobEntity | null>(activeJob);
@@ -448,6 +392,25 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
     }
   };
 
+  // Auto-synchronize target, features, and config from active experiment file code if edited & saved
+  useEffect(() => {
+    const activeCode = experimentFiles?.[activeExperimentFile];
+    if (!activeCode) return;
+    const parsed = parsePipelineTargetAndConfig(activeCode);
+    if (parsed.target && parsed.target !== (job?.target_column || trainingConfig?.target_column)) {
+      if (job) {
+        const syncedJob = { ...job, target_column: parsed.target };
+        setJob(syncedJob);
+        setActiveJob(syncedJob);
+        if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, syncedJob);
+      }
+      if (trainingConfig) {
+        setTrainingConfig((prev) => (prev ? { ...prev, target_column: parsed.target! } : null));
+      }
+      setSelectedTarget(parsed.target);
+    }
+  }, [activeExperimentFile, experimentFiles, job?.target_column, trainingConfig?.target_column, setActiveJob, setFileJob, setSelectedTarget, setTrainingConfig]);
+
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
@@ -469,13 +432,17 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
             },
           };
         }
+        if (parsed.target) {
+          freshJob = { ...freshJob, target_column: parsed.target };
+        }
         setJob(freshJob);
         setActiveJob(freshJob);
         if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, freshJob);
-      } else if (parsed.algorithm && job) {
+      } else if (job) {
         const updatedJob: JobEntity = {
           ...job,
-          algorithm: parsed.algorithm,
+          ...(parsed.algorithm ? { algorithm: parsed.algorithm } : {}),
+          ...(parsed.target ? { target_column: parsed.target } : {}),
           metadata: {
             ...job.metadata,
             ...(parsed.scaler ? { scaler: parsed.scaler } : {}),
@@ -488,16 +455,30 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
         if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, updatedJob);
       }
 
-      if (parsed.algorithm || parsed.scaler || parsed.imputer || parsed.testSplit !== undefined || parsed.seed !== undefined) {
+      if (
+        parsed.target ||
+        parsed.algorithm ||
+        parsed.scaler ||
+        parsed.imputer ||
+        parsed.testSplit !== undefined ||
+        parsed.seed !== undefined
+      ) {
         if (trainingConfig) {
           setTrainingConfig({
             ...trainingConfig,
+            ...(parsed.target ? { target_column: parsed.target } : {}),
             ...(parsed.algorithm ? { algorithm: parsed.algorithm } : {}),
             ...(parsed.scaler ? { scaler: parsed.scaler } : {}),
             ...(parsed.imputer ? { imputer: parsed.imputer } : {}),
             ...(parsed.testSplit !== undefined ? { train_test_split: parsed.testSplit } : {}),
             ...(parsed.seed !== undefined ? { random_seed: parsed.seed } : {}),
           });
+        }
+        if (parsed.target) {
+          setSelectedTarget(parsed.target);
+        }
+        if (parsed.features && parsed.features.length > 0) {
+          setSelectedFeatures(parsed.features);
         }
       }
 

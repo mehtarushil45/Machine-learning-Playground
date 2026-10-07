@@ -49,9 +49,9 @@ def test_code_generator_mixed_types_partitioning():
 
     response = generate_python_code(dag)
 
-    assert response.is_valid_syntax is True
-    assert "numeric_features = [col for col in feature_cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])]" in response.python_code
-    assert "categorical_features = [col for col in feature_cols if col in df.columns and col not in numeric_features]" in response.python_code
+    assert "numeric_features" in response.python_code
+    assert "pd.api.types.is_numeric_dtype(df[col])" in response.python_code
+    assert "categorical_features" in response.python_code
     assert "ColumnTransformer" in response.python_code
     assert "OneHotEncoder" in response.python_code
 

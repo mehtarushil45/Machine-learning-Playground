@@ -22,6 +22,7 @@ import {
   ArrowDown,
   Wand2,
   Rocket,
+  Save,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService } from '../../services/api';
@@ -30,6 +31,7 @@ import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 import { MonacoCodeStudioEditor } from './MonacoCodeStudioEditor';
+import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -577,6 +579,12 @@ export function ViewAsCodeStudio({
     markFileModified,
     markFileGenerated,
     isFileModified,
+    setSelectedTarget,
+    setTrainingConfig,
+    setSelectedFeatures,
+    setActiveJob,
+    setFileJob,
+    fileJobs,
   } = useProject();
 
   /* ── Local Sizing & Layout States (with persistence) ─────────────── */
@@ -639,6 +647,7 @@ export function ViewAsCodeStudio({
   const [execExitCode, setExecExitCode] = useState<number | null>(null);
   const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<Diagnostic[]>([]);
   const [serverDiagnostics, setServerDiagnostics] = useState<Diagnostic[]>([]);
+  const [serverLintDone, setServerLintDone] = useState<boolean>(false);
   const [isLinting, setIsLinting] = useState<boolean>(false);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
 
@@ -721,6 +730,7 @@ export function ViewAsCodeStudio({
     // If buffer is empty or blank, immediately clear diagnostics (satisfies empty buffer requirement)
     if (!displayedCode || !displayedCode.trim()) {
       setServerDiagnostics([]);
+      setServerLintDone(true);
       setIsLinting(false);
       return;
     }
@@ -747,10 +757,12 @@ export function ViewAsCodeStudio({
             code: d.code,
           }));
         setServerDiagnostics(mapped);
+        setServerLintDone(true);
       } catch {
         // Fallback to client-side static analysis if server is unreachable
         const fallback = analyzeCode(displayedCode);
         setServerDiagnostics(fallback);
+        setServerLintDone(true);
       } finally {
         setIsLinting(false);
       }
@@ -1012,6 +1024,49 @@ export function ViewAsCodeStudio({
       setIsFormatting(false);
     }
   };
+
+  const handleSaveCode = useCallback(() => {
+    if (!displayedCode) return;
+    markFileModified(currentFile);
+    const parsed = parsePipelineTargetAndConfig(displayedCode);
+    if (parsed.target) {
+      setSelectedTarget(parsed.target);
+      if (trainingConfig) {
+        setTrainingConfig((prev) => (prev ? { ...prev, target_column: parsed.target! } : null));
+      }
+      if (activeJob) {
+        const updatedJob = { ...activeJob, target_column: parsed.target };
+        setActiveJob(updatedJob);
+        if (setFileJob) setFileJob(currentFile, updatedJob);
+      }
+    }
+    if (parsed.features && parsed.features.length > 0) {
+      setSelectedFeatures(parsed.features);
+      if (trainingConfig) {
+        setTrainingConfig((prev) => (prev ? { ...prev, feature_columns: parsed.features! } : null));
+      }
+    }
+    if (parsed.algorithm && trainingConfig) {
+      setTrainingConfig((prev) => (prev ? { ...prev, algorithm: parsed.algorithm! } : null));
+    }
+    onShowToast?.(
+      'File Saved',
+      `${currentFile} saved.${parsed.target ? ` Target: ${parsed.target}` : ''}`,
+      'success'
+    );
+  }, [
+    currentFile,
+    displayedCode,
+    markFileModified,
+    trainingConfig,
+    activeJob,
+    setSelectedTarget,
+    setTrainingConfig,
+    setActiveJob,
+    setFileJob,
+    setSelectedFeatures,
+    onShowToast,
+  ]);
 
   /* ── Code Execution Handlers ─────────────────────────────────────── */
   const handleRunCode = async () => {
@@ -1382,8 +1437,13 @@ export function ViewAsCodeStudio({
 
     const seen = new Map<string, Diagnostic>();
     // Primary source: real server-side AST and pyflakes diagnostics.
-    // Client-side analyzeCode serves as initial pre-check while server request is in flight
-    const activeDiagnostics = serverDiagnostics.length > 0 ? serverDiagnostics : analyzeCode(displayedCode);
+    // When server lint has completed, trust its results (empty means clean code with 0 problems).
+    // Client-side analyzeCode serves only as initial pre-check while server request is in flight.
+    const activeDiagnostics = serverLintDone
+      ? serverDiagnostics
+      : serverDiagnostics.length > 0
+      ? serverDiagnostics
+      : analyzeCode(displayedCode);
 
     [...activeDiagnostics, ...runtimeDiagnostics].forEach((d) => {
       const key = `${d.line}:${d.message}`;
@@ -1639,6 +1699,30 @@ export function ViewAsCodeStudio({
 
         {/* Right: Studio Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', flexShrink: 0 }}>
+          {/* Save Button */}
+          <button
+            onClick={handleSaveCode}
+            disabled={!displayedCode}
+            aria-label="Save code"
+            title="Save code & synchronize configuration (Ctrl+S)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 9px',
+              borderRadius: 5,
+              border: `1px solid ${isFileModified(currentFile) ? BB.gold : BB.border}`,
+              background: isFileModified(currentFile) ? 'rgba(245,158,11,0.18)' : 'rgba(75,59,124,0.15)',
+              color: isFileModified(currentFile) ? BB.gold : BB.text,
+              fontSize: 11.5,
+              cursor: !displayedCode ? 'not-allowed' : 'pointer',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <Save style={{ width: 12, height: 12 }} />
+            <span>Save</span>
+          </button>
+
           {/* Format Button */}
           <button
             onClick={handleFormatCode}
@@ -1934,10 +2018,6 @@ export function ViewAsCodeStudio({
             <FolderOpen style={{ width: 12, height: 12, color: BB.gold }} />
             <span>workspace</span>
             <ChevronRight style={{ width: 10, height: 10, opacity: 0.5 }} />
-            <span>src</span>
-            <ChevronRight style={{ width: 10, height: 10, opacity: 0.5 }} />
-            <span>pipeline</span>
-            <ChevronRight style={{ width: 10, height: 10, opacity: 0.5 }} />
             <FileCode style={{ width: 12, height: 12, color: '#38BDF8' }} />
             <span style={{ color: BB.text, fontWeight: 600 }}>{currentFile}</span>
           </div>
@@ -2031,10 +2111,7 @@ export function ViewAsCodeStudio({
                 }}
                 onCursorChange={(pos) => setCursorPos(pos)}
                 onRunCode={handleRunCode}
-                onSave={() => {
-                  markFileModified(currentFile);
-                  onShowToast?.('Saved', `${currentFile} saved.`, 'info');
-                }}
+                onSave={handleSaveCode}
                 onToggleTerminal={() => setBottomPanelOpen((o) => !o)}
                 minimapEnabled={true}
               />

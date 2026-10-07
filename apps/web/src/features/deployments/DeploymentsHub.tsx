@@ -8,7 +8,7 @@
  * - Traceable lineage from Dataset → Training Run → Model Artifact → Deployment
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Rocket,
@@ -54,6 +54,7 @@ import { useProject } from '../../providers/ProjectContext';
 interface DeploymentsHubProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'error') => void;
   initialDeploymentId?: string | null;
+  isActive?: boolean;
 }
 
 const STATUS_CONFIG: Record<
@@ -73,7 +74,12 @@ const STATUS_CONFIG: Record<
 export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
   onShowToast,
   initialDeploymentId,
+  isActive = true,
 }) => {
+  const onShowToastRef = useRef(onShowToast);
+  useEffect(() => {
+    onShowToastRef.current = onShowToast;
+  });
   const { activeJob, selectedTarget } = useProject();
   const [deployments, setDeployments] = useState<LocalDeploymentResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,11 +122,13 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
       const data = await LocalDeploymentService.list();
       setDeployments(data);
     } catch (err: any) {
-      onShowToast?.('Failed to Load Deployments', err?.detail || err?.message, 'error');
+      if (isActive) {
+        onShowToastRef.current?.('Failed to Load Deployments', err?.detail || err?.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
-  }, [onShowToast]);
+  }, [isActive]);
 
   // Load Model Registry
   const fetchRegistry = useCallback(async () => {
@@ -140,9 +148,11 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
   }, []);
 
   useEffect(() => {
-    fetchDeployments();
-    fetchRegistry();
-  }, [fetchDeployments, fetchRegistry]);
+    if (isActive) {
+      fetchDeployments();
+      fetchRegistry();
+    }
+  }, [isActive, fetchDeployments, fetchRegistry]);
 
   useEffect(() => {
     if (initialDeploymentId) {
