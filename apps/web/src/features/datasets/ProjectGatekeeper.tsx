@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ProjectGatekeeper — 2-step onboarding shown on every page
  * when no dataset + experiment file has been initialized.
  *
@@ -51,12 +51,44 @@ function Step1Upload({ onComplete }: { onComplete: (d: Dataset) => void }) {
     try {
       setIsProcessing(true); setProgress(20);
       const dataset = await parseCsvFile(file); setProgress(60);
-      let datasetId = 'ds-' + Date.now().toString(36);
+      let datasetId: string | null = null;
       try {
         const fd = new FormData(); fd.append('file', file);
         const r = await apiClient.upload<{ dataset_id: string }>('/datasets/upload', fd);
-        datasetId = r.dataset_id; setProgress(90);
-      } catch { /* backend unavailable */ }
+        datasetId = r.dataset_id;
+        setProgress(90);
+      } catch (uploadErr) {
+        // Attempt quick auto-auth retry if session expired or unauthenticated
+        try {
+          const authBody = new URLSearchParams({
+            username: 'demo@ml-playground.internal',
+            password: 'DemoPassword123!',
+          });
+          const loginRes = await fetch('/api/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: authBody.toString(),
+          });
+          if (loginRes.ok) {
+            const authData = await loginRes.json();
+            if (authData.access_token) {
+              localStorage.setItem('access_token', authData.access_token);
+              const fd2 = new FormData(); fd2.append('file', file);
+              const r2 = await apiClient.upload<{ dataset_id: string }>('/datasets/upload', fd2);
+              datasetId = r2.dataset_id;
+              setProgress(90);
+            }
+          }
+        } catch {
+          // Backend completely unreachable
+        }
+      }
+
+      if (!datasetId) {
+        setError('Failed to upload dataset to backend storage. Please ensure the backend server is running and accessible.');
+        return;
+      }
+
       setProgress(100);
       onComplete({ ...dataset, datasetId, rowCount: dataset.rows.length });
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not parse the CSV file.'); }

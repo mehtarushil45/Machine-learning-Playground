@@ -211,3 +211,16 @@ async def get_training_options():
         "min_cv_folds": 2,
         "max_cv_folds": 20,
     }
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Root entrypoint returning service info and guidance."""
+    return {
+        "service": "ML Platform API",
+        "version": app.version,
+        "status": "healthy",
+        "web_application_url": "http://localhost:5173",
+        "docs_url": "/docs",
+        "message": "Welcome to the ML Platform Backend API. For the Web Application UI (Data, Studio, Results, Deployments), please open http://localhost:5173 in your browser. For API documentation, visit /docs.",
+    }
