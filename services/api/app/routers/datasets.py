@@ -179,6 +179,15 @@ async def get_dataset_by_id(
             res = await db.execute(stmt)
             ds = res.scalar_one_or_none()
             if ds is not None:
+                # Verify that underlying file is actually accessible in storage backend
+                backend = get_configured_backend()
+                org_str = str(current_user.organisation_id)
+                if not backend.exists(dataset_id=str(ds.id), filename=ds.name, organisation_id=org_str):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"No dataset file found for dataset_id='{dataset_id}'. Physical file is missing from storage.",
+                    )
+
                 return DatasetResponse(
                     id=ds.id,
                     name=ds.name,
@@ -438,6 +447,19 @@ async def upload_dataset(
                     if ex.version == target_version:
                         if ex.content_hash == content_hash:
                             # Idempotent re-upload of identical immutable version
+                            backend = get_configured_backend()
+                            org_id_str = str(current_user.organisation_id)
+                            if not backend.exists(dataset_id=str(ex.id), filename=safe_filename, organisation_id=org_id_str):
+                                try:
+                                    backend.save_stream(
+                                        chunks=[content],
+                                        dataset_id=str(ex.id),
+                                        filename=safe_filename,
+                                        organisation_id=org_id_str,
+                                    )
+                                    logger.info("Restored missing storage file for dataset %s (%s)", ex.id, safe_filename)
+                                except Exception as save_err:
+                                    logger.error("Failed restoring storage file for dataset %s: %s", ex.id, save_err)
                             return DatasetUploadResponse(
                                 dataset_id=ex.id,
                                 filename=ex.name,
@@ -462,6 +484,19 @@ async def upload_dataset(
                 # Auto-versioning: check if identical content already exists
                 for ex in existing_datasets:
                     if ex.content_hash == content_hash:
+                        backend = get_configured_backend()
+                        org_id_str = str(current_user.organisation_id)
+                        if not backend.exists(dataset_id=str(ex.id), filename=safe_filename, organisation_id=org_id_str):
+                            try:
+                                backend.save_stream(
+                                    chunks=[content],
+                                    dataset_id=str(ex.id),
+                                    filename=safe_filename,
+                                    organisation_id=org_id_str,
+                                )
+                                logger.info("Restored missing storage file for dataset %s (%s)", ex.id, safe_filename)
+                            except Exception as save_err:
+                                logger.error("Failed restoring storage file for dataset %s: %s", ex.id, save_err)
                         return DatasetUploadResponse(
                             dataset_id=ex.id,
                             filename=ex.name,
