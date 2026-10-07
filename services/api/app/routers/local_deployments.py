@@ -155,9 +155,9 @@ async def restart_local_deployment(
 )
 async def redeploy_local_deployment(
     deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
     payload: Optional[LocalDeploymentRedeploy] = None,
-    current_user: CurrentUser = None,
-    db: DBSession = None,
 ) -> LocalDeploymentResponse:
     """Redeploy current deployment, optionally updating to a new model artifact version."""
     return await svc.redeploy_local_deployment(
@@ -212,11 +212,11 @@ async def predict_local(
 )
 async def predict_batch_local(
     deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
     file: UploadFile = File(..., description="CSV file containing feature records"),
     batch_size: int = Form(1000, description="Processing batch size"),
     return_probabilities: bool = Form(True, description="Compute class probabilities"),
-    current_user: CurrentUser = None,
-    db: DBSession = None,
 ) -> LocalBatchPredictResponse:
     """Execute high-throughput batch scoring from an uploaded CSV file."""
     if not file.filename or not file.filename.lower().endswith(".csv"):
@@ -243,8 +243,8 @@ async def predict_batch_local(
 async def predict_batch_json_local(
     deployment_id: str,
     payload: LocalBatchPredictRequest,
-    current_user: CurrentUser = None,
-    db: DBSession = None,
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> LocalBatchPredictResponse:
     """Execute batch inference for a list of JSON feature records."""
     return await svc.predict_batch_local(
@@ -263,8 +263,8 @@ async def predict_batch_json_local(
 )
 async def get_template_csv(
     deployment_id: str,
-    current_user: CurrentUser = None,
-    db: DBSession = None,
+    current_user: CurrentUser,
+    db: DBSession,
 ) -> Response:
     """Download a pre-formatted template CSV populated with the required feature headers and sample rows."""
     csv_text = await svc.generate_template_csv(
@@ -289,10 +289,10 @@ async def get_template_csv(
 )
 async def list_prediction_history(
     deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    current_user: CurrentUser = None,
-    db: DBSession = None,
 ) -> List[PredictionHistoryItem]:
     """Fetch paginated inference audit history."""
     return await svc.list_prediction_history(
