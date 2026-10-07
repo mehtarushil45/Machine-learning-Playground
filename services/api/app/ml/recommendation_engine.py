@@ -142,6 +142,9 @@ class RecommendationConfig:
     screening_sample_size: int = 2_000
     verification_sample_size: int = 5_000
     max_distance_kernel_rows: int = 2_000
+    screening_n_estimators: int = 50
+    verification_n_estimators: int = 150
+    candidate_fold_timeout_seconds: float = 20.0
 
 
 @dataclass
@@ -290,12 +293,15 @@ def evaluate_candidate_cv(
     metric_name: str,
     task_type: str,
     random_seed: int = 42,
+    n_estimators_budget: Optional[int] = None,
+    max_fold_seconds: Optional[float] = None,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
 ) -> CandidateBenchmarkResult:
     """Evaluate a single algorithm across CV folds using leakage-safe per-fold pipeline fitting."""
     start_time = time.perf_counter()
     fold_scores: List[float] = []
     raw_scores: List[float] = []
+    risk_flags: List[str] = []
 
     X = dataframe[feature_columns]
     y = dataframe[target_column]
@@ -305,6 +311,20 @@ def evaluate_candidate_cv(
 
         unfitted_preprocessor = build_preprocessor(ctx)
         base_estimator = definition.factory(random_seed)
+
+        # Multi-fidelity hyperparameter budget scaling
+        if n_estimators_budget is not None:
+            try:
+                params = base_estimator.get_params()
+                if "n_estimators" in params:
+                    base_estimator.set_params(n_estimators=n_estimators_budget)
+                if "max_iter" in params and n_estimators_budget <= 50:
+                    current_max_iter = params.get("max_iter")
+                    if isinstance(current_max_iter, int) and current_max_iter > 300:
+                        base_estimator.set_params(max_iter=300)
+            except Exception as e:
+                logger.debug("Failed setting parameter budget on %s: %s", definition.key, e)
+
         unfitted_pipeline = Pipeline([
             ("preprocessor", unfitted_preprocessor),
             ("estimator", base_estimator),
@@ -316,6 +336,7 @@ def evaluate_candidate_cv(
             if progress_callback:
                 progress_callback(definition.display_name, fold_idx + 1, total_folds)
 
+            fold_start = time.perf_counter()
             fold_pipeline: Any = clone(unfitted_pipeline)
 
             X_train_fold, X_val_fold = X.iloc[train_idx], X.iloc[val_idx]
@@ -331,12 +352,26 @@ def evaluate_candidate_cv(
                 task_type=task_type,
             )
 
+            fold_elapsed = time.perf_counter() - fold_start
             fold_scores.append(c_score)
             raw_scores.append(r_score)
 
+            # Progressive fold-level early pruning:
+            # 1. Fold runtime exceeds timeout budget
+            if max_fold_seconds is not None and fold_elapsed > max_fold_seconds and (fold_idx + 1) < total_folds:
+                risk_flags.append(
+                    f"Candidate pruned after fold {fold_idx + 1} (fold took {fold_elapsed:.1f}s > {max_fold_seconds:.1f}s limit)"
+                )
+                break
+
+            # 2. Score is non-finite or severely degenerate
+            if (math.isnan(c_score) or math.isinf(c_score)) and (fold_idx + 1) < total_folds:
+                risk_flags.append(f"Candidate pruned after fold {fold_idx + 1} due to non-finite fold score")
+                break
+
         elapsed = time.perf_counter() - start_time
         mean_score = float(np.mean(fold_scores))
-        std_score = float(np.std(fold_scores))
+        std_score = float(np.std(fold_scores)) if len(fold_scores) > 1 else 0.0
         mean_raw = float(np.mean(raw_scores))
 
         return CandidateBenchmarkResult(
@@ -350,6 +385,7 @@ def evaluate_candidate_cv(
             raw_metric_value=round(mean_raw, 4),
             fold_scores=[round(s, 4) for s in fold_scores],
             training_seconds=round(elapsed, 3),
+            risk_flags=risk_flags,
         )
 
     except Exception as exc:
@@ -664,6 +700,10 @@ def run_recommendation_benchmark(
         screening_models.append(defn)
 
     # Run Screening Tier
+    benchmark_start_time = time.perf_counter()
+    time_limit = float(config.constraints.max_training_seconds) if config.constraints.max_training_seconds else 120.0
+    screening_time_budget = time_limit * 0.70
+
     if stage_callback:
         stage_callback("SCREENING", 20.0)
 
@@ -671,6 +711,13 @@ def run_recommendation_benchmark(
     screening_splitter = StratifiedKFold(n_splits=3, shuffle=True, random_state=config.random_seed) if task_type == "classification" else KFold(n_splits=3, shuffle=True, random_state=config.random_seed)
 
     for defn in screening_models:
+        elapsed_so_far = time.perf_counter() - benchmark_start_time
+        if elapsed_so_far >= screening_time_budget and len(screening_results) >= 2:
+            limitations.append(
+                f"Screening concluded after evaluating {len(screening_results)} models to respect the time budget ({elapsed_so_far:.1f}s / {time_limit:.0f}s limit)."
+            )
+            break
+
         res = evaluate_candidate_cv(
             definition=defn,
             dataframe=df_screening,
@@ -680,6 +727,8 @@ def run_recommendation_benchmark(
             metric_name=chosen_metric,
             task_type=task_type,
             random_seed=config.random_seed,
+            n_estimators_budget=config.screening_n_estimators,
+            max_fold_seconds=config.candidate_fold_timeout_seconds,
             progress_callback=progress_callback,
         )
         screening_results.append(res)
@@ -718,6 +767,13 @@ def run_recommendation_benchmark(
 
     verified_results: List[CandidateBenchmarkResult] = []
     for defn in verification_models:
+        elapsed_so_far = time.perf_counter() - benchmark_start_time
+        if elapsed_so_far >= time_limit * 0.95 and len(verified_results) >= 1:
+            limitations.append(
+                f"Verification concluded early to honor the global time budget ({elapsed_so_far:.1f}s / {time_limit:.0f}s limit)."
+            )
+            break
+
         res = evaluate_candidate_cv(
             definition=defn,
             dataframe=df_verification,
@@ -727,6 +783,8 @@ def run_recommendation_benchmark(
             metric_name=chosen_metric,
             task_type=task_type,
             random_seed=config.random_seed,
+            n_estimators_budget=config.verification_n_estimators,
+            max_fold_seconds=config.candidate_fold_timeout_seconds * 2.0,
             progress_callback=progress_callback,
         )
         verified_results.append(res)
@@ -765,6 +823,12 @@ def run_recommendation_benchmark(
         "train_rows": train_rows,
         "holdout_rows": holdout_rows,
         "metric": chosen_metric,
+        "screening_n_estimators": config.screening_n_estimators,
+        "verification_n_estimators": config.verification_n_estimators,
+        "fidelity_tiers": {
+            "screening_trees": config.screening_n_estimators,
+            "verification_trees": config.verification_n_estimators,
+        },
         "constraints": {
             "max_training_seconds": config.constraints.max_training_seconds,
             "prefer_interpretable": config.constraints.prefer_interpretable,

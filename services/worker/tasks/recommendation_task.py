@@ -187,6 +187,12 @@ async def _execute_recommendation_job_async(job_id_str: str) -> Dict[str, Any]:
             max_training_seconds=constraints_cfg.get("max_training_seconds", 120),
             prefer_interpretable=constraints_cfg.get("prefer_interpretable", False),
         ),
+        screening_sample_size=req_cfg.get("screening_sample_size", 2_000),
+        verification_sample_size=req_cfg.get("verification_sample_size", 5_000),
+        max_distance_kernel_rows=req_cfg.get("max_distance_kernel_rows", 2_000),
+        screening_n_estimators=req_cfg.get("screening_n_estimators", 50),
+        verification_n_estimators=req_cfg.get("verification_n_estimators", 150),
+        candidate_fold_timeout_seconds=req_cfg.get("candidate_fold_timeout_seconds", 20.0),
     )
 
     # ── 6. Cooperative Stage & Progress Callbacks ─────────────────────────────
