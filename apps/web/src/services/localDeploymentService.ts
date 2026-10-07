@@ -284,5 +284,60 @@ export const LocalDeploymentService = {
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
   },
+
+  /** Retrieve real-time statistical drift report and serving latency telemetry */
+  getDriftReport: (deploymentId: string, minSamples = 5): Promise<DeploymentDriftReport> =>
+    request<DeploymentDriftReport>(`/local-deployments/${deploymentId}/drift?min_samples=${minSamples}`),
+
+  /** Run simulated drift with synthetic production samples to preview drift detection */
+  simulateDrift: (deploymentId: string, shiftFactor = 2.5): Promise<DeploymentDriftReport> =>
+    request<DeploymentDriftReport>(`/local-deployments/${deploymentId}/drift/simulate?shift_factor=${shiftFactor}`, {
+      method: 'POST',
+    }),
 };
+
+export interface DistributionBinComparison {
+  bin: string;
+  baseline_pct: number;
+  current_pct: number;
+}
+
+export interface FeatureDriftDetail {
+  feature: string;
+  type: 'numeric' | 'categorical';
+  psi: number;
+  status: 'STABLE' | 'MODERATE' | 'CRITICAL';
+  ks_statistic: number;
+  p_value: number;
+  baseline_mean?: number;
+  current_mean?: number;
+  baseline_mode?: string;
+  distribution_comparison: DistributionBinComparison[];
+}
+
+export interface ServingTelemetry {
+  total_requests: number;
+  success_rate: number;
+  error_count: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  avg_latency_ms: number;
+  throughput_rps: number;
+}
+
+export interface DeploymentDriftReport {
+  deployment_id: string;
+  drift_detected: boolean;
+  overall_status: 'HEALTHY' | 'MODERATE_DRIFT' | 'CRITICAL_DRIFT';
+  insufficient_data?: boolean;
+  sample_count: number;
+  min_required: number;
+  highest_psi: number;
+  drifted_features: string[];
+  features: Record<string, FeatureDriftDetail>;
+  telemetry: ServingTelemetry;
+  recommendation: string;
+}
+
 

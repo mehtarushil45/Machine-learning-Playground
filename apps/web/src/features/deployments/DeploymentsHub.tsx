@@ -55,6 +55,7 @@ interface DeploymentsHubProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'error') => void;
   initialDeploymentId?: string | null;
   isActive?: boolean;
+  onNavigateToStudio?: () => void;
 }
 
 const STATUS_CONFIG: Record<
@@ -75,6 +76,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
   onShowToast,
   initialDeploymentId,
   isActive = true,
+  onNavigateToStudio,
 }) => {
   const onShowToastRef = useRef(onShowToast);
   useEffect(() => {
@@ -504,6 +506,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
             onShowToast={onShowToast}
             selectedDeploymentId={activeDeploymentId}
             onDeploymentChange={fetchDeployments}
+            onNavigateToStudio={onNavigateToStudio}
           />
         </div>
       </div>

@@ -45,7 +45,9 @@ import {
   Search,
   Sliders,
   X,
+  Activity,
 } from 'lucide-react';
+import { DriftMonitoringPanel } from './DriftMonitoringPanel';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails } from '../../services/jobService';
 import {
@@ -413,6 +415,7 @@ interface DeploymentStudioProps {
   selectedDeploymentId?: string | null;
   onDeploymentChange?: () => void;
   onBack?: () => void;
+  onNavigateToStudio?: () => void;
 }
 
 export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
@@ -420,6 +423,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
   selectedDeploymentId,
   onDeploymentChange,
   onBack,
+  onNavigateToStudio,
 }) => {
   const { activeJob, setActiveJob } = useProject();
 
@@ -434,8 +438,8 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
   const [predResult, setPredResult] = useState<LocalPredictResponse | null>(null);
   const [predError, setPredError] = useState<string | null>(null);
 
-  // Console Mode: Single Record vs High-Throughput Batch Scoring
-  const [consoleMode, setConsoleMode] = useState<'single' | 'batch'>('single');
+  // Console Mode: Single Record vs High-Throughput Batch Scoring vs Monitoring & Drift
+  const [consoleMode, setConsoleMode] = useState<'single' | 'batch' | 'monitoring'>('single');
 
   // Batch scoring state
   const [batchFile, setBatchFile] = useState<File | null>(null);
@@ -1400,7 +1404,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                           <RotateCcw size={12} /> Clear
                         </button>
                       </>
-                    ) : (
+                    ) : consoleMode === 'batch' ? (
                       <>
                         <button
                           onClick={handleDownloadTemplate}
@@ -1451,7 +1455,7 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                           </button>
                         )}
                       </>
-                    )}
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -1517,6 +1521,25 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                     >
                       <FileSpreadsheet size={13} /> High-Throughput Batch CSV Scoring
                     </button>
+                    <button
+                      onClick={() => setConsoleMode('monitoring')}
+                      style={{
+                        padding: '6px 16px',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: consoleMode === 'monitoring' ? '#1E293B' : 'transparent',
+                        color: consoleMode === 'monitoring' ? '#F59E0B' : '#64748B',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        transition: 'all 150ms ease',
+                      }}
+                    >
+                      <Activity size={13} /> Production Telemetry & Drift
+                    </button>
                   </div>
 
                   {isStopped && (
@@ -1542,7 +1565,13 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                     </div>
                   )}
 
-                  {consoleMode === 'single' ? (
+                  {consoleMode === 'monitoring' ? (
+                    <DriftMonitoringPanel
+                      deploymentId={deployment.deployment_id}
+                      onNavigateToStudio={onNavigateToStudio}
+                      onShowToast={onShowToast}
+                    />
+                  ) : consoleMode === 'single' ? (
                     /* ═══════════════════════════════════════════════════════════════════
                         SINGLE RECORD PREDICTION FORM
                        ═══════════════════════════════════════════════════════════════════ */

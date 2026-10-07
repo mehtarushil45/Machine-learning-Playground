@@ -467,6 +467,7 @@ function AppContent() {
                     isActive={activeTab === 'deployments'}
                     initialDeploymentId={activeDeploymentId}
                     onShowToast={showToast}
+                    onNavigateToStudio={() => setActiveTab('code-studio')}
                   />
                 </ErrorBoundary>
               </div>

@@ -322,6 +322,44 @@ async def list_available_versions(
     )
 
 
+@router.get(
+    "/{deployment_id}/drift",
+    summary="Get real-time data drift analysis & serving telemetry",
+)
+async def get_deployment_drift(
+    deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+    min_samples: int = Query(5, ge=1, le=100),
+) -> Dict[str, Any]:
+    """Retrieve statistical data drift report (PSI, KS test) and serving latency telemetry."""
+    return await svc.get_deployment_drift_report(
+        deployment_id,
+        owner_id=str(current_user.id),
+        db=db,
+        min_samples=min_samples,
+    )
+
+
+@router.post(
+    "/{deployment_id}/drift/simulate",
+    summary="Run simulated data drift analysis for testing",
+)
+async def simulate_deployment_drift(
+    deployment_id: str,
+    current_user: CurrentUser,
+    db: DBSession,
+    shift_factor: float = Query(2.5, ge=0.5, le=5.0),
+) -> Dict[str, Any]:
+    """Simulate production inferences with distribution shifts to test drift guardrails."""
+    return await svc.simulate_deployment_drift(
+        deployment_id,
+        owner_id=str(current_user.id),
+        db=db,
+        shift_factor=shift_factor,
+    )
+
+
 @job_router.get(
     "/{job_id}/local-deployments",
     response_model=List[LocalDeploymentResponse],

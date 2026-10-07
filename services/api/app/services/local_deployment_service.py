@@ -444,6 +444,17 @@ async def create_local_deployment(
     )
     logs.append(_log_entry(f"Input schema built for {len(feature_columns)} features.", event="INPUT_SCHEMA_LOADED"))
 
+    # Compute baseline feature distributions for production drift monitoring
+    baseline_dist = {}
+    try:
+        from app.services.drift_monitoring_service import extract_baseline_distribution
+        if _csv_path and os.path.exists(_csv_path):
+            baseline_dist = extract_baseline_distribution(_csv_path, feature_columns, input_schema)
+            if baseline_dist:
+                logs.append(_log_entry(f"Captured baseline distribution for {len(baseline_dist)} features.", event="BASELINE_DISTRIBUTION_CAPTURED"))
+    except Exception as exc:
+        logger.warning("Could not extract baseline distribution: %s", exc)
+
     # 5. Persist Deployment record (STARTING)
     dep_id = uuid.uuid4()
     now = datetime.now(timezone.utc)
@@ -451,6 +462,7 @@ async def create_local_deployment(
         "host": "localhost",
         "port": 8000,
         "timeout_seconds": 30,
+        "baseline_distribution": baseline_dist,
         **(payload.configuration or {}),
     }
 
@@ -1209,4 +1221,103 @@ async def generate_template_csv(
     out = io.StringIO()
     df_sample.to_csv(out, index=False)
     return out.getvalue()
+
+
+async def get_deployment_drift_report(
+    deployment_id: str,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+    min_samples: int = 5,
+) -> Dict[str, Any]:
+    """Retrieve real-time drift analysis and serving telemetry for a deployment."""
+    dep = await _get_deployment(deployment_id, db)
+    if dep.owner_id and dep.owner_id != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this deployment.",
+        )
+
+    # If baseline is missing from configuration, attempt to compute and persist it
+    config = dict(dep.configuration or {})
+    if not config.get("baseline_distribution"):
+        try:
+            from services.worker.core.dataset_loader import find_dataset_path
+            from app.services.drift_monitoring_service import extract_baseline_distribution
+            csv_path = find_dataset_path(dep.dataset_id)
+            if csv_path and os.path.exists(csv_path):
+                baseline = extract_baseline_distribution(csv_path, dep.feature_columns or [], dep.input_schema or {})
+                if baseline:
+                    config["baseline_distribution"] = baseline
+                    dep.configuration = config
+                    await db.commit()
+        except Exception as exc:
+            logger.warning("Dynamic baseline extraction failed: %s", exc)
+
+    # Fetch recent inference history records (most recent 500 records)
+    dep_uuid = dep.id
+    history_res = await db.execute(
+        select(LocalPredictionHistory)
+        .where(LocalPredictionHistory.deployment_id == dep_uuid)
+        .order_by(LocalPredictionHistory.created_at.desc())
+        .limit(500)
+    )
+    records = list(history_res.scalars().all())
+
+    from app.services.drift_monitoring_service import generate_drift_report
+    return generate_drift_report(dep, records, min_samples=min_samples)
+
+
+async def simulate_deployment_drift(
+    deployment_id: str,
+    *,
+    owner_id: str,
+    db: AsyncSession,
+    shift_factor: float = 2.5,
+) -> Dict[str, Any]:
+    """Generate a simulated drift analysis with synthetic production samples to preview drift detection."""
+    dep = await _get_deployment(deployment_id, db)
+    if dep.owner_id and dep.owner_id != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this deployment.",
+        )
+
+    config = dep.configuration or {}
+    baseline = config.get("baseline_distribution", {})
+    feature_cols = dep.feature_columns or []
+
+    # Generate 50 synthetic records with simulated drift on the first feature
+    simulated_records = []
+    drift_target_feature = feature_cols[0] if feature_cols else ""
+
+    for i in range(50):
+        fake_inputs: Dict[str, Any] = {}
+        for col in feature_cols:
+            col_info = baseline.get(col, {})
+            if col_info.get("type") == "numeric":
+                mean_val = float(col_info.get("mean", 50.0))
+                std_val = float(col_info.get("std", 10.0))
+                # Inject significant mean shift on target feature
+                if col == drift_target_feature:
+                    val = float(np.random.normal(mean_val + shift_factor * std_val, max(std_val, 1.0)))
+                else:
+                    val = float(np.random.normal(mean_val, max(std_val, 1.0)))
+                fake_inputs[col] = round(val, 2)
+            else:
+                cats = col_info.get("categories", ["A", "B"])
+                fake_inputs[col] = cats[i % len(cats)] if cats else "sample"
+
+        simulated_records.append(
+            type("SimulatedRec", (), {
+                "inputs": fake_inputs,
+                "status": "SUCCESS",
+                "latency_ms": round(float(np.random.uniform(3.0, 15.0)), 2),
+                "created_at": datetime.now(timezone.utc),
+            })()
+        )
+
+    from app.services.drift_monitoring_service import generate_drift_report
+    return generate_drift_report(dep, simulated_records, min_samples=5)
+
 
