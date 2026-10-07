@@ -385,3 +385,67 @@ def test_cache_key_canonicalization_and_sensitivity():
     # 8. Changed dataset content hash -> Different key
     diff_hash = dict(base_args, dataset_content_hash="b" * 64)
     assert _compute_key(diff_hash) != key1
+
+
+def test_top_3_curation_and_decision_rationale():
+    """Verify that engine returns top 3 candidates with dataset-grounded decision rationale, strengths, and tradeoffs."""
+    np.random.seed(42)
+    n = 200
+    df = pd.DataFrame({
+        "num1": np.random.randn(n),
+        "num2": np.random.randn(n),
+        "cat1": np.random.choice(["A", "B", "C"], size=n),
+        "target": np.random.choice([0, 1], size=n),
+    })
+
+    config = RecommendationConfig(
+        target_column="target",
+        feature_columns=["num1", "num2", "cat1"],
+        random_seed=42,
+        cv_folds=3,
+    )
+    result = run_recommendation_benchmark(df, config)
+
+    assert result.status == "completed"
+    assert len(result.top_3_candidates) == 3
+    assert result.top_3_candidates[0].rank == 1
+    assert result.top_3_candidates[1].rank == 2
+    assert result.top_3_candidates[2].rank == 3
+
+    for idx, cand in enumerate(result.top_3_candidates, start=1):
+        assert cand.selection_rationale is not None
+        assert f"Ranked #{idx}" in cand.selection_rationale
+        assert len(cand.strengths) >= 2
+        assert len(cand.tradeoffs) >= 1
+
+    # Check to_dict serialization
+    d = result.to_dict()
+    assert "top_3_candidates" in d
+    assert len(d["top_3_candidates"]) == 3
+    assert d["top_3_candidates"][0]["selection_rationale"] is not None
+
+
+def test_ranking_determinism_across_runs():
+    """Ensure identical rank order across independent benchmark runs on identical data."""
+    np.random.seed(42)
+    n = 150
+    df = pd.DataFrame({
+        "x1": np.random.randn(n),
+        "x2": np.random.randn(n),
+        "target": np.random.choice([0, 1], size=n),
+    })
+
+    config = RecommendationConfig(
+        target_column="target",
+        feature_columns=["x1", "x2"],
+        random_seed=42,
+        cv_folds=3,
+    )
+
+    res1 = run_recommendation_benchmark(df, config)
+    res2 = run_recommendation_benchmark(df, config)
+
+    ranks1 = [c.algorithm_id for c in res1.top_3_candidates]
+    ranks2 = [c.algorithm_id for c in res2.top_3_candidates]
+    assert ranks1 == ranks2, f"Ranks differed across identical runs: {ranks1} vs {ranks2}"
+

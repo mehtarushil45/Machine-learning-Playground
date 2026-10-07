@@ -94,6 +94,7 @@ export function AlgorithmRecommendationPanel({
   const [lastAnalyzedFingerprint, setLastAnalyzedFingerprint] = useState<string | null>(null);
   const [recommendedAlgorithmId, setRecommendedAlgorithmId] = useState<string | null>(null);
   const [showEvidenceModal, setShowEvidenceModal] = useState(false);
+  const [showAllCandidates, setShowAllCandidates] = useState(false);
 
   /* ── Fingerprint for Stale Detection ─────────────────────────────── */
   const effectiveDatasetId = dataset?.datasetId || (dataset ? `ds-${dataset.fileName || 'local'}` : undefined);
@@ -103,6 +104,17 @@ export function AlgorithmRecommendationPanel({
     const sortedFeats = [...selectedFeatures].sort().join(',');
     return `${effectiveDatasetId}:${selectedTarget}:${sortedFeats}:${cvFolds}:${trainTestSplit}`;
   }, [effectiveDatasetId, selectedTarget, selectedFeatures, cvFolds, trainTestSplit]);
+
+  /* ── Curate Top 3 Candidates for Executive Presentation ─────────── */
+  const top3Candidates = useMemo(() => {
+    if (activeJob?.top_3_candidates && activeJob.top_3_candidates.length > 0) {
+      return activeJob.top_3_candidates.slice(0, 3);
+    }
+    const completed = (activeJob?.candidates || [])
+      .filter((c) => c.status === 'completed' && c.score !== null && c.score !== undefined)
+      .sort((a, b) => (a.rank || 999) - (b.rank || 999));
+    return completed.slice(0, 3);
+  }, [activeJob?.top_3_candidates, activeJob?.candidates]);
 
   /* ── Derived Manual Override Flag ────────────────────────────────── */
   const isManualOverride = Boolean(
@@ -816,7 +828,7 @@ export function AlgorithmRecommendationPanel({
               }}
             >
               <HelpCircle style={{ width: 12, height: 12, color: BB.gold }} />
-              Compare Top {activeJob.candidates?.length || 5} Models
+              Compare Top 3 Models
             </button>
 
             <button
@@ -1238,121 +1250,364 @@ export function AlgorithmRecommendationPanel({
                 </div>
               )}
 
-              {/* Contenders Benchmark Table */}
+              {/* Top 3 Recommended Models (Podium & Exact Decision Evidence) */}
               <div>
-                <span
-                  style={{
-                    display: 'block',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    color: BB.muted,
-                    marginBottom: 8,
-                  }}
-                >
-                  Evaluated Candidate Contenders ({activeJob.candidates?.length || 0})
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      color: BB.gold,
+                    }}
+                  >
+                    Top 3 Recommended Models (Podium & Decision Evidence)
+                  </span>
+                  <span style={{ fontSize: 9, color: BB.muted }}>
+                    Evaluated {activeJob.candidates?.length || 0} candidate architectures
+                  </span>
+                </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {(activeJob.candidates || []).map((c: CandidateBenchmarkResult, idx: number) => {
-                    const isWinner = activeJob.recommendation?.algorithm_id === c.algorithm_id;
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {top3Candidates.map((c: CandidateBenchmarkResult, idx: number) => {
+                    const rank = c.rank || idx + 1;
+                    const isWinner = rank === 1 || activeJob.recommendation?.algorithm_id === c.algorithm_id;
+                    const isSelected = selectedAlgorithm === c.algorithm_id;
+
+                    const rankTheme =
+                      rank === 1
+                        ? {
+                            border: `1px solid ${BB.gold}`,
+                            bg: 'linear-gradient(135deg, rgba(201,162,75,0.08) 0%, rgba(11,9,18,0.7) 100%)',
+                            badgeBg: BB.gold,
+                            badgeColor: '#0B0912',
+                            badgeText: '#1 CHAMPION (TOP PICK)',
+                            scoreColor: BB.gold,
+                          }
+                        : rank === 2
+                        ? {
+                            border: '1px solid rgba(56,189,248,0.4)',
+                            bg: 'linear-gradient(135deg, rgba(56,189,248,0.06) 0%, rgba(11,9,18,0.7) 100%)',
+                            badgeBg: '#38BDF8',
+                            badgeColor: '#0B0912',
+                            badgeText: '#2 RUNNER-UP CONTENDER',
+                            scoreColor: '#38BDF8',
+                          }
+                        : {
+                            border: '1px solid rgba(167,139,250,0.4)',
+                            bg: 'linear-gradient(135deg, rgba(167,139,250,0.06) 0%, rgba(11,9,18,0.7) 100%)',
+                            badgeBg: '#A78BFA',
+                            badgeColor: '#0B0912',
+                            badgeText: '#3 ALTERNATIVE CONTENDER',
+                            scoreColor: '#A78BFA',
+                          };
+
                     return (
                       <div
                         key={c.algorithm_id || idx}
                         style={{
-                          border: `1px solid ${isWinner ? BB.gold : BB.border}`,
-                          background: isWinner ? 'rgba(201,162,75,0.04)' : 'rgba(0,0,0,0.2)',
+                          border: rankTheme.border,
+                          background: rankTheme.bg,
                           borderRadius: 8,
-                          padding: 12,
+                          padding: 14,
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: 8,
-                          position: 'relative'
+                          gap: 10,
+                          position: 'relative',
                         }}
                       >
-                        {isWinner && (
-                          <div style={{ position: 'absolute', top: -8, right: 12, background: BB.surface, padding: '0 6px', border: `1px solid ${BB.gold}`, borderRadius: 12, fontSize: 8, fontWeight: 700, color: BB.gold }}>
-                            #1 RECOMMENDED
-                          </div>
-                        )}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        {/* Rank Badge */}
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: -9,
+                            right: 14,
+                            background: rankTheme.badgeBg,
+                            color: rankTheme.badgeColor,
+                            padding: '1px 8px',
+                            borderRadius: 10,
+                            fontSize: 8,
+                            fontWeight: 800,
+                            letterSpacing: '0.05em',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+                          }}
+                        >
+                          {rankTheme.badgeText}
+                        </div>
+
+                        {/* Top Header: Model Name & Metric Score */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: 2 }}>
                           <div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: BB.text }}>{c.rank ? `#${c.rank} ` : ''}{c.display_name}</span>
-                              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: 'rgba(107,92,166,0.15)', color: BB.primaryLight, textTransform: 'capitalize' }}>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: BB.text }}>
+                                #{rank} {c.display_name}
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  background: 'rgba(107,92,166,0.20)',
+                                  color: BB.primaryLight,
+                                  textTransform: 'capitalize',
+                                  fontWeight: 600,
+                                }}
+                              >
                                 {c.category}
                               </span>
                             </div>
-                            {c.why_recommended && (
-                              <div style={{ fontSize: 10, color: BB.muted, marginTop: 4, lineHeight: 1.4 }}>
-                                {c.why_recommended}
-                              </div>
-                            )}
                           </div>
-                          
+
                           <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-mono)', color: isWinner ? BB.gold : BB.success }}>
-                              {c.validation_score?.toFixed(3) || c.score?.toFixed(3) || '-'}
+                            <div
+                              style={{
+                                fontSize: 15,
+                                fontWeight: 800,
+                                fontFamily: 'var(--font-mono)',
+                                color: rankTheme.scoreColor,
+                              }}
+                            >
+                              {(c.validation_score ?? c.score)?.toFixed(3) ?? '-'}
                             </div>
-                            {c.ci_lower !== null && c.ci_lower !== undefined && (
-                              <div style={{ fontSize: 8, color: BB.muted, fontFamily: 'var(--font-mono)' }}>
-                                95% CI: [{c.ci_lower.toFixed(3)}, {c.ci_upper?.toFixed(3)}]
-                              </div>
-                            )}
+                            <div style={{ fontSize: 8, color: BB.muted, fontFamily: 'var(--font-mono)' }}>
+                              {c.metric_used ? c.metric_used.toUpperCase() : 'CV SCORE'}
+                              {c.ci_lower !== null && c.ci_lower !== undefined && c.ci_upper !== null && c.ci_upper !== undefined && (
+                                <span> · 95% CI [{c.ci_lower.toFixed(3)}, {c.ci_upper.toFixed(3)}]</span>
+                              )}
+                            </div>
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 4 }}>
-                          {c.interpretability_score && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <div style={{ display: 'flex' }}>
-                                {Array.from({ length: 5 }).map((_, i) => (
-                                  <Sparkles key={i} style={{ width: 10, height: 10, color: i < (c.interpretability_score || 0) ? BB.gold : BB.disabled }} />
-                                ))}
-                              </div>
-                              <span style={{ fontSize: 9, color: BB.muted }}>{c.interpretability_label} Int.</span>
-                            </div>
-                          )}
-                          <div style={{ fontSize: 9, color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <span>⚡</span> {(c.training_time_seconds || c.training_seconds || 0).toFixed(2)}s train time
-                          </div>
+                        {/* Exact Decision Rationale */}
+                        <div
+                          style={{
+                            background: 'rgba(0,0,0,0.25)',
+                            padding: '8px 10px',
+                            borderRadius: 6,
+                            border: `1px solid ${BB.border}`,
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: 'block',
+                              fontSize: 9,
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.06em',
+                              color: rankTheme.scoreColor,
+                              marginBottom: 3,
+                            }}
+                          >
+                            Why This Model is Preferred:
+                          </span>
+                          <p style={{ margin: 0, fontSize: 10, color: BB.text, lineHeight: 1.45 }}>
+                            {c.selection_rationale || c.why_recommended || 'Demonstrates high predictive power and cross-validation stability for this dataset.'}
+                          </p>
                         </div>
 
-                        {c.risk_flags && c.risk_flags.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                            {c.risk_flags.map((flag, i) => (
-                              <span key={i} style={{ fontSize: 8, padding: '2px 6px', background: 'rgba(245,158,11,0.1)', color: BB.warning, borderRadius: 4, border: `1px solid rgba(245,158,11,0.2)` }}>
-                                ⚠️ {flag}
-                              </span>
-                            ))}
+                        {/* Strengths Badges */}
+                        {c.strengths && c.strengths.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: '#34D399', letterSpacing: '0.04em' }}>
+                              Key Strengths:
+                            </span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {c.strengths.map((str, sIdx) => (
+                                <span
+                                  key={sIdx}
+                                  style={{
+                                    fontSize: 9,
+                                    padding: '2px 7px',
+                                    borderRadius: 4,
+                                    background: 'rgba(52,211,153,0.1)',
+                                    color: '#34D399',
+                                    border: '1px solid rgba(52,211,153,0.25)',
+                                  }}
+                                >
+                                  ✓ {str}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         )}
-                        
-                        <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+
+                        {/* Tradeoffs Badges */}
+                        {c.tradeoffs && c.tradeoffs.length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', color: BB.muted, letterSpacing: '0.04em' }}>
+                              Operational Tradeoffs:
+                            </span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {c.tradeoffs.map((trd, tIdx) => (
+                                <span
+                                  key={tIdx}
+                                  style={{
+                                    fontSize: 9,
+                                    padding: '2px 7px',
+                                    borderRadius: 4,
+                                    background: 'rgba(158,147,184,0.08)',
+                                    color: BB.muted,
+                                    border: `1px solid ${BB.border}`,
+                                  }}
+                                >
+                                  ℹ️ {trd}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Meta Row: Interpretability, Latency & Risks */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 2 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                            {c.interpretability_score && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <div style={{ display: 'flex' }}>
+                                  {Array.from({ length: 5 }).map((_, i) => (
+                                    <Sparkles
+                                      key={i}
+                                      style={{
+                                        width: 10,
+                                        height: 10,
+                                        color: i < (c.interpretability_score || 0) ? BB.gold : BB.disabled,
+                                      }}
+                                    />
+                                  ))}
+                                </div>
+                                <span style={{ fontSize: 9, color: BB.muted }}>{c.interpretability_label} Int.</span>
+                              </div>
+                            )}
+                            <div style={{ fontSize: 9, color: BB.muted, display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span>⚡</span> {(c.training_time_seconds || c.training_seconds || 0).toFixed(2)}s train time
+                            </div>
+                          </div>
+
+                          {c.risk_flags && c.risk_flags.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {c.risk_flags.map((flag, fIdx) => (
+                                <span
+                                  key={fIdx}
+                                  style={{
+                                    fontSize: 8,
+                                    padding: '1px 5px',
+                                    background: 'rgba(245,158,11,0.1)',
+                                    color: BB.warning,
+                                    borderRadius: 3,
+                                    border: '1px solid rgba(245,158,11,0.2)',
+                                  }}
+                                >
+                                  ⚠️ {flag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action CTA */}
+                        <div style={{ marginTop: 4, display: 'flex', justifyContent: 'flex-end' }}>
                           <button
                             onClick={() => {
                               onSelectAlgorithm(c.algorithm_id);
                               setShowEvidenceModal(false);
                             }}
+                            disabled={isSelected}
                             style={{
-                              padding: '4px 12px',
-                              borderRadius: 4,
-                              background: isWinner ? `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})` : 'transparent',
-                              border: `1px solid ${isWinner ? 'transparent' : BB.primaryLight}`,
-                              color: BB.text,
+                              padding: '5px 14px',
+                              borderRadius: 5,
+                              background: isSelected
+                                ? 'rgba(52,211,153,0.15)'
+                                : isWinner
+                                ? `linear-gradient(135deg, ${BB.primary}, ${BB.maroon})`
+                                : 'transparent',
+                              border: `1px solid ${isSelected ? '#34D399' : isWinner ? 'transparent' : BB.primaryLight}`,
+                              color: isSelected ? '#34D399' : BB.text,
                               fontSize: 10,
-                              fontWeight: 600,
-                              cursor: 'pointer',
+                              fontWeight: 700,
+                              cursor: isSelected ? 'default' : 'pointer',
                             }}
                           >
-                            {isWinner ? 'Use Recommended Model' : 'Override & Use Model'}
+                            {isSelected ? '✓ Active Model for Training' : isWinner ? 'Use Recommended Champion' : 'Select Contender'}
                           </button>
                         </div>
                       </div>
                     );
                   })}
                 </div>
+
+                {/* Optional Collapsible for Remaining Evaluated Candidates */}
+                {(activeJob.candidates?.length || 0) > 3 && (
+                  <div style={{ marginTop: 12 }}>
+                    <button
+                      onClick={() => setShowAllCandidates((prev) => !prev)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: BB.primaryLight,
+                        fontSize: 10,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        padding: 0,
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      {showAllCandidates
+                        ? 'Hide full benchmark table'
+                        : `Show all ${activeJob.candidates.length} evaluated architectures (Full Registry)`}
+                    </button>
+
+                    {showAllCandidates && (
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {activeJob.candidates
+                          .filter((c) => !top3Candidates.some((tc) => tc.algorithm_id === c.algorithm_id))
+                          .map((c, remIdx) => (
+                            <div
+                              key={c.algorithm_id || remIdx}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '6px 10px',
+                                background: 'rgba(0,0,0,0.2)',
+                                border: `1px solid ${BB.border}`,
+                                borderRadius: 5,
+                                fontSize: 10,
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: BB.muted }}>#{c.rank || '-'}</span>
+                                <span style={{ color: BB.text, fontWeight: 600 }}>{c.display_name}</span>
+                                <span style={{ fontSize: 9, color: BB.muted }}>({c.category})</span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <span style={{ fontFamily: 'var(--font-mono)', color: BB.muted }}>
+                                  {c.score !== null && c.score !== undefined ? c.score.toFixed(3) : c.status}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    onSelectAlgorithm(c.algorithm_id);
+                                    setShowEvidenceModal(false);
+                                  }}
+                                  style={{
+                                    padding: '2px 8px',
+                                    borderRadius: 3,
+                                    background: 'transparent',
+                                    border: `1px solid ${BB.border}`,
+                                    color: BB.text,
+                                    fontSize: 9,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Select
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Limitations & Exclusions */}

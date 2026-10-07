@@ -56,6 +56,9 @@ class RecommendationCandidateItem(BaseModel):
     interpretability_score: Optional[int] = None
     interpretability_label: Optional[str] = None
     why_recommended: Optional[str] = None
+    selection_rationale: Optional[str] = None
+    strengths: List[str] = Field(default_factory=list)
+    tradeoffs: List[str] = Field(default_factory=list)
     risk_flags: List[str] = Field(default_factory=list)
     reason_codes: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
@@ -81,6 +84,7 @@ class RecommendationJobResponse(BaseModel):
     completed_at: Optional[str] = None
     cancelled_at: Optional[str] = None
     recommendation: Optional[RecommendationCandidateItem] = None
+    top_3_candidates: List[RecommendationCandidateItem] = Field(default_factory=list)
     candidates: List[RecommendationCandidateItem] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     exclusions: List[dict[str, Any]] = Field(default_factory=list)

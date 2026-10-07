@@ -65,6 +65,9 @@ export interface CandidateBenchmarkResult {
   interpretability_score?: number | null;
   interpretability_label?: string | null;
   why_recommended?: string | null;
+  selection_rationale?: string | null;
+  strengths?: string[];
+  tradeoffs?: string[];
   risk_flags?: string[];
   reason_codes: string[];
   warnings: string[];
@@ -92,6 +95,7 @@ export interface RecommendationJobDetail {
   completed_at?: string | null;
   cancelled_at?: string | null;
   recommendation?: CandidateBenchmarkResult | null;
+  top_3_candidates?: CandidateBenchmarkResult[];
   candidates: CandidateBenchmarkResult[];
   warnings: string[];
   exclusions: ColumnExclusion[];

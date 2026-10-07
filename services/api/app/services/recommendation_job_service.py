@@ -74,6 +74,10 @@ def _orm_to_response(job: RecommendationJob) -> RecommendationJobResponse:
         for c in (job.candidates or [])
     ]
 
+    completed_items = [c for c in candidate_items if c.status == "completed" and c.score is not None]
+    completed_items.sort(key=lambda c: (c.rank or 999))
+    top_3_items = completed_items[:3]
+
     return RecommendationJobResponse(
         job_id=str(job.id),
         dataset_id=str(job.dataset_id),
@@ -88,6 +92,7 @@ def _orm_to_response(job: RecommendationJob) -> RecommendationJobResponse:
         completed_at=job.completed_at.isoformat() if job.completed_at else None,
         cancelled_at=job.cancelled_at.isoformat() if job.cancelled_at else None,
         recommendation=rec_candidate,
+        top_3_candidates=top_3_items,
         candidates=candidate_items,
         warnings=job.warnings or [],
         exclusions=job.exclusions or [],
@@ -187,8 +192,9 @@ class RecommendationJobService:
             "max_training_seconds": request.max_training_seconds or 120,
             "prefer_interpretable": request.prefer_interpretable,
         }
+        dataset_content_hash = getattr(dataset, "content_hash", None) or dataset_id
         cache_key = compute_recommendation_cache_key(
-            dataset_content_hash=dataset_id,
+            dataset_content_hash=dataset_content_hash,
             target_column=target_col,
             feature_columns=clean_features,
             metric=metric_clean,
