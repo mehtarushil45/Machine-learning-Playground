@@ -15,6 +15,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import type { ReactNode } from 'react';
 import type { Dataset } from '../types/dataset';
 import type { JobEntity } from '../types/job';
+import { apiClient } from '../services/apiClient';
 
 const STORAGE_KEY = 'ml_playground_project_state_v3';
 
@@ -181,6 +182,27 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [generatedFiles, setGeneratedFiles]       = useState<string[]>(
     Array.isArray((initial as any).generatedFiles) ? (initial as any).generatedFiles : [],
   );
+
+  // Auto-heal: verify persisted dataset still exists on backend; if server 404s, clear ghost state
+  useEffect(() => {
+    if (initial.dataset?.datasetId) {
+      const dsId = initial.dataset.datasetId;
+      if (dsId.includes('-') && !dsId.startsWith('client-') && !dsId.startsWith('ds-')) {
+        apiClient.get(`/datasets/${dsId}`).catch((err: any) => {
+          if (err?.status === 404) {
+            console.warn(`Persisted dataset ${dsId} no longer exists on backend server. Auto-clearing stale state.`);
+            setDataset(null);
+            setTrainingConfig(null);
+            setSelectedFeatures([]);
+            setSelectedTargetState(null);
+            try {
+              localStorage.removeItem(STORAGE_KEY);
+            } catch {}
+          }
+        });
+      }
+    }
+  }, []);
 
   const setSelectedTarget = useCallback((t: string | null) => {
     setSelectedTargetState(t);

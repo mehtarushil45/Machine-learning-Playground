@@ -2200,7 +2200,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       <div
                         style={{
                           display: 'flex',
-                          alignItems: 'flex-start',
+                          flexDirection: 'column',
                           gap: 6,
                           padding: '6px 8px',
                           borderRadius: 6,
@@ -2210,8 +2210,34 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                           color: BB.maroonLight,
                         }}
                       >
-                        <AlertCircle style={{ width: 12, height: 12, flexShrink: 0, marginTop: 1 }} />
-                        <span>{launchError}</span>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                          <AlertCircle style={{ width: 12, height: 12, flexShrink: 0, marginTop: 1 }} />
+                          <span>{launchError}</span>
+                        </div>
+                        {(launchError.includes('404') || launchError.toLowerCase().includes('not found')) && (
+                          <button
+                            onClick={() => {
+                              resetProject();
+                              onShowToast('Session Cleared', 'Stale dataset session cleared. Please re-upload your CSV file.', 'info');
+                            }}
+                            style={{
+                              alignSelf: 'flex-start',
+                              padding: '4px 8px',
+                              borderRadius: 4,
+                              background: 'rgba(178,58,78,0.35)',
+                              border: '1px solid rgba(178,58,78,0.6)',
+                              color: '#fff',
+                              fontSize: 9,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            Re-upload Dataset
+                          </button>
+                        )}
                       </div>
                     )}
 

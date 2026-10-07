@@ -137,7 +137,7 @@ def _build_input_schema(
             elif dataset_sample is not None and isinstance(dataset_sample, pd.DataFrame) and col in dataset_sample.columns and len(dataset_sample) > 0:
                 sample_inputs[col] = str(dataset_sample[col].iloc[0])
             else:
-                sample_inputs[col] = "Sample"
+                sample_inputs[col] = cats[0] if cats else ""
 
         elif col in bool_cols or (
             dataset_sample is not None
@@ -885,7 +885,10 @@ async def predict_local(
             valid_categories = col_schema.get("categories")
             if valid_categories:
                 val_str = str(val).strip()
-                if val_str not in valid_categories:
+                matched_category = next((c for c in valid_categories if str(c).strip().lower() == val_str.lower()), None)
+                if matched_category is not None:
+                    cleaned_inputs[col] = matched_category
+                else:
                     allowed = ", ".join(valid_categories[:8]) + ("..." if len(valid_categories) > 8 else "")
                     validation_errors.append(
                         f"{col}: Value '{val_str}' is not present in the trained categorical schema. Valid categories: {allowed}"

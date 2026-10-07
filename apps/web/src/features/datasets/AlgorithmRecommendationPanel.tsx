@@ -39,6 +39,7 @@ import {
   startRecommendation,
 } from '../../services/recommendationService';
 import { ApiError } from '../../services/apiClient';
+import { useProject } from '../../providers/ProjectContext';
 
 /* ── BB Brand Tokens ─────────────────────────────────────────────────── */
 const BB = {
@@ -87,6 +88,7 @@ export function AlgorithmRecommendationPanel({
   onRecommendationChange,
 }: AlgorithmRecommendationPanelProps) {
   /* ── Recommendation Job State ────────────────────────────────────── */
+  const { resetProject } = useProject();
   const [activeJob, setActiveJob] = useState<RecommendationJobDetail | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -1013,22 +1015,48 @@ export function AlgorithmRecommendationPanel({
               {activeJob?.error_details?.message || errorMessage || 'Benchmark execution encountered an error.'}
             </span>
           </div>
-          <button
-            onClick={handleStartAnalysis}
-            disabled={!isEligibleToAnalyze}
-            style={{
-              padding: '3px 8px',
-              borderRadius: 4,
-              background: 'transparent',
-              border: `1px solid rgba(178,58,78,0.4)`,
-              color: BB.maroonLight,
-              fontSize: 9,
-              fontWeight: 600,
-              cursor: isEligibleToAnalyze ? 'pointer' : 'not-allowed',
-            }}
-          >
-            Retry Analysis
-          </button>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              onClick={handleStartAnalysis}
+              disabled={!isEligibleToAnalyze}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 4,
+                background: 'transparent',
+                border: `1px solid rgba(178,58,78,0.4)`,
+                color: BB.maroonLight,
+                fontSize: 9,
+                fontWeight: 600,
+                cursor: isEligibleToAnalyze ? 'pointer' : 'not-allowed',
+              }}
+            >
+              Retry Analysis
+            </button>
+            {((activeJob?.error_details?.message || errorMessage || '').toLowerCase().includes('not found') ||
+              (activeJob?.error_details?.message || errorMessage || '').toLowerCase().includes('no dataset file found')) && (
+              <button
+                onClick={() => {
+                  resetProject();
+                  onShowToast?.('Session Reset', 'Stale dataset session cleared. Please re-upload your CSV file.', 'info');
+                }}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 4,
+                  background: 'rgba(178,58,78,0.35)',
+                  border: '1px solid rgba(178,58,78,0.6)',
+                  color: '#fff',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                Re-upload Dataset
+              </button>
+            )}
+          </div>
         </div>
       )}
 

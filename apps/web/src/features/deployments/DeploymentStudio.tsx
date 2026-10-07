@@ -197,14 +197,23 @@ function SmartFeatureInput({
   };
 
   if (hasCategories) {
-    const selected = value || (schema!.categories && schema!.categories.length > 0 ? schema!.categories[0] : '');
+    const cats = schema!.categories!;
+    const isValid = cats.includes(value);
+    const selected = isValid ? value : cats[0];
+
+    useEffect(() => {
+      if (!isValid && cats.length > 0) {
+        onChange(cats[0]);
+      }
+    }, [isValid, cats, onChange]);
+
     return (
       <select
         value={selected}
         onChange={(e) => onChange(e.target.value)}
         style={{ ...inputStyle, cursor: 'pointer' }}
       >
-        {schema!.categories!.map((cat) => (
+        {cats.map((cat) => (
           <option key={cat} value={cat}>
             {cat}
           </option>
@@ -533,17 +542,25 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
       const init: Record<string, string> = {};
       const sample = deployment.sample_inputs || {};
       deployment.feature_columns.forEach((col) => {
-        if (sample[col] != null) {
-          init[col] = String(sample[col]);
-        } else {
-          const schema = deployment.input_schema?.[col];
-          if (schema?.type === 'categorical' && schema.categories?.length) {
-            init[col] = schema.categories[0];
-          } else if (schema?.type === 'boolean') {
-            init[col] = '1';
+        const schema = deployment.input_schema?.[col];
+        const sampleVal = sample[col];
+
+        if (schema?.type === 'categorical' && schema.categories && schema.categories.length > 0) {
+          if (sampleVal != null && schema.categories.includes(String(sampleVal))) {
+            init[col] = String(sampleVal);
           } else {
-            init[col] = '';
+            init[col] = schema.categories[0];
           }
+        } else if (schema?.type === 'boolean') {
+          if (sampleVal != null && ['0', '1', 'true', 'false'].includes(String(sampleVal).toLowerCase())) {
+            init[col] = String(sampleVal);
+          } else {
+            init[col] = '1';
+          }
+        } else if (sampleVal != null) {
+          init[col] = String(sampleVal);
+        } else {
+          init[col] = '';
         }
       });
       setInputValues(init);
@@ -673,17 +690,25 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
     const filled: Record<string, string> = {};
 
     deployment.feature_columns.forEach((col) => {
-      if (sample[col] != null) {
-        filled[col] = String(sample[col]);
-      } else {
-        const schema = deployment.input_schema[col];
-        if (schema?.type === 'categorical' && schema.categories?.length) {
-          filled[col] = schema.categories[0];
-        } else if (schema?.type === 'boolean') {
-          filled[col] = '1';
+      const schema = deployment.input_schema?.[col];
+      const sampleVal = sample[col];
+
+      if (schema?.type === 'categorical' && schema.categories && schema.categories.length > 0) {
+        if (sampleVal != null && schema.categories.includes(String(sampleVal))) {
+          filled[col] = String(sampleVal);
         } else {
-          filled[col] = '1.0';
+          filled[col] = schema.categories[0];
         }
+      } else if (schema?.type === 'boolean') {
+        if (sampleVal != null && ['0', '1', 'true', 'false'].includes(String(sampleVal).toLowerCase())) {
+          filled[col] = String(sampleVal);
+        } else {
+          filled[col] = '1';
+        }
+      } else if (sampleVal != null) {
+        filled[col] = String(sampleVal);
+      } else {
+        filled[col] = '1.0';
       }
     });
 
