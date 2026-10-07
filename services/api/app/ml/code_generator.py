@@ -564,10 +564,11 @@ print("Saved model pipeline to 'trained_model_pipeline.joblib'")"""
     unique_imports = sorted(set(imports))
     full_script = "\n".join(unique_imports) + "\n\n" + "\n".join(code_blocks)
 
-    # Format cleanly with Black (PEP 8)
+    # Format cleanly with Black (PEP 8) if available
     try:
-        import black
-        formatted_script = black.format_str(full_script, mode=black.Mode())
+        import importlib
+        black_mod = importlib.import_module("black")
+        formatted_script = black_mod.format_str(full_script, mode=black_mod.Mode())
         if formatted_script.strip():
             full_script = formatted_script
     except Exception:

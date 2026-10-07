@@ -405,7 +405,7 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
         if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, syncedJob);
       }
       if (trainingConfig) {
-        setTrainingConfig((prev) => (prev ? { ...prev, target_column: parsed.target! } : null));
+        setTrainingConfig({ ...trainingConfig, target_column: parsed.target });
       }
       setSelectedTarget(parsed.target);
     }

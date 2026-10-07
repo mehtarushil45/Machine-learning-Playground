@@ -584,7 +584,6 @@ export function ViewAsCodeStudio({
     setSelectedFeatures,
     setActiveJob,
     setFileJob,
-    fileJobs,
   } = useProject();
 
   /* ── Local Sizing & Layout States (with persistence) ─────────────── */
@@ -1029,10 +1028,12 @@ export function ViewAsCodeStudio({
     if (!displayedCode) return;
     markFileModified(currentFile);
     const parsed = parsePipelineTargetAndConfig(displayedCode);
+    let updatedConfig = trainingConfig;
+
     if (parsed.target) {
       setSelectedTarget(parsed.target);
-      if (trainingConfig) {
-        setTrainingConfig((prev) => (prev ? { ...prev, target_column: parsed.target! } : null));
+      if (updatedConfig) {
+        updatedConfig = { ...updatedConfig, target_column: parsed.target };
       }
       if (activeJob) {
         const updatedJob = { ...activeJob, target_column: parsed.target };
@@ -1042,12 +1043,16 @@ export function ViewAsCodeStudio({
     }
     if (parsed.features && parsed.features.length > 0) {
       setSelectedFeatures(parsed.features);
-      if (trainingConfig) {
-        setTrainingConfig((prev) => (prev ? { ...prev, feature_columns: parsed.features! } : null));
+      if (updatedConfig) {
+        updatedConfig = { ...updatedConfig, feature_columns: parsed.features };
       }
     }
-    if (parsed.algorithm && trainingConfig) {
-      setTrainingConfig((prev) => (prev ? { ...prev, algorithm: parsed.algorithm! } : null));
+    if (parsed.algorithm && updatedConfig) {
+      updatedConfig = { ...updatedConfig, algorithm: parsed.algorithm };
+    }
+
+    if (updatedConfig !== trainingConfig) {
+      setTrainingConfig(updatedConfig);
     }
     onShowToast?.(
       'File Saved',
