@@ -171,17 +171,20 @@ async def test_worker_task_lifecycle_transitions(tmp_path):
         },
     )
 
+    call_count = 0
+
+    def _mock_execute_handler(stmt, *args, **kwargs):
+        nonlocal call_count
+        stmt_str = str(stmt).upper()
+        if "SELECT" in stmt_str:
+            call_count += 1
+            if call_count == 1:
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=fake_job))
+            return MagicMock(scalar_one_or_none=MagicMock(return_value=RecommendationJobStatus.PROFILING.value))
+        return MagicMock()
+
     mock_session = AsyncMock()
-    mock_session.execute = AsyncMock(
-        side_effect=[
-            # Initial query for job
-            MagicMock(scalar_one_or_none=MagicMock(return_value=fake_job)),
-            # Atomic check before final DB write
-            MagicMock(scalar_one_or_none=MagicMock(return_value=RecommendationJobStatus.PROFILING.value)),
-            # Final update
-            MagicMock(),
-        ]
-    )
+    mock_session.execute = AsyncMock(side_effect=_mock_execute_handler)
     mock_session.commit = AsyncMock()
 
     class MockAsyncSessionContext:

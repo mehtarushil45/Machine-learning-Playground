@@ -1,4 +1,9 @@
-"""Celery Tasks module."""
+import os
+import sys
+
+_api_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "api"))
+if _api_dir not in sys.path:
+    sys.path.insert(0, _api_dir)
 
 from services.worker.tasks.training_task import execute_ml_training_job
 from services.worker.tasks.ingestion_task import ingest_dataset_task

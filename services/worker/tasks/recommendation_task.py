@@ -8,40 +8,53 @@ and bounded retries.
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
-import os
-from typing import Any, Dict, Optional
+from pathlib import Path
+import sys
+from typing import Any, Dict
 import uuid
 
-import pandas as pd
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
-
-from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+# ── Dynamic Path Bootstrapping ────────────────────────────────────────────────
+# Ensure services/api is on sys.path for worker subprocesses regardless of CWD.
+_API_DIR = str(Path(__file__).resolve().parents[2] / "api")
+if _API_DIR not in sys.path:
+    sys.path.insert(0, _API_DIR)
+
 from services.worker.celery_app import celery_app
 from services.worker.core.dataset_loader import load_dataset_dataframe
+
 from app.config import settings
 from app.ml.recommendation_engine import (
     RecommendationConfig,
     RecommendationConstraints,
     run_recommendation_benchmark,
 )
-from app.models.dataset import Dataset
 from app.models.recommendation import RecommendationJob, RecommendationJobStatus
 from app.redis_client import get_redis
 
 logger = logging.getLogger("apex_ml.recommendation_task")
 
 
+def _get_async_database_url() -> str:
+    """Normalize database connection string for asyncpg driver."""
+    url = settings.database_url
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
+
+
 @asynccontextmanager
 async def get_worker_session():
     """Create an isolated, unpooled async database session for Celery worker tasks."""
     engine = create_async_engine(
-        settings.database_url,
+        _get_async_database_url(),
         poolclass=NullPool,
         future=True,
     )
@@ -216,7 +229,10 @@ async def _execute_recommendation_job_async(job_id_str: str) -> Dict[str, Any]:
             except Exception as exc_inner:
                 logger.debug("Failed stage progress update for %s: %s", job_uuid, exc_inner)
 
-        loop.create_task(_do_db_stage_update())
+        try:
+            asyncio.run_coroutine_threadsafe(_do_db_stage_update(), loop)
+        except Exception:
+            loop.create_task(_do_db_stage_update())
 
     def stage_callback(stage_name: str, progress_pct: float) -> None:
         target_status = getattr(RecommendationJobStatus, stage_name, None)
@@ -228,9 +244,10 @@ async def _execute_recommendation_job_async(job_id_str: str) -> Dict[str, Any]:
     def progress_callback(candidate_name: str, fold: int, total_folds: int) -> None:
         pass
 
-    # ── 7. Run Pure Benchmark Engine ──────────────────────────────────────────
+    # ── 7. Run Pure Benchmark Engine in Worker Thread Pool ────────────────────
     try:
-        bench_result = run_recommendation_benchmark(
+        bench_result = await asyncio.to_thread(
+            run_recommendation_benchmark,
             dataframe=df,
             config=config,
             progress_callback=progress_callback,
@@ -327,11 +344,12 @@ def execute_recommendation_benchmark_job(self: Any, job_id: str) -> Dict[str, An
     except Exception as exc:
         logger.error("Permanent failure in recommendation job %s: %s", job_id, exc)
         try:
+            job_uuid = uuid.UUID(job_id)
             async def _mark_failed():
                 async with get_worker_session() as db:
                     await db.execute(
                         update(RecommendationJob)
-                        .where(RecommendationJob.id == uuid.UUID(job_id))
+                        .where(RecommendationJob.id == job_uuid)
                         .values(
                             status=RecommendationJobStatus.FAILED.value,
                             stage="Failed",
