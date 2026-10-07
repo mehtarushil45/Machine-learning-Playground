@@ -322,7 +322,7 @@ def build_preprocessor(
     if ctx.categorical_columns:
         cat_steps = [
             ("imputer", get_imputer("most_frequent")),
-            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False, max_categories=20)),
         ]
         transformers.append(
             ("categorical", Pipeline(steps=cat_steps), ctx.categorical_columns)

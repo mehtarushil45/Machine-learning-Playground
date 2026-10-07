@@ -323,22 +323,31 @@ class RecommendationJobService:
                 )
                 await db.commit()
         except Exception as exc:
-            logger.error("Celery dispatch failure for recommendation job %s: %s", new_job.id, exc)
-            await db.execute(
-                update(RecommendationJob)
-                .where(RecommendationJob.id == new_job.id)
-                .values(
-                    status=RecommendationJobStatus.FAILED.value,
-                    stage="Failed",
-                    error_details={"error_type": "DispatchFailed", "message": "Failed to dispatch job to Celery worker"},
-                    completed_at=datetime.now(timezone.utc),
+            logger.warning("Celery dispatch failed for recommendation job %s (%s); falling back to async background worker task", new_job.id, exc)
+            try:
+                import asyncio
+                from services.worker.tasks.recommendation_task import _execute_recommendation_job_async
+
+                loop = asyncio.get_running_loop()
+                loop.create_task(_execute_recommendation_job_async(str(new_job.id)))
+                logger.info("Successfully dispatched recommendation job %s to async background worker", new_job.id)
+            except Exception as fallback_exc:
+                logger.error("Async worker fallback failed for recommendation job %s: %s", new_job.id, fallback_exc)
+                await db.execute(
+                    update(RecommendationJob)
+                    .where(RecommendationJob.id == new_job.id)
+                    .values(
+                        status=RecommendationJobStatus.FAILED.value,
+                        stage="Failed",
+                        error_details={"error_type": "DispatchFailed", "message": "Failed to dispatch job to Celery worker or async task"},
+                        completed_at=datetime.now(timezone.utc),
+                    )
                 )
-            )
-            await db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Recommendation queue service is temporarily unavailable. Please retry later.",
-            )
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Recommendation queue service is temporarily unavailable. Please retry later.",
+                )
 
         logger.info(
             "Created and queued RecommendationJob %s for dataset %s (org %s)",

@@ -89,6 +89,13 @@ def _create_dataset_context(df: pd.DataFrame, target_col: str, feature_cols: Lis
         elif pd.api.types.is_datetime64_any_dtype(series):
             dt_cols.append(col)
         else:
+            try:
+                coerced = pd.to_numeric(series.dropna(), errors="coerce")
+                if len(coerced) > 0 and (coerced.notna().sum() / len(coerced)) >= 0.95:
+                    num_cols.append(col)
+                    continue
+            except Exception:
+                pass
             cat_cols.append(col)
 
     missing_dict = {c: pd.Series(df[c]).isna().sum() for c in df.columns}
@@ -132,9 +139,9 @@ class RecommendationConfig:
     random_seed: int = 42
     train_test_split: float = 0.8
     constraints: RecommendationConstraints = field(default_factory=RecommendationConstraints)
-    screening_sample_size: int = 25_000
-    verification_sample_size: int = 50_000
-    max_distance_kernel_rows: int = 5_000
+    screening_sample_size: int = 2_000
+    verification_sample_size: int = 5_000
+    max_distance_kernel_rows: int = 2_000
 
 
 @dataclass
@@ -634,7 +641,14 @@ def run_recommendation_benchmark(
             )
             continue
 
-        if defn.max_safe_rows and len(df_screening) > defn.max_safe_rows:
+        if getattr(defn, "recommendation_tier", None) == "manual_only":
+            continue
+
+        effective_max_safe_rows = defn.max_safe_rows
+        if defn.category in ("kernel", "distance") and not effective_max_safe_rows:
+            effective_max_safe_rows = config.max_distance_kernel_rows
+
+        if effective_max_safe_rows and len(df_screening) > effective_max_safe_rows:
             candidates_result.append(
                 CandidateBenchmarkResult(
                     algorithm_id=defn.key,
@@ -642,7 +656,7 @@ def run_recommendation_benchmark(
                     category=defn.category,
                     task_type=defn.task_type,
                     status="skipped",
-                    skip_reason=f"Dataset shape ({len(df_screening)} rows) exceeds safe limit for {defn.display_name} (max {defn.max_safe_rows} rows).",
+                    skip_reason=f"Dataset shape ({len(df_screening)} rows) exceeds safe limit for {defn.display_name} (max {effective_max_safe_rows} rows).",
                 )
             )
             continue
@@ -676,21 +690,37 @@ def run_recommendation_benchmark(
     # 2. it is one of the highest-ranked screening contenders.
     successful_screening = [r for r in screening_results if r.status == "completed" and r.score is not None]
     successful_screening.sort(key=lambda r: r.score or -999999.0, reverse=True)
-    top_keys = {r.algorithm_id for r in successful_screening[:3]}
+    top_keys = {r.algorithm_id for r in successful_screening[:2]}
 
     verification_models: List[AlgorithmDefinition] = [
         defn for defn in all_task_models if defn.key in top_keys
     ]
 
-    # Run Verification Tier on df_train with full cv_splitter
+    # Run Verification Tier on df_train (or bounded sample up to verification_sample_size) with full cv_splitter
     if stage_callback:
         stage_callback("VERIFYING", 60.0)
+
+    if train_rows > config.verification_sample_size:
+        stratify_verify = df_train[config.target_column] if task_type == "classification" and min_class_samples >= 2 else None
+        try:
+            _, verify_idx = train_test_split(
+                np.arange(train_rows),
+                test_size=config.verification_sample_size / train_rows,
+                random_state=config.random_seed,
+                stratify=stratify_verify,
+            )
+            df_verification = df_train.iloc[verify_idx].copy()
+            limitations.append(f"Verification benchmark executed on a deterministic {config.verification_sample_size:,}-row stratified sample.")
+        except Exception:
+            df_verification = df_train.head(config.verification_sample_size).copy()
+    else:
+        df_verification = df_train
 
     verified_results: List[CandidateBenchmarkResult] = []
     for defn in verification_models:
         res = evaluate_candidate_cv(
             definition=defn,
-            dataframe=df_train,
+            dataframe=df_verification,
             feature_columns=clean_features,
             target_column=config.target_column,
             cv_splitter=cv_splitter,

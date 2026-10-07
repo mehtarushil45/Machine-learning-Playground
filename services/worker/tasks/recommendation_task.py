@@ -191,11 +191,33 @@ async def _execute_recommendation_job_async(job_id_str: str) -> Dict[str, Any]:
 
     # ── 6. Cooperative Stage & Progress Callbacks ─────────────────────────────
     current_status_holder = {"status": RecommendationJobStatus.PROFILING.value}
+    loop = asyncio.get_running_loop()
+
+    def _async_update_stage(status_val: str, stage_label: str, pct_val: float) -> None:
+        async def _do_db_stage_update():
+            try:
+                async with get_worker_session() as db_inner:
+                    await db_inner.execute(
+                        update(RecommendationJob)
+                        .where(RecommendationJob.id == job_uuid)
+                        .values(
+                            status=status_val,
+                            stage=stage_label,
+                            progress=pct_val,
+                        )
+                    )
+                    await db_inner.commit()
+            except Exception as exc_inner:
+                logger.debug("Failed stage progress update for %s: %s", job_uuid, exc_inner)
+
+        loop.create_task(_do_db_stage_update())
 
     def stage_callback(stage_name: str, progress_pct: float) -> None:
         target_status = getattr(RecommendationJobStatus, stage_name, None)
-        if target_status:
-            current_status_holder["status"] = target_status.value
+        status_val = target_status.value if target_status else stage_name
+        stage_label = "Screening Candidate Algorithms" if stage_name == "SCREENING" else ("Verifying Top Contenders" if stage_name == "VERIFYING" else stage_name)
+        current_status_holder["status"] = status_val
+        _async_update_stage(status_val, stage_label, float(progress_pct))
 
     def progress_callback(candidate_name: str, fold: int, total_folds: int) -> None:
         pass

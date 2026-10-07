@@ -21,27 +21,37 @@ UPLOADS_DIR = os.path.abspath(
 )
 
 
+VALID_DATASET_EXTENSIONS = (".csv", ".parquet", ".pq")
+
+
+def _read_dataframe_from_path(file_path: str) -> pd.DataFrame:
+    """Read dataframe from CSV or Parquet file path."""
+    if file_path.lower().endswith((".parquet", ".pq")):
+        return pd.read_parquet(file_path)
+    return pd.read_csv(file_path)
+
+
 def find_dataset_path(dataset_id: str) -> str:
-    """Find CSV file path in uploads directory corresponding to dataset_id.
+    """Find CSV or Parquet file path in uploads directory corresponding to dataset_id.
 
     Searches both the root upload directory and organisation-scoped subdirectories.
 
     Raises:
-        FileNotFoundError: If no matching CSV dataset file is found for dataset_id.
+        FileNotFoundError: If no matching CSV or Parquet dataset file is found for dataset_id.
     """
-    if os.path.exists(dataset_id) and dataset_id.endswith(".csv"):
+    if os.path.exists(dataset_id) and any(dataset_id.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
         return dataset_id
 
     if os.path.exists(UPLOADS_DIR):
         # 1. Search root upload directory
         for fname in os.listdir(UPLOADS_DIR):
             fpath = os.path.join(UPLOADS_DIR, fname)
-            if os.path.isfile(fpath) and (dataset_id in fname and fname.endswith(".csv")):
+            if os.path.isfile(fpath) and dataset_id in fname and any(fname.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
                 return fpath
             # 2. Search organisation-scoped subdirectories
             if os.path.isdir(fpath):
                 for sub_fname in os.listdir(fpath):
-                    if dataset_id in sub_fname and sub_fname.endswith(".csv"):
+                    if dataset_id in sub_fname and any(sub_fname.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
                         return os.path.join(fpath, sub_fname)
 
     # 3. Check MinIO / S3 Object Storage backend
@@ -114,7 +124,7 @@ def load_dataset_dataframe(
                 organisation_id=org_id_str,
             )
             if temp_path:
-                df = pd.read_csv(temp_path)
+                df = _read_dataframe_from_path(temp_path)
                 return df
         except Exception as exc:
             logger.warning(
@@ -132,7 +142,7 @@ def load_dataset_dataframe(
 
     # ── 2. Local FileSystem Storage Abstraction ───────────────────────────────
     if file_path_hint and os.path.exists(file_path_hint) and os.path.isfile(file_path_hint):
-        return pd.read_csv(file_path_hint)
+        return _read_dataframe_from_path(file_path_hint)
 
     resolved_path = find_dataset_path(dataset_id_str)
-    return pd.read_csv(resolved_path)
+    return _read_dataframe_from_path(resolved_path)

@@ -233,10 +233,10 @@ export function AlgorithmRecommendationPanel({
         return;
       }
 
-      // Check for 45s client-side timeout
-      if (pollStartTimeRef.current > 0 && Date.now() - pollStartTimeRef.current > 45000) {
+      // Check for 120s client-side timeout
+      if (pollStartTimeRef.current > 0 && Date.now() - pollStartTimeRef.current > 120000) {
         stopPolling();
-        const timeoutMsg = 'Recommendation benchmark timed out after 45 seconds without worker completion. Please retry.';
+        const timeoutMsg = 'Recommendation benchmark timed out after 120 seconds without worker completion. Please retry.';
         setErrorMessage(timeoutMsg);
         setActiveJob((prev) =>
           prev
