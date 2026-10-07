@@ -26,7 +26,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
@@ -223,13 +223,16 @@ async def upload_dataset(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     file: UploadFile = File(...),
+    version: Annotated[Optional[str], Form()] = None,
 ) -> DatasetUploadResponse:
-    """Validate, parse metadata from, and securely store an uploaded CSV dataset.
+    """Validate, parse metadata from, and securely store an uploaded CSV, Parquet, or JSONL dataset.
 
-    - **Validation**: CSV extension, MIME type, max size (50MB), non-empty file, non-corrupted structure.
+    - **Validation**: CSV/Parquet/JSONL extension, MIME type, max size (50MB), non-empty file, valid structure.
+    - **Versioning**: Immutable dataset versions with SHA-256 content hashes (e.g. v1, v2). Auto-increments if not specified.
     - **Isolation**: Stored under organisation-scoped path for multi-tenant isolation.
     - **HTTP Statuses**:
         - 400 Bad Request: Unsupported format, invalid encoding, empty file.
+        - 409 Conflict: Attempted mutation/overwrite of an existing immutable dataset version with different content.
         - 413 Payload Too Large: Size > 50MB.
         - 422 Unprocessable Entity: Missing headers or no data rows.
         - 500 Internal Server Error: Storage failure.
@@ -240,15 +243,16 @@ async def upload_dataset(
             detail="No file was provided in the upload request.",
         )
 
-    # 1. Extension Validation (CSV and Parquet)
+    # 1. Extension Validation (CSV, Parquet, JSONL)
     filename_lower = file.filename.lower()
     is_parquet = filename_lower.endswith((".parquet", ".pq"))
-    is_csv = filename_lower.endswith(".csv")
+    is_json = filename_lower.endswith((".json", ".jsonl", ".ndjson"))
+    is_csv = filename_lower.endswith((".csv", ".tsv"))
 
-    if not (is_csv or is_parquet):
+    if not (is_csv or is_parquet or is_json):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file format. Only CSV (.csv) and Parquet (.parquet, .pq) files are allowed.",
+            detail="Unsupported file format. Only CSV (.csv), Parquet (.parquet, .pq), and JSON Lines (.jsonl) files are allowed.",
         )
 
     # 2. MIME Type Validation (if header provided)
@@ -263,11 +267,14 @@ async def upload_dataset(
         "application/vnd.apache.parquet",
         "application/parquet",
         "application/x-parquet",
+        "application/json",
+        "application/x-ndjson",
+        "text/tab-separated-values",
     }
     if file.content_type and file.content_type.lower() not in allowed_mimes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid MIME type '{file.content_type}'. Only CSV and Parquet files are supported.",
+            detail=f"Invalid MIME type '{file.content_type}'. Only CSV, Parquet, and JSON Lines files are supported.",
         )
 
     # 3. Read Content & Size Validation
@@ -294,8 +301,12 @@ async def upload_dataset(
         )
 
     content_hash = hashlib.sha256(content).hexdigest()
-    version = "v1"
-    file_format = "parquet" if is_parquet else "csv"
+    if is_parquet:
+        file_format = "parquet"
+    elif is_json:
+        file_format = "jsonl"
+    else:
+        file_format = "csv"
 
     # 4. Parse Structure based on format
     if is_parquet:
@@ -317,6 +328,46 @@ async def upload_dataset(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Malformed Parquet: Failed to parse tabular structure ({str(exc)}).",
             ) from exc
+    elif is_json:
+        decoded_text = ""
+        for encoding in ["utf-8-sig", "utf-8", "iso-8859-1"]:
+            try:
+                decoded_text = content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+        if not decoded_text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Malformed JSON: Unable to decode file content.",
+            )
+        import json
+
+        lines = [line.strip() for line in decoded_text.splitlines() if line.strip()]
+        if not lines:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Invalid JSON structure: File contains no data rows.",
+            )
+        try:
+            sample_obj = json.loads(lines[0])
+            if isinstance(sample_obj, dict):
+                columns = list(sample_obj.keys())
+                row_count = len(lines)
+            elif isinstance(sample_obj, list):
+                full_arr = json.loads(decoded_text)
+                if full_arr and isinstance(full_arr[0], dict):
+                    columns = list(full_arr[0].keys())
+                    row_count = len(full_arr)
+                else:
+                    raise ValueError("JSON array elements must be objects")
+            else:
+                raise ValueError("JSON records must be objects")
+        except Exception as j_exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Malformed JSON: Failed to parse tabular records ({str(j_exc)}).",
+            ) from j_exc
     else:
         # Decode Content & Parse CSV Structure
         decoded_text = ""
@@ -365,9 +416,89 @@ async def upload_dataset(
                 detail=f"Malformed CSV: Failed to parse tabular structure ({str(exc)}).",
             ) from exc
 
-    # 5. Safe Filename & Storage — delegated to StorageBackend with Organisation Scoping
-    dataset_id = uuid.uuid4()
+    # 5. Versioning & Immutability Resolution
     safe_filename = sanitize_filename(file.filename)
+    target_version = version.strip() if version and version.strip() else None
+
+    if db is not None:
+        try:
+            stmt = (
+                select(Dataset)
+                .where(
+                    Dataset.organisation_id == current_user.organisation_id,
+                    (Dataset.name == safe_filename) | (Dataset.original_filename == file.filename),
+                )
+                .order_by(Dataset.created_at.desc())
+            )
+            res = await db.execute(stmt)
+            existing_datasets = res.scalars().all()
+
+            if target_version:
+                for ex in existing_datasets:
+                    if ex.version == target_version:
+                        if ex.content_hash == content_hash:
+                            # Idempotent re-upload of identical immutable version
+                            return DatasetUploadResponse(
+                                dataset_id=ex.id,
+                                filename=ex.name,
+                                size_bytes=ex.file_size_bytes or size_bytes,
+                                uploaded_at=ex.created_at,
+                                status="uploaded",
+                                version=ex.version,
+                                content_hash=ex.content_hash,
+                                file_format=ex.file_format,
+                                row_count=ex.row_count,
+                                column_count=ex.column_count,
+                                columns=columns,
+                            )
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=(
+                                f"Dataset '{safe_filename}' version '{target_version}' already exists "
+                                f"with content hash '{ex.content_hash}'. Dataset versions are immutable."
+                            ),
+                        )
+            else:
+                # Auto-versioning: check if identical content already exists
+                for ex in existing_datasets:
+                    if ex.content_hash == content_hash:
+                        return DatasetUploadResponse(
+                            dataset_id=ex.id,
+                            filename=ex.name,
+                            size_bytes=ex.file_size_bytes or size_bytes,
+                            uploaded_at=ex.created_at,
+                            status="uploaded",
+                            version=ex.version,
+                            content_hash=ex.content_hash,
+                            file_format=ex.file_format,
+                            row_count=ex.row_count,
+                            column_count=ex.column_count,
+                            columns=columns,
+                        )
+                if existing_datasets:
+                    max_v = 1
+                    for ex in existing_datasets:
+                        v_str = ex.version or "v1"
+                        if v_str.startswith("v") and v_str[1:].isdigit():
+                            try:
+                                max_v = max(max_v, int(v_str[1:]))
+                            except ValueError:
+                                pass
+                    target_version = f"v{max_v + 1}"
+                else:
+                    target_version = "v1"
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.debug("Version resolution error in upload_dataset: %s", exc)
+            target_version = target_version or "v1"
+    else:
+        target_version = target_version or "v1"
+
+    version = target_version
+
+    # 6. Safe Storage — delegated to StorageBackend with Organisation Scoping
+    dataset_id = uuid.uuid4()
     org_id_str = str(current_user.organisation_id)
     backend = get_configured_backend()
 
@@ -417,13 +548,13 @@ async def upload_dataset(
 
     uploaded_at = datetime.now(timezone.utc)
 
-    # 6. Persist Dataset record to PostgreSQL
+    # 7. Persist Dataset record to PostgreSQL
     if db is not None:
         try:
             db_dataset = Dataset(
                 id=dataset_id,
                 name=safe_filename,
-                description=f"Uploaded {file_format.upper()} {safe_filename}",
+                description=f"Uploaded {file_format.upper()} {safe_filename} ({version})",
                 file_path=location.path,
                 file_size_bytes=size_bytes,
                 original_filename=file.filename,
@@ -454,6 +585,76 @@ async def upload_dataset(
         column_count=len(columns),
         columns=columns,
     )
+
+
+@router.delete(
+    "/{dataset_id}",
+    summary="Delete a dataset version (enforces immutable audit lineage guard)",
+)
+async def delete_dataset(
+    dataset_id: str,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """Delete a dataset version only if no training jobs depend on its immutable audit lineage.
+
+    - **Audit Lineage**: Returns 409 Conflict if any training jobs reference this dataset version.
+    - **Security**: Strictly scoped to current_user.organisation_id.
+    """
+    try:
+        ds_uuid = uuid.UUID(dataset_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset with ID '{dataset_id}' not found.",
+        )
+
+    stmt = select(Dataset).where(
+        Dataset.id == ds_uuid,
+        Dataset.organisation_id == current_user.organisation_id,
+    )
+    res = await db.execute(stmt)
+    ds = res.scalar_one_or_none()
+    if ds is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset with ID '{dataset_id}' not found.",
+        )
+
+    # Check immutable audit lineage: verify if jobs reference this dataset
+    from app.models.job import Job
+
+    job_stmt = select(func.count()).select_from(Job).where(Job.dataset_id == ds_uuid)
+    job_res = await db.execute(job_stmt)
+    job_count = job_res.scalar_one_or_none() or 0
+
+    if job_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Cannot delete dataset '{ds.name}' version '{ds.version}': "
+                f"{job_count} training job(s) and model artifacts depend on its immutable audit lineage."
+            ),
+        )
+
+    # Clean up storage file if it exists
+    if ds.file_path and os.path.exists(ds.file_path):
+        try:
+            os.remove(ds.file_path)
+        except OSError as os_err:
+            logger.warning("Could not remove file '%s' during dataset deletion: %s", ds.file_path, os_err)
+
+    # Delete record from PostgreSQL
+    await db.delete(ds)
+    await db.commit()
+
+    return {
+        "deleted": True,
+        "dataset_id": dataset_id,
+        "name": ds.name,
+        "version": ds.version,
+        "content_hash": ds.content_hash,
+    }
 
 
 @router.get(

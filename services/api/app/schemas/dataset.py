@@ -85,6 +85,7 @@ class ColumnProfile(BaseModel):
 
     name: str
     type: str  # numeric | categorical | boolean | datetime | text | identifier
+    detailed_type: str | None = None  # continuous_numeric | discrete_integer | high_cardinality_categorical | low_cardinality_categorical | datetime | text | identifier | boolean | constant
     nullable: bool
     missing: int
     missing_percentage: float

@@ -72,8 +72,15 @@ class DuckDBProfilerEngine:
             raise RuntimeError("DuckDB engine is not installed. Install duckdb to enable out-of-core profiling.")
 
         file_size_bytes = os.path.getsize(file_path)
-        is_parquet = file_path.lower().endswith((".parquet", ".pq"))
-        file_format = "parquet" if is_parquet else "csv"
+        path_lower = file_path.lower()
+        is_parquet = path_lower.endswith((".parquet", ".pq"))
+        is_json = path_lower.endswith((".json", ".jsonl", ".ndjson"))
+        if is_parquet:
+            file_format = "parquet"
+        elif is_json:
+            file_format = "jsonl"
+        else:
+            file_format = "csv"
 
         # Create thread-safe in-memory DuckDB connection
         con = duckdb.connect(database=":memory:")
@@ -86,6 +93,8 @@ class DuckDBProfilerEngine:
             sql_escaped_path = file_path.replace("'", "''")
             if is_parquet:
                 scan_clause = f"read_parquet('{sql_escaped_path}')"
+            elif is_json:
+                scan_clause = f"read_json_auto('{sql_escaped_path}')"
             else:
                 scan_clause = f"read_csv_auto('{sql_escaped_path}', sample_size=20000, ignore_errors=true)"
 
@@ -169,10 +178,19 @@ class DuckDBProfilerEngine:
                 missing_pct = round((missing_cnt / row_count) * 100.0, 2) if row_count > 0 else 0.0
                 dup_cnt = max(0, row_count - unique_cnt)
 
-                # Determine classified column type
-                is_numeric_type = any(
-                    t in duck_type for t in ("INT", "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "HUGEINT", "TINYINT", "BIGINT")
+                # Determine classified column type & detailed sub-type
+                is_integer = any(
+                    t in duck_type
+                    for t in (
+                        "INT", "HUGEINT", "TINYINT", "BIGINT", "SMALLINT",
+                        "UBIGINT", "UINTEGER", "USMALLINT", "UTINYINT",
+                    )
                 )
+                is_float = any(
+                    t in duck_type
+                    for t in ("FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "REAL")
+                )
+                is_numeric_type = is_integer or is_float
                 is_bool_type = "BOOL" in duck_type
                 is_date_type = any(t in duck_type for t in ("DATE", "TIME", "TIMESTAMP"))
 
@@ -180,33 +198,56 @@ class DuckDBProfilerEngine:
                 if unique_cnt <= 1:
                     constant_columns.append(col_name)
 
-                # Type classification
+                # Strict type classification
                 detected_type = "text"
+                detailed_type = "free_text"
+
                 if is_numeric_type:
                     is_id_name = any(k in col_name_lower for k in ("id", "_id", "uuid", "pk", "key", "code"))
                     if is_id_name and unique_cnt == row_count and row_count > 1:
                         detected_type = "identifier"
+                        detailed_type = "identifier"
                         identifier_columns.append(col_name)
                     elif unique_cnt <= 2 and (
                         col_name_lower.startswith("is_") or col_name_lower.startswith("has_") or col_name_lower.endswith("_flag")
                     ):
                         detected_type = "boolean"
+                        detailed_type = "boolean"
+                    elif is_integer:
+                        detected_type = "numeric"
+                        detailed_type = "discrete_integer"
+                        numeric_columns.append(col_name)
                     else:
                         detected_type = "numeric"
+                        detailed_type = "continuous_numeric"
                         numeric_columns.append(col_name)
                 elif is_bool_type:
                     detected_type = "boolean"
+                    detailed_type = "boolean"
                 elif is_date_type:
                     detected_type = "datetime"
+                    detailed_type = "datetime"
                 else:
                     is_id_name = any(k in col_name_lower for k in ("id", "_id", "uuid", "pk", "key", "code"))
                     if unique_cnt == row_count and (is_id_name or row_count >= 10):
                         detected_type = "identifier"
+                        detailed_type = "identifier"
                         identifier_columns.append(col_name)
-                    elif unique_cnt <= 50 or (row_count > 0 and (unique_cnt / row_count) <= 0.5):
+                    elif unique_cnt <= 50:
                         detected_type = "categorical"
+                        detailed_type = "low_cardinality_categorical"
+                    elif row_count > 0 and (unique_cnt < row_count) and (
+                        (unique_cnt / row_count) <= 0.85
+                        or any(k in col_name_lower for k in ("cat", "city", "state", "dept", "tag", "status", "type", "group", "class", "country", "code", "segment", "region"))
+                    ):
+                        detected_type = "categorical"
+                        detailed_type = "high_cardinality_categorical"
                     else:
                         detected_type = "text"
+                        detailed_type = "free_text"
+
+                if unique_cnt <= 1 and col_name not in identifier_columns:
+                    detailed_type = "constant"
 
                 # Compute statistics
                 stats: dict[str, Any] = {}
@@ -267,12 +308,17 @@ class DuckDBProfilerEngine:
                         "sample_values": samples,
                     }
 
+                stats["detailed_type"] = detailed_type
+
                 # Imputation strategy recommendation
                 if missing_cnt > 0:
                     if missing_pct > 60.0:
                         imputation_strategies[col_name] = "drop_feature"
                     elif detected_type == "numeric":
-                        imputation_strategies[col_name] = "median"
+                        if 5.0 <= missing_pct <= 40.0 and len(numeric_columns) >= 3:
+                            imputation_strategies[col_name] = "iterative"
+                        else:
+                            imputation_strategies[col_name] = "median"
                     elif detected_type in ("categorical", "boolean"):
                         imputation_strategies[col_name] = "most_frequent"
                     elif detected_type == "datetime":
@@ -284,6 +330,7 @@ class DuckDBProfilerEngine:
                     ColumnProfile(
                         name=col_name,
                         type=detected_type,
+                        detailed_type=detailed_type,
                         nullable=missing_cnt > 0,
                         missing=missing_cnt,
                         missing_percentage=missing_pct,

@@ -363,39 +363,58 @@ def ingestion_pipeline_sync(
             JobStatusEnum.RUNNING.value,
             60.0,
             "Statistical Profiling",
-            "Running column-level statistical analysis",
+            "Running out-of-core streaming statistical analysis & governance guardrails",
             estimated_seconds=4.0,
         )
 
-        rows: list[dict[str, str]] = []
+        profile = None
+        # Primary path: Out-of-core DuckDB profiling (zero host RAM buffering)
         try:
-            # _local_path is already a real filesystem path (resolved before Stage 1).
-            # For local backend: it equals storage_path.
-            # For MinIO backend: it is the temp file downloaded before Stage 1.
-            with open(
-                _local_path,
-                encoding=validation.encoding,
-                errors="replace",
-                newline="",
-            ) as fh:
-                reader = _csv_module.DictReader(
-                    fh, delimiter=validation.delimiter
-                )
-                for row in reader:
-                    rows.append(dict(row))
-        except OSError as exc:
-            raise RuntimeError(
-                f"Failed to open stored CSV for profiling: {exc}"
-            ) from exc
+            from services.api.app.services.duckdb_profiler import duckdb_profiler_service  # noqa: PLC0415
+            profile = duckdb_profiler_service.profile_file(
+                file_path=_local_path,
+                dataset_id=dataset_id,
+                filename=filename,
+                version=version_id,
+                content_hash=sha256_hex,
+            )
+            logger.info("Out-of-core DuckDB profiling completed for job %s", job_id)
+        except Exception as duck_err:
+            logger.warning(
+                "DuckDB out-of-core profiling fallback for job %s: %s", job_id, duck_err
+            )
 
-        container = TabularDataContainer(
-            dataset_id=dataset_id,
-            filename=filename,
-            columns=validation.columns,
-            rows=rows,
-            memory_usage_bytes=size_bytes,
-        )
-        profile = profiler_service.profile(container)
+        # Fallback path: In-memory profiling if DuckDB failed or was unavailable
+        if profile is None:
+            rows: list[dict[str, str]] = []
+            try:
+                # _local_path is already a real filesystem path (resolved before Stage 1).
+                # For local backend: it equals storage_path.
+                # For MinIO backend: it is the temp file downloaded before Stage 1.
+                with open(
+                    _local_path,
+                    encoding=validation.encoding,
+                    errors="replace",
+                    newline="",
+                ) as fh:
+                    reader = _csv_module.DictReader(
+                        fh, delimiter=validation.delimiter
+                    )
+                    for row in reader:
+                        rows.append(dict(row))
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Failed to open stored CSV for profiling: {exc}"
+                ) from exc
+
+            container = TabularDataContainer(
+                dataset_id=dataset_id,
+                filename=filename,
+                columns=validation.columns,
+                rows=rows,
+                memory_usage_bytes=size_bytes,
+            )
+            profile = profiler_service.profile(container)
 
         update_job_state(
             job_id,
@@ -433,7 +452,16 @@ def ingestion_pipeline_sync(
                         "duplicate_columns": profile.duplicate_columns,
                         "empty_columns": profile.empty_columns,
                         "total_missing_values": profile.total_missing_values,
+                        "engine": getattr(profile, "engine", "duckdb"),
                     },
+                    "governance": {
+                        "has_leakage": getattr(profile.governance, "has_leakage", False),
+                        "leaked_features_count": len(getattr(profile.governance, "leaked_features", [])),
+                        "multicollinear_pairs_count": len(getattr(profile.governance, "multicollinear_pairs", [])),
+                        "constant_columns": getattr(profile.governance, "constant_columns", []),
+                        "identifier_columns": getattr(profile.governance, "identifier_columns", []),
+                        "imputation_strategies": getattr(profile.governance, "imputation_strategies", {}),
+                    } if hasattr(profile, "governance") else {},
                     # ── V4 additions — additive, never overwrite existing keys ──
                     "validation_score": vreport.validation_score,
                     "ml_task_type": vreport.ml_task_type,

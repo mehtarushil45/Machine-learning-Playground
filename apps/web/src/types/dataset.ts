@@ -30,6 +30,7 @@ export interface Dataset {
 export interface ColumnProfile {
   name: string
   type: 'numeric' | 'categorical' | 'boolean' | 'datetime' | 'text' | 'identifier' | string
+  detailed_type?: string
   nullable: boolean
   missing: number
   missing_percentage: number
