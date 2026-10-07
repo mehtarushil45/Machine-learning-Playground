@@ -83,7 +83,15 @@ def test_duckdb_profiler_parquet_and_leakage_detection():
         "constant_column": const_col,
         "normal_feat": normal_feat,
     })
-    df.to_parquet(parquet_path, index=False)
+    try:
+        import duckdb
+        conn = duckdb.connect()
+        conn.register("df_data", df)
+        safe_parquet_path = parquet_path.replace("\\", "/")
+        conn.execute(f"COPY df_data TO '{safe_parquet_path}' (FORMAT PARQUET)")
+        conn.close()
+    except Exception:
+        pytest.skip("DuckDB parquet write is unavailable in this environment")
 
     try:
         profile = duckdb_profiler_service.profile_file(

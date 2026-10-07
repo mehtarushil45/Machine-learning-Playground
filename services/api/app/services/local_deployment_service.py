@@ -104,10 +104,18 @@ def _build_input_schema(
                     str_cols = [str(c) for c in cols]
                     if tname in ("categorical", "cat", "boolean") or "cat" in str(tname).lower():
                         cat_cols.update(str_cols)
-                        encoder = getattr(trans, "named_steps", {}).get("encoder") if hasattr(trans, "named_steps") else trans
+                        encoder = None
+                        if hasattr(trans, "named_steps"):
+                            for step_obj in trans.named_steps.values():
+                                if hasattr(step_obj, "categories_"):
+                                    encoder = step_obj
+                                    break
+                        elif hasattr(trans, "categories_"):
+                            encoder = trans
+
                         if encoder and hasattr(encoder, "categories_"):
-                            for c, cats in zip(str_cols, encoder.categories_):
-                                categories_map[c] = [str(x) for x in cats]
+                            for c, cats_arr in zip(str_cols, encoder.categories_):
+                                categories_map[c] = [str(x) for x in cats_arr]
 
     # 2. Lineage / registry metadata fallback
     if isinstance(model_registry_meta, dict):
@@ -128,16 +136,19 @@ def _build_input_schema(
                 unique_vals = [str(x) for x in dataset_sample[col].dropna().unique() if str(x).strip()]
                 cats = unique_vals[:30] if unique_vals else None
 
+            if not cats:
+                # If boolean-like column name, supply standard binary categories
+                col_lower = col.lower()
+                if any(k in col_lower for k in ("renew", "churn", "is_", "has_", "active", "flag")):
+                    cats = ["No", "Yes"]
+                else:
+                    cats = ["Category_A", "Category_B"]
+
             schema[col] = {
                 "type": "categorical",
                 "categories": cats,
             }
-            if cats:
-                sample_inputs[col] = cats[0]
-            elif dataset_sample is not None and isinstance(dataset_sample, pd.DataFrame) and col in dataset_sample.columns and len(dataset_sample) > 0:
-                sample_inputs[col] = str(dataset_sample[col].iloc[0])
-            else:
-                sample_inputs[col] = cats[0] if cats else ""
+            sample_inputs[col] = cats[0]
 
         elif col in bool_cols or (
             dataset_sample is not None
@@ -885,10 +896,7 @@ async def predict_local(
             valid_categories = col_schema.get("categories")
             if valid_categories:
                 val_str = str(val).strip()
-                matched_category = next((c for c in valid_categories if str(c).strip().lower() == val_str.lower()), None)
-                if matched_category is not None:
-                    cleaned_inputs[col] = matched_category
-                else:
+                if val_str not in valid_categories:
                     allowed = ", ".join(valid_categories[:8]) + ("..." if len(valid_categories) > 8 else "")
                     validation_errors.append(
                         f"{col}: Value '{val_str}' is not present in the trained categorical schema. Valid categories: {allowed}"

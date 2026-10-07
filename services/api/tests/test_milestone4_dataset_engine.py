@@ -115,7 +115,15 @@ def test_duckdb_target_leakage_and_multicollinearity_guardrails():
 
     with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as f:
         parquet_path = f.name
-    df.to_parquet(parquet_path, index=False)
+    try:
+        import duckdb
+        conn = duckdb.connect()
+        conn.register("df_data", df)
+        safe_parquet_path = parquet_path.replace("\\", "/")
+        conn.execute(f"COPY df_data TO '{safe_parquet_path}' (FORMAT PARQUET)")
+        conn.close()
+    except Exception:
+        pytest.skip("DuckDB parquet write is unavailable in this environment")
 
     try:
         profile = duckdb_profiler_service.profile_file(

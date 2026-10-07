@@ -115,6 +115,10 @@ interface ProjectContextValue extends ProjectState {
   loadDataset:           (d: Dataset)          => void;
   /** Convenience: reset everything and return to gatekeeper */
   resetProject:          ()                    => void;
+  /** Warning message when a persisted dataset was found to be stale/missing on backend */
+  staleDatasetWarning:   string | null;
+  /** Clear stale dataset warning */
+  clearStaleDatasetWarning: () => void;
 }
 
 
@@ -183,18 +187,30 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     Array.isArray((initial as any).generatedFiles) ? (initial as any).generatedFiles : [],
   );
 
+  const [staleDatasetWarning, setStaleDatasetWarning] = useState<string | null>(null);
+  const clearStaleDatasetWarning = useCallback(() => setStaleDatasetWarning(null), []);
+
   // Auto-heal: verify persisted dataset still exists on backend; if server 404s, clear ghost state
   useEffect(() => {
     if (initial.dataset?.datasetId) {
       const dsId = initial.dataset.datasetId;
       if (dsId.includes('-') && !dsId.startsWith('client-') && !dsId.startsWith('ds-')) {
         apiClient.get(`/datasets/${dsId}`).catch((err: any) => {
-          if (err?.status === 404) {
+          const isNotFound =
+            err?.status === 404 ||
+            (err instanceof ApiError && err.status === 404) ||
+            (err?.message && (err.message.includes('404') || err.message.toLowerCase().includes('not found')));
+          if (isNotFound) {
             console.warn(`Persisted dataset ${dsId} no longer exists on backend server. Auto-clearing stale state.`);
             setDataset(null);
             setTrainingConfig(null);
             setSelectedFeatures([]);
             setSelectedTargetState(null);
+            setActiveJobState(null);
+            setFileJobs({});
+            setStaleDatasetWarning(
+              'Your previous dataset is no longer available on the server. Please re-upload your dataset to continue.'
+            );
             try {
               localStorage.removeItem(STORAGE_KEY);
             } catch {}
@@ -336,6 +352,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
    */
   const initializeProject = useCallback((d: Dataset, fileName: string) => {
     const safeName = fileName.trim().endsWith('.py') ? fileName.trim() : `${fileName.trim()}.py`;
+    setStaleDatasetWarning(null);
     setDataset(d);
     setSelectedFeatures([]);
     setSelectedTarget(null);
@@ -352,6 +369,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadDataset = useCallback((d: Dataset) => {
+    setStaleDatasetWarning(null);
     setDataset(d);
     setSelectedFeatures([]);
     setSelectedTarget(null);
@@ -362,6 +380,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, [setActiveJob]);
 
   const resetProject = useCallback(() => {
+    setStaleDatasetWarning(null);
     setDataset(null);
     setSelectedFeatures([]);
     setSelectedTarget(null);
@@ -425,6 +444,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         initializeProject,
         loadDataset,
         resetProject,
+        staleDatasetWarning,
+        clearStaleDatasetWarning,
       }}
     >
       {children}

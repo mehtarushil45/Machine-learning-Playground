@@ -7,7 +7,7 @@
  * On confirm: calls initializeProject(dataset, fileName) to unlock the studio.
  */
 import { useState, useRef, useCallback } from 'react';
-import { Upload, FileCode, ArrowLeft, Sparkles } from 'lucide-react';
+import { Upload, FileCode, ArrowLeft, Sparkles, AlertCircle, X } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { parseCsvFile } from '../../services/csvService';
 import { validateCsvFile } from '../../utils/validation';
@@ -216,7 +216,7 @@ function Step2CreateFile({ dataset, onBack, onConfirm }: { dataset: Dataset; onB
 
 /* ── MAIN GATEKEEPER ─────────────────────────────────────────────────── */
 export function ProjectGatekeeper() {
-  const { initializeProject } = useProject();
+  const { initializeProject, staleDatasetWarning, clearStaleDatasetWarning } = useProject();
   const [pendingDataset, setPendingDataset] = useState<Dataset | null>(null);
   const step = pendingDataset ? 2 : 1;
 
@@ -228,6 +228,43 @@ export function ProjectGatekeeper() {
       <div style={{ width:'100%', maxWidth:500, background:'rgba(18,14,34,0.92)', backdropFilter:'blur(24px)',
         border:'1px solid rgba(138,121,202,0.25)', borderRadius:20, padding:'32px 32px 28px',
         boxShadow:'0 24px 80px rgba(0,0,0,0.6)', boxSizing:'border-box' }}>
+        {staleDatasetWarning && (
+          <div
+            data-testid="stale-dataset-banner"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '12px 14px',
+              marginBottom: 20,
+              borderRadius: 10,
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              color: '#FF6B6B',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertCircle style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <span>{staleDatasetWarning}</span>
+            </div>
+            <button
+              onClick={clearStaleDatasetWarning}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#FF6B6B',
+                cursor: 'pointer',
+                padding: 2,
+              }}
+              aria-label="Dismiss warning"
+            >
+              <X style={{ width: 14, height: 14 }} />
+            </button>
+          </div>
+        )}
         {/* Step indicator */}
         <div style={{ marginBottom:28 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16 }}>

@@ -705,10 +705,15 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
         } else {
           filled[col] = '1';
         }
-      } else if (sampleVal != null) {
+      } else if (schema?.type === 'numeric' || typeof sampleVal === 'number') {
+        const num = Number(sampleVal);
+        filled[col] = !isNaN(num) && isFinite(num) ? String(num) : (schema?.min != null ? String(schema.min) : '0.0');
+      } else if (sampleVal != null && String(sampleVal).trim() !== '' && String(sampleVal).trim().toLowerCase() !== 'sample') {
         filled[col] = String(sampleVal);
+      } else if (schema?.categories && schema.categories.length > 0) {
+        filled[col] = schema.categories[0];
       } else {
-        filled[col] = '1.0';
+        filled[col] = '0.0';
       }
     });
 

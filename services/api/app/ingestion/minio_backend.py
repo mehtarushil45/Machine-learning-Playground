@@ -207,6 +207,26 @@ class MinIOStorageBackend:
                     return True
                 except Exception:
                     pass
+
+            # Fallback check for dataset_id prefix in MinIO
+            try:
+                client = self._make_client()
+                prefixes = [f"{organisation_id}/{dataset_id}" if organisation_id else None, dataset_id]
+                for p in filter(None, prefixes):
+                    resp = client.list_objects_v2(Bucket=self._bucket, Prefix=p, MaxKeys=1)
+                    if resp.get("Contents"):
+                        return True
+            except Exception:
+                pass
+
+            # Fallback check for LocalFileSystemBackend
+            try:
+                from app.ingestion.storage_backend import LocalFileSystemBackend  # noqa: PLC0415
+                if LocalFileSystemBackend().exists(dataset_id, filename, organisation_id):
+                    return True
+            except Exception:
+                pass
+
             return False
 
     def delete(
@@ -294,6 +314,19 @@ class MinIOStorageBackend:
                     pass
 
         if body is None:
+            # Check if file exists in local uploads directory
+            try:
+                from app.ingestion.storage_backend import LocalFileSystemBackend  # noqa: PLC0415
+                local_backend = LocalFileSystemBackend()
+                candidate_local = local_backend.resolve_path(dataset_id, filename or "dataset.csv", organisation_id)
+                if os.path.isfile(candidate_local):
+                    return candidate_local
+                candidate_unscoped = local_backend.resolve_path(dataset_id, filename or "dataset.csv", None)
+                if os.path.isfile(candidate_unscoped):
+                    return candidate_unscoped
+            except Exception:
+                pass
+
             raise StorageError(
                 f"MinIOStorageBackend: failed downloading object for dataset_id '{dataset_id}' from bucket '{self._bucket}'."
             )

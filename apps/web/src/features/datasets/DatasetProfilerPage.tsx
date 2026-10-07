@@ -473,6 +473,8 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     activeJob: _activeJob,
     setActiveJob,
     setLifecycleStage,
+    staleDatasetWarning,
+    clearStaleDatasetWarning,
   } = useProject();
 
   /* ── View Toggle State (Workspace vs Preview data vs Governance) ─────────────── */
@@ -1093,6 +1095,43 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   if (!dataset) {
     return (
       <div style={{ padding: '0 0 24px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {staleDatasetWarning && (
+          <div
+            data-testid="stale-dataset-banner"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              padding: '12px 16px',
+              marginBottom: 16,
+              borderRadius: 10,
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              color: '#FF6B6B',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertCircle style={{ width: 16, height: 16, flexShrink: 0 }} />
+              <span>{staleDatasetWarning}</span>
+            </div>
+            <button
+              onClick={clearStaleDatasetWarning}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#FF6B6B',
+                cursor: 'pointer',
+                padding: 2,
+              }}
+              aria-label="Dismiss warning"
+            >
+              <X style={{ width: 14, height: 14 }} />
+            </button>
+          </div>
+        )}
         <DataUpload onDataLoaded={handleDataLoaded} />
       </div>
     );

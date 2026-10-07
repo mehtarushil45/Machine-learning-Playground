@@ -114,7 +114,15 @@ class ModelContainer:
                     self.numeric_columns.extend(str_cols)
                 elif name in ("categorical", "cat", "boolean") or "cat" in str(name).lower():
                     self.categorical_columns.extend(str_cols)
-                    encoder = getattr(trans, "named_steps", {}).get("encoder") if hasattr(trans, "named_steps") else trans
+                    encoder = None
+                    if hasattr(trans, "named_steps"):
+                        for step_obj in trans.named_steps.values():
+                            if hasattr(step_obj, "categories_"):
+                                encoder = step_obj
+                                break
+                    elif hasattr(trans, "categories_"):
+                        encoder = trans
+
                     if encoder and hasattr(encoder, "categories_"):
                         for c, cats in zip(str_cols, encoder.categories_):
                             self.categories_map[c] = [str(x) for x in cats]
