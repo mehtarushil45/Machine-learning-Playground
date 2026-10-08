@@ -1,6 +1,6 @@
-"""Classroom, Course, Assignment, Submission, and Portfolio Pydantic Schemas.
+"""Classroom, Lab Exam, Code Deployment, and Evaluation Pydantic Schemas.
 
-Defines request payloads and response models for institutional learning workflows.
+Defines request payloads and response models for university ML practical lab exams.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.classroom import ClassroomRole, SubmissionStatus
 
 
-# ── Course Schemas ────────────────────────────────────────────────────────────
+# ── Course & Classroom Schemas ───────────────────────────────────────────────
 
 class CourseCreate(BaseModel):
     code: str = Field(..., examples=["CS401"], description="Course code identifier")
@@ -32,8 +32,6 @@ class CourseResponse(BaseModel):
     description: Optional[str] = None
     created_at: datetime
 
-
-# ── Classroom Schemas ─────────────────────────────────────────────────────────
 
 class ClassroomCreate(BaseModel):
     course_id: UUID = Field(..., description="Target Course UUID")
@@ -61,8 +59,6 @@ class ClassroomResponse(BaseModel):
     created_at: datetime
 
 
-# ── Assignment Schemas ────────────────────────────────────────────────────────
-
 class AssignmentCreate(BaseModel):
     classroom_id: UUID = Field(..., description="Target Classroom UUID")
     title: str = Field(..., examples=["Lab 3: Binary Classification"], description="Assignment title")
@@ -89,13 +85,13 @@ class AssignmentResponse(BaseModel):
     created_at: datetime
 
 
-# ── Submission & Review Schemas ───────────────────────────────────────────────
-
 class SubmissionCreate(BaseModel):
     assignment_id: UUID = Field(..., description="Target Assignment UUID")
     experiment_id: Optional[str] = Field(None, description="Submitted experiment UUID")
     model_id: Optional[str] = Field(None, description="Submitted model ID")
     pipeline_id: Optional[str] = Field(None, description="Submitted pipeline ID")
+    code_draft: Optional[str] = Field(None, description="Student code draft")
+    active_deployment_id: Optional[str] = Field(None, description="Student deployed model endpoint")
 
 
 class FeedbackCreate(BaseModel):
@@ -113,61 +109,105 @@ class SubmissionResponse(BaseModel):
     experiment_id: Optional[str] = None
     model_id: Optional[str] = None
     pipeline_id: Optional[str] = None
+    code_draft: Optional[str] = None
+    active_deployment_id: Optional[str] = None
+    version_count: int = 1
+    grade_score: Optional[float] = None
     status: SubmissionStatus
     submitted_at: datetime
     reproducibility_verified: bool
     metrics_summary: Optional[Dict[str, Any]] = None
 
 
-# ── Portfolio Schemas ─────────────────────────────────────────────────────────
+# ── University Lab Exam Schemas ──────────────────────────────────────────────
 
-class PortfolioProjectCreate(BaseModel):
-    submission_id: Optional[UUID] = Field(None, description="Approved submission UUID")
-    title: str = Field(..., examples=["Customer Churn Predictor"], description="Portfolio project title")
-    description: str = Field(..., description="Project abstract and findings")
-    model_id: Optional[str] = Field(None, description="Model ID")
-    experiment_id: Optional[str] = Field(None, description="Experiment ID")
-    is_public: bool = Field(True, description="Public shareable flag")
+class LabExamInfo(BaseModel):
+    """University Practical ML Lab Exam definition."""
+    id: str = Field(..., description="Exam identifier")
+    title: str = Field(..., description="Exam title")
+    course_code: str = Field("CS401", description="Course code")
+    duration_minutes: int = Field(90, description="Exam allotted time in minutes")
+    problem_type: str = Field("classification", description="Problem type (classification | regression)")
+    dataset_name: str = Field(..., description="Dataset file name")
+    dataset_id: str = Field(..., description="Dataset ID")
+    target_column: str = Field(..., description="Target column to predict")
+    feature_columns: List[str] = Field(default_factory=list, description="Expected feature columns")
+    description: str = Field(..., description="Detailed lab problem statement")
+    rubric: Dict[str, Any] = Field(default_factory=dict, description="Grading rubric thresholds")
+    starter_code: str = Field(..., description="Python starter code for student")
 
 
-class PortfolioProjectResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class LabExamSessionResponse(BaseModel):
+    """Active student exam session state."""
+    exam_id: str
+    student_id: str
+    active_deployment_id: Optional[str] = None
+    code_draft: Optional[str] = None
+    version_count: int = 1
+    status: str = "IN_PROGRESS"
+    grade_score: Optional[float] = None
+    submitted_at: Optional[str] = None
 
-    id: UUID
-    organisation_id: UUID
-    user_id: UUID
-    submission_id: Optional[UUID] = None
-    title: str
+
+class LabDeployRequest(BaseModel):
+    """Deploy / redeploy model from lab exam code execution."""
+    model_id: Optional[str] = Field(None, description="Registered model ID from code execution")
+    code: Optional[str] = Field(None, description="Current student Python code")
+    name: Optional[str] = Field(None, description="Deployment slot display name")
+
+
+class LabDeployResponse(BaseModel):
+    """Result of deploying or in-place updating a lab model."""
+    deployment_id: str
+    model_id: str
+    model_version: str
+    is_updated_in_place: bool
+    status: str
+    endpoint_path: str
+    sample_inputs: Dict[str, Any] = Field(default_factory=dict)
+    input_schema: Dict[str, Any] = Field(default_factory=dict)
+    metrics: Dict[str, float] = Field(default_factory=dict)
+    version_count: int = 1
+    logs: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class LabEvaluateRequest(BaseModel):
+    """Request automated grading evaluation against lab test rubric."""
+    deployment_id: str
+
+
+class RubricCriterionResult(BaseModel):
+    criterion: str
     description: str
-    model_id: Optional[str] = None
-    experiment_id: Optional[str] = None
-    is_public: bool
-    certificate_qr_code: Optional[str] = None
-    published_at: datetime
+    target: str
+    actual: str
+    passed: bool
+    points_awarded: float
+    max_points: float
 
 
-# ── Reproducibility Audit Schemas ─────────────────────────────────────────────
-
-class ReproducibilityAuditRequest(BaseModel):
-    submission_id: UUID = Field(..., description="Target Submission UUID")
-    tolerance: float = Field(0.005, ge=0.0, le=0.1, description="Allowed metric difference tolerance threshold")
-
-
-class MetricDifference(BaseModel):
-    metric_name: str = Field(..., description="Name of metric evaluated (e.g. 'accuracy', 'f1_score')")
-    claimed_value: float = Field(..., description="Learner's submitted metric value")
-    reproduced_value: float = Field(..., description="Re-executed worker metric value")
-    difference: float = Field(..., description="Absolute metric difference")
-    within_tolerance: bool = Field(..., description="True if difference <= tolerance")
+class LabEvaluateResponse(BaseModel):
+    """Automated benchmark test results."""
+    score: float
+    max_score: float
+    percentage: float
+    passed: bool
+    criteria_results: List[RubricCriterionResult]
+    summary: str
 
 
-class ReproducibilityReportResponse(BaseModel):
-    submission_id: UUID = Field(..., description="Submission UUID analyzed")
-    experiment_id: Optional[str] = Field(None, description="Experiment ID verified")
-    is_reproducible: bool = Field(..., description="True if all metrics re-executed within tolerance")
-    verification_status: str = Field(..., description="'VERIFIED_REPRODUCIBLE', 'METRIC_MISMATCH', or 'EXECUTION_FAILED'")
-    claimed_metrics: Dict[str, float] = Field(default_factory=dict, description="Learner's claimed metrics")
-    reproduced_metrics: Dict[str, float] = Field(default_factory=dict, description="Worker re-executed metrics")
-    metric_differences: List[MetricDifference] = Field(default_factory=list, description="Per-metric difference audit list")
-    audit_summary: str = Field(..., description="Summary explanation for faculty review")
-    verified_at: str = Field(..., description="Timestamp of verification execution")
+class LabSubmitRequest(BaseModel):
+    """Final submission of student lab exam."""
+    code: str
+    deployment_id: Optional[str] = None
+
+
+class LabSubmitResponse(BaseModel):
+    """Confirmation of locked exam submission."""
+    submission_id: str
+    status: str
+    grade_score: float
+    percentage: float
+    passed: bool
+    submitted_at: str
+    message: str

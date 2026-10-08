@@ -15,7 +15,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import type { ReactNode } from 'react';
 import type { Dataset } from '../types/dataset';
 import type { JobEntity } from '../types/job';
-import { apiClient } from '../services/apiClient';
+import { apiClient, ApiError } from '../services/apiClient';
 
 const STORAGE_KEY = 'ml_playground_project_state_v3';
 

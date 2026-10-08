@@ -26,10 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.blacklist import TokenBlacklistMiddleware
 from app.redis_client import close_redis, ping_redis
 
-from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, notifications, pipelines, portfolios, predictions, algorithms
+from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, notifications, pipelines, predictions, algorithms
 from app.routers import organizations, workspaces, users_v7a, api_keys, activity  # V7A
 from app.routers import admin  # V7B Part 1
-from app.routers import studio, explainability_v7b, portfolios_v7b, classrooms_v7b, workflow  # V7B Part 2
+from app.routers import studio, explainability_v7b, workflow  # V7B Part 2
 from app.routers import local_deployments  # Prototype 4: Local Deployments
 from app.routers import code_execution      # Code Studio: sandboxed execution
 
@@ -134,7 +134,6 @@ app.include_router(models.router, prefix=API_V1_PREFIX)  # V5A: Model Versioning
 app.include_router(experiments.router, prefix=API_V1_PREFIX)
 app.include_router(predictions.router, prefix=API_V1_PREFIX)
 app.include_router(classrooms.router, prefix=API_V1_PREFIX)
-app.include_router(portfolios.router, prefix=API_V1_PREFIX)
 app.include_router(pipelines.router, prefix=API_V1_PREFIX)
 app.include_router(explainability.router, prefix=API_V1_PREFIX)
 app.include_router(deployments.router, prefix=API_V1_PREFIX)
@@ -152,8 +151,6 @@ app.include_router(admin.router, prefix=API_V1_PREFIX)  # V7B Part 1
 # ── V7B Part 2: Enterprise Platform Completion ────────────────────────────────
 app.include_router(studio.router, prefix=API_V1_PREFIX)              # View-as-Code Studio
 app.include_router(explainability_v7b.router, prefix=API_V1_PREFIX)  # Ethics & Trust
-app.include_router(portfolios_v7b.router, prefix=API_V1_PREFIX)      # Portfolio+
-app.include_router(classrooms_v7b.router, prefix=API_V1_PREFIX)      # Classroom Analytics
 app.include_router(workflow.router, prefix=API_V1_PREFIX)             # E2E Workflow
 
 # ── Prototype 4: Local Deployments ───────────────────────────────────────────

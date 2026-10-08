@@ -18,7 +18,6 @@ from app.models.classroom import (  # noqa: F401
     ClassroomRole,
     Course,
     Feedback,
-    PortfolioProject,
     Submission,
     SubmissionStatus,
 )

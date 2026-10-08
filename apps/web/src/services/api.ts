@@ -188,36 +188,108 @@ export const ExplainabilityService = {
 // ---------------------------------------------------------------------------
 // 3. Classroom & Automated Reproducibility Audit API
 // ---------------------------------------------------------------------------
+// 3. University Lab Exam & Classroom Service
+// ---------------------------------------------------------------------------
 
-export interface MetricDifference {
-  metric_name: string;
-  claimed_value: number;
-  reproduced_value: number;
-  difference: number;
-  within_tolerance: boolean;
+export interface LabExamInfo {
+  id: string;
+  title: string;
+  course_code: string;
+  duration_minutes: number;
+  problem_type: string;
+  dataset_name: string;
+  dataset_id: string;
+  target_column: string;
+  feature_columns: string[];
+  description: string;
+  rubric: {
+    min_accuracy?: number;
+    min_f1?: number;
+    min_r2?: number;
+    max_latency_ms?: number;
+    max_score?: number;
+  };
+  starter_code: string;
 }
 
-export interface ReproducibilityReportResponse {
+export interface LabExamSession {
+  exam_id: string;
+  student_id: string;
+  active_deployment_id?: string | null;
+  code_draft?: string | null;
+  version_count: number;
+  status: string;
+  grade_score?: number | null;
+  submitted_at?: string | null;
+}
+
+export interface LabDeployResponse {
+  deployment_id: string;
+  model_id: string;
+  model_version: string;
+  is_updated_in_place: boolean;
+  status: string;
+  endpoint_path: string;
+  sample_inputs: Record<string, any>;
+  input_schema: Record<string, any>;
+  metrics: Record<string, number>;
+  version_count: number;
+  logs: Array<{ ts: string; msg: string; event: string; severity?: string }>;
+}
+
+export interface RubricCriterionResult {
+  criterion: string;
+  description: string;
+  target: string;
+  actual: string;
+  passed: boolean;
+  points_awarded: number;
+  max_points: number;
+}
+
+export interface LabEvaluateResponse {
+  score: number;
+  max_score: number;
+  percentage: number;
+  passed: boolean;
+  criteria_results: RubricCriterionResult[];
+  summary: string;
+}
+
+export interface LabSubmitResponse {
   submission_id: string;
-  experiment_id?: string;
-  is_reproducible: boolean;
-  verification_status: string;
-  claimed_metrics: Record<string, number>;
-  reproduced_metrics: Record<string, number>;
-  metric_differences: MetricDifference[];
-  audit_summary: string;
-  verified_at: string;
+  status: string;
+  grade_score: number;
+  percentage: number;
+  passed: boolean;
+  submitted_at: string;
+  message: string;
 }
 
 export const ClassroomService = {
-  verifyReproducibility: (submissionId: string, tolerance = 0.005) =>
-    request<ReproducibilityReportResponse>(`/classrooms/submissions/${submissionId}/verify-reproducibility`, {
+  listExams: () => request<LabExamInfo[]>('/classrooms/exams'),
+
+  getExam: (examId: string) => request<LabExamInfo>(`/classrooms/exams/${examId}`),
+
+  getSession: (examId: string) => request<LabExamSession>(`/classrooms/exams/${examId}/session`),
+
+  deployModel: (examId: string, modelId?: string, code?: string) =>
+    request<LabDeployResponse>(`/classrooms/exams/${examId}/deploy`, {
       method: 'POST',
-      body: JSON.stringify({ submission_id: submissionId, tolerance }),
+      body: JSON.stringify({ model_id: modelId, code }),
     }),
 
-  getReproducibilityReport: (submissionId: string) =>
-    request<ReproducibilityReportResponse>(`/classrooms/submissions/${submissionId}/reproducibility-report`),
+  evaluateModel: (examId: string, deploymentId: string) =>
+    request<LabEvaluateResponse>(`/classrooms/exams/${examId}/evaluate`, {
+      method: 'POST',
+      body: JSON.stringify({ deployment_id: deploymentId }),
+    }),
+
+  submitExam: (examId: string, code: string, deploymentId?: string) =>
+    request<LabSubmitResponse>(`/classrooms/exams/${examId}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ code, deployment_id: deploymentId }),
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -273,48 +345,6 @@ export const DeploymentService = {
     request<DeploymentResponse>(`/deployments/${deploymentId}/status?new_status=${newStatus}`, {
       method: 'PATCH',
     }),
-};
-
-// ---------------------------------------------------------------------------
-// 5. Portfolio & Cryptographic Certificate API
-// ---------------------------------------------------------------------------
-
-export interface PortfolioProjectResponse {
-  id: string;
-  organisation_id: string;
-  user_id: string;
-  submission_id?: string;
-  title: string;
-  description: string;
-  model_id?: string;
-  experiment_id?: string;
-  is_public: boolean;
-  certificate_qr_code?: string;
-  published_at: string;
-}
-
-export interface CertificateVerificationResponse {
-  verified: boolean;
-  verification_status: string;
-  certificate_id: string;
-  title: string;
-  learner_id: string;
-  published_at: string;
-  issuer: string;
-  signature: string;
-  qr_code_url: string;
-}
-
-export const PortfolioService = {
-  publishProject: (title: string, description: string, modelId?: string, experimentId?: string) =>
-    request<PortfolioProjectResponse>('/portfolios', {
-      method: 'POST',
-      body: JSON.stringify({ title, description, model_id: modelId, experiment_id: experimentId, is_public: true }),
-    }),
-
-  getUserPortfolio: (userId: string) => request<PortfolioProjectResponse[]>(`/portfolios/user/${userId}`),
-
-  verifyCertificate: (projectId: string) => request<CertificateVerificationResponse>(`/portfolios/verify/${projectId}`),
 };
 
 // ---------------------------------------------------------------------------

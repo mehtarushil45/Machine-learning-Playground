@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 import {
@@ -9,6 +9,7 @@ import {
   Rocket,
   Search,
   FolderOpen,
+  GraduationCap,
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider } from './providers/AuthContext';
@@ -19,12 +20,14 @@ import { ProjectGatekeeper } from './features/datasets/ProjectGatekeeper';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { DeploymentsHub } from './features/deployments/DeploymentsHub';
+import { ClassroomHub } from './features/classrooms/ClassroomHub';
 
 export type PlatformTab =
   | 'workspace'
   | 'code-studio'
   | 'training-results'
-  | 'deployments';
+  | 'deployments'
+  | 'classroom';
 
 export interface ToastMessage {
   id: string;
@@ -52,12 +55,37 @@ const BB = {
 function AppContent() {
   const { setLifecycleStage, isProjectInitialized, dataset, activeExperimentFile, resetProject } = useProject();
 
-  const [activeTab, setActiveTab] = useState<PlatformTab>('workspace');
+  const [activeTab, setActiveTab] = useState<PlatformTab>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (hash === 'classroom' || window.location.pathname.includes('classroom')) {
+        return 'classroom';
+      }
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam === 'classroom') return 'classroom';
+    }
+    return 'workspace';
+  });
   const [activeDeploymentId, setActiveDeploymentId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [hoveredNav, setHoveredNav] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (hash === 'classroom') {
+        setActiveTab('classroom');
+      } else if (hash === 'workspace' || hash === 'code-studio' || hash === 'training-results' || hash === 'deployments') {
+        setActiveTab(hash as PlatformTab);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const showToast = useCallback((
     title: string,
@@ -80,6 +108,9 @@ function AppContent() {
 
   const handleNavigate = (tab: PlatformTab, deploymentId?: string) => {
     setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      window.location.hash = tab === 'workspace' ? '' : `#${tab}`;
+    }
     if (deploymentId) {
       setActiveDeploymentId(deploymentId);
     }
@@ -98,6 +129,7 @@ function AppContent() {
     { id: 'code-studio',      label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />     },
     { id: 'training-results', label: 'Training & Experiments',    icon: <BarChart2 className="w-5 h-5" /> },
     { id: 'deployments',      label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />    },
+    { id: 'classroom',        label: 'Classroom (Lab Exam)',      icon: <GraduationCap className="w-5 h-5" /> },
   ];
 
   return (
@@ -166,78 +198,115 @@ function AppContent() {
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             const isHovered = hoveredNav === item.id;
+            const isClassroom = item.id === 'classroom';
 
             return (
-              <div
-                key={item.id}
-                style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}
-                onMouseEnter={() => setHoveredNav(item.id)}
-                onMouseLeave={() => setHoveredNav(null)}
-              >
-                <button
-                  onClick={() => handleNavigate(item.id as PlatformTab)}
-                  style={{
-                    width: 40,
-                    height: 40,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 8,
-                    background: isActive
-                      ? 'rgba(107,92,166,0.18)'
-                      : isHovered
-                      ? 'rgba(107,92,166,0.10)'
-                      : 'transparent',
-                    border: `1px solid ${isActive ? BB.primaryLight : 'transparent'}`,
-                    color: isActive ? BB.text : isHovered ? BB.text : BB.muted,
-                    cursor: 'pointer',
-                    transition: 'all 150ms ease',
-                    position: 'relative',
-                  }}
+              <React.Fragment key={item.id}>
+                {isClassroom && (
+                  <div
+                    style={{
+                      width: 24,
+                      height: 1,
+                      backgroundColor: 'rgba(107,92,166,0.3)',
+                      margin: '4px 0',
+                    }}
+                  />
+                )}
+                <div
+                  style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}
+                  onMouseEnter={() => setHoveredNav(item.id)}
+                  onMouseLeave={() => setHoveredNav(null)}
                 >
-                  {/* Left maroon active indicator bar */}
-                  {isActive && (
+                  <button
+                    onClick={() => handleNavigate(item.id as PlatformTab)}
+                    title={item.label}
+                    style={{
+                      width: 40,
+                      height: 40,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 8,
+                      background: isActive
+                        ? isClassroom
+                          ? 'rgba(0,212,255,0.18)'
+                          : 'rgba(107,92,166,0.18)'
+                        : isHovered
+                        ? isClassroom
+                          ? 'rgba(0,212,255,0.12)'
+                          : 'rgba(107,92,166,0.10)'
+                        : isClassroom
+                        ? 'rgba(0,212,255,0.06)'
+                        : 'transparent',
+                      border: `1px solid ${
+                        isActive
+                          ? isClassroom
+                            ? '#00D4FF'
+                            : BB.primaryLight
+                          : isClassroom
+                          ? 'rgba(0,212,255,0.25)'
+                          : 'transparent'
+                      }`,
+                      color: isActive
+                        ? isClassroom
+                          ? '#00D4FF'
+                          : BB.text
+                        : isHovered
+                        ? isClassroom
+                          ? '#00D4FF'
+                          : BB.text
+                        : isClassroom
+                        ? '#00D4FF'
+                        : BB.muted,
+                      cursor: 'pointer',
+                      transition: 'all 150ms ease',
+                      position: 'relative',
+                    }}
+                  >
+                    {/* Left active indicator bar */}
+                    {isActive && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: -8,
+                          top: 8,
+                          bottom: 8,
+                          width: 3,
+                          borderRadius: '0 3px 3px 0',
+                          background: isClassroom ? '#00D4FF' : BB.maroon,
+                        }}
+                      />
+                    )}
+                    {item.icon}
+                  </button>
+
+                  {/* White font hover tooltip (A3) */}
+                  {isHovered && (
                     <div
                       style={{
                         position: 'absolute',
-                        left: -8,
-                        top: 8,
-                        bottom: 8,
-                        width: 3,
-                        borderRadius: '0 3px 3px 0',
-                        background: BB.maroon,
+                        left: 54,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        backgroundColor: '#1B1530',
+                        color: '#FFFFFF',
+                        fontSize: 11,
+                        fontWeight: 500,
+                        padding: '5px 10px',
+                        borderRadius: 6,
+                        border: '1px solid rgba(107,92,166,0.35)',
+                        boxShadow: '0 6px 16px rgba(0,0,0,0.5)',
+                        whiteSpace: 'nowrap',
+                        pointerEvents: 'none',
+                        zIndex: 9999,
+                        letterSpacing: '0.02em',
                       }}
-                    />
+                    >
+                      {item.label}
+                    </div>
                   )}
-                  {item.icon}
-                </button>
-
-                {/* White font hover tooltip (A3) */}
-                {isHovered && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: 54,
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      backgroundColor: '#1B1530',
-                      color: '#FFFFFF',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      padding: '5px 10px',
-                      borderRadius: 6,
-                      border: '1px solid rgba(107,92,166,0.35)',
-                      boxShadow: '0 6px 16px rgba(0,0,0,0.5)',
-                      whiteSpace: 'nowrap',
-                      pointerEvents: 'none',
-                      zIndex: 9999,
-                      letterSpacing: '0.02em',
-                    }}
-                  >
-                    {item.label}
-                  </div>
-                )}
-              </div>
+                </div>
+              </React.Fragment>
             );
           })}
         </nav>
@@ -271,9 +340,29 @@ function AppContent() {
             gap: 16,
           }}
         >
-          {/* Header left: dataset + experiment context pill (shown when project initialized) */}
+          {/* Header left: dataset + experiment context pill (shown when project initialized or classroom) */}
           <div style={{ width: 220, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {isProjectInitialized && dataset && (
+            {activeTab === 'classroom' ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  background: 'rgba(0, 212, 255, 0.1)',
+                  border: '1px solid rgba(0, 212, 255, 0.3)',
+                  maxWidth: 200,
+                  overflow: 'hidden',
+                }}
+                title="Active Page: University Lab Exam Environment"
+              >
+                <GraduationCap style={{ width: 14, height: 14, color: '#00D4FF', flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#00D4FF', whiteSpace: 'nowrap' }}>
+                  University Lab Exam
+                </span>
+              </div>
+            ) : isProjectInitialized && dataset ? (
               <>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -303,7 +392,7 @@ function AppContent() {
                   New Project
                 </button>
               </>
-            )}
+            ) : null}
           </div>
 
           {/* Header Center: C3 Global Search Bar */}
@@ -425,7 +514,13 @@ function AppContent() {
                Once initializeProject() is called, isProjectInitialized becomes
                true and we drop through to the studio pages below.
           ─────────────────────────────────────────────────────────────────── */}
-          {!isProjectInitialized ? (
+          {activeTab === 'classroom' ? (
+            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '16px 20px', width: '100%' }}>
+              <ErrorBoundary key="classroom" onReset={() => handleNavigate('classroom')}>
+                <ClassroomHub onShowToast={showToast} />
+              </ErrorBoundary>
+            </div>
+          ) : !isProjectInitialized ? (
             <ProjectGatekeeper />
           ) : (
             <>

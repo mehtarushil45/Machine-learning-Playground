@@ -39,6 +39,7 @@ import {
   startRecommendation,
 } from '../../services/recommendationService';
 import { ApiError } from '../../services/apiClient';
+import { useProject } from '../../providers/ProjectContext';
 
 /* ── BB Brand Tokens ─────────────────────────────────────────────────── */
 const BB = {
@@ -86,6 +87,7 @@ export function AlgorithmRecommendationPanel({
   onShowToast,
   onRecommendationChange,
 }: AlgorithmRecommendationPanelProps) {
+  const { resetProject } = useProject();
   /* ── Recommendation Job State ────────────────────────────────────── */
   const [activeJob, setActiveJob] = useState<RecommendationJobDetail | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

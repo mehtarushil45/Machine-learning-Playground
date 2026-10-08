@@ -133,9 +133,13 @@ class Submission(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     reproducibility_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     metrics_summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
+    code_draft: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    active_deployment_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    version_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    grade_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
     assignment: Mapped["Assignment"] = relationship(back_populates="submissions")
     feedbacks: Mapped[List["Feedback"]] = relationship(back_populates="submission", cascade="all, delete-orphan")
-    portfolio_project: Mapped[Optional["PortfolioProject"]] = relationship(back_populates="submission")
 
 
 class Feedback(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
@@ -154,28 +158,3 @@ class Feedback(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     )
 
     submission: Mapped["Submission"] = relationship(back_populates="feedbacks")
-
-
-class PortfolioProject(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
-    __tablename__ = "portfolio_projects"
-
-    organisation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    submission_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("submissions.id", ondelete="SET NULL"), nullable=True, unique=True
-    )
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    model_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    experiment_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    is_public: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    certificate_qr_code: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    published_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
-    )
-
-    submission: Mapped[Optional["Submission"]] = relationship(back_populates="portfolio_project")
