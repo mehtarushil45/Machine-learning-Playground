@@ -71,26 +71,34 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
   });
 
   const waitForExamLoaded = async () => {
-    return screen.findByRole('heading', { level: 1, name: /Lab Exam 1: Customer Churn Classification Pipeline/i });
+    return screen.findByText('lab_exam.py');
   };
 
-  it('renders lab exam header, course code, and timer', async () => {
+  it('renders lab workspace, code studio controls, and exam selector', async () => {
     render(<ClassroomHub />);
 
     await waitForExamLoaded();
-    expect(screen.getByText('CS401 - Machine Learning Lab')).toBeInTheDocument();
-    expect(screen.getByText('LIVE LAB EXAM IN PROGRESS')).toBeInTheDocument();
+    expect(screen.getByText('lab_exam.py')).toBeInTheDocument();
+    expect(screen.getByText('Python 3.14 (Scikit-Learn)')).toBeInTheDocument();
+    expect(screen.getByText('Run Code')).toBeInTheDocument();
+    expect(screen.getByText('Deploy to Lab Slot')).toBeInTheDocument();
+    expect(screen.getByText('Submit Exam')).toBeInTheDocument();
   });
 
-  it('allows switching between exams and updating title', async () => {
+  it('allows switching between exams in the selector', async () => {
     render(<ClassroomHub />);
 
     await waitForExamLoaded();
 
-    const select = screen.getByRole('combobox');
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('lab-exam-01');
+
     fireEvent.change(select, { target: { value: 'lab-exam-02' } });
 
-    expect(await screen.findByRole('heading', { level: 1, name: /Lab Exam 2: Real Estate Price Regression/i })).toBeInTheDocument();
+    expect(select.value).toBe('lab-exam-02');
+    await waitFor(() => {
+      expect(screen.getByText(/Switched to Lab Exam 2/i)).toBeInTheDocument();
+    });
   });
 
   it('handles in-place singleton deployment update with zero duplicates', async () => {
@@ -220,8 +228,8 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
     render(<ClassroomHub />);
     await waitForExamLoaded();
 
-    // Click Final Submit Exam in header
-    fireEvent.click(screen.getByText('Submit Final Exam'));
+    // Click Submit Exam in toolbar
+    fireEvent.click(screen.getByText('Submit Exam'));
 
     // Modal appears
     expect(screen.getByText('Finalize & Submit Lab Exam')).toBeInTheDocument();
@@ -231,7 +239,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
 
     await waitFor(() => {
       expect(screen.getByText('Score: 95/100')).toBeInTheDocument();
-      expect(screen.getByText('EXAM SUBMITTED (LOCKED)')).toBeInTheDocument();
+      expect(screen.getByText(/Receipt: sub-lab-888/i)).toBeInTheDocument();
     });
   });
 });

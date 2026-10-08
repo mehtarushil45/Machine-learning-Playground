@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  GraduationCap,
   Play,
   Rocket,
   CheckCircle2,
   AlertTriangle,
-  Clock,
   Terminal,
   FileCode,
   RotateCcw,
@@ -14,7 +12,6 @@ import {
   Award,
   Layers,
   ChevronDown,
-  Info,
   Cpu,
   Zap,
 } from 'lucide-react';
@@ -82,12 +79,10 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationResult, setEvaluationResult] = useState<LabEvaluateResponse | null>(null);
 
-  // Exam Submission & Timer
+  // Exam Submission
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionReceipt, setSubmissionReceipt] = useState<LabSubmitResponse | null>(null);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
-  const [showInstructions, setShowInstructions] = useState(false);
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(90 * 60); // 90 min timer
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -106,7 +101,6 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
             setActiveExam(initial);
             setSelectedExamId(initial.id);
             setCode(initial.starter_code);
-            setSecondsRemaining((initial.duration_minutes || 90) * 60);
           }
         }
       } catch (err: any) {
@@ -133,26 +127,6 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
     setPredictionResult(null);
     setSubmissionReceipt(null);
     setOutputLines([`[System] Switched to ${target.title}. Starter code loaded.`]);
-    setSecondsRemaining((target.duration_minutes || 90) * 60);
-  };
-
-  // 3. Countdown Timer
-  useEffect(() => {
-    if (submissionReceipt) return; // Freeze timer once submitted
-    if (typeof window !== 'undefined' && ((window as any).VITEST || process.env.NODE_ENV === 'test')) {
-      return;
-    }
-    const interval = setInterval(() => {
-      setSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [submissionReceipt]);
-
-  const formatTimer = (totalSec: number) => {
-    const hrs = Math.floor(totalSec / 3600);
-    const mins = Math.floor((totalSec % 3600) / 60);
-    const secs = totalSec % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   // 4. Auto-scroll terminal
@@ -362,161 +336,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
   }
 
   return (
-    <div className="space-y-6">
-      {/* ── 1. Top Lab Exam Header & Timer Bar ────────────────────────────── */}
-      <div
-        className="rounded-2xl p-5 border relative overflow-hidden backdrop-blur-xl"
-        style={{
-          background: 'linear-gradient(135deg, rgba(21, 16, 38, 0.95) 0%, rgba(36, 27, 66, 0.95) 100%)',
-          borderColor: BB.border,
-        }}
-      >
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3.5">
-            <div
-              className="p-3 rounded-xl border flex items-center justify-center"
-              style={{
-                background: 'rgba(75, 59, 124, 0.25)',
-                borderColor: 'rgba(124, 107, 174, 0.4)',
-                boxShadow: '0 0 20px rgba(0, 212, 255, 0.15)',
-              }}
-            >
-              <GraduationCap className="w-7 h-7 text-[#00D4FF]" />
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-[#4B3B7C]/40 text-[#00D4FF] border border-[#7C6BAE]/30">
-                  {activeExam?.course_code || 'CS401'}
-                </span>
-                <span className="text-[10px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-[#00F5A0]/10 text-[#00F5A0] border border-[#00F5A0]/20">
-                  {submissionReceipt ? 'EXAM SUBMITTED (LOCKED)' : 'LIVE LAB EXAM IN PROGRESS'}
-                </span>
-              </div>
-              <h1 className="text-xl font-bold text-[#F5F1EC] mt-1 flex items-center gap-2">
-                {activeExam?.title}
-              </h1>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* Exam Selector */}
-            <div className="relative">
-              <select
-                value={selectedExamId}
-                onChange={(e) => handleSelectExam(e.target.value)}
-                disabled={Boolean(submissionReceipt)}
-                className="px-3 py-2 pr-8 rounded-xl text-xs font-semibold bg-[#1C1534] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] focus:outline-none appearance-none cursor-pointer"
-              >
-                {exams.map((ex) => (
-                  <option key={ex.id} value={ex.id} className="bg-[#151026]">
-                    {ex.title}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="w-4 h-4 text-[#9E93B8] absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            </div>
-
-            {/* Countdown Clock */}
-            <div
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-mono font-bold"
-              style={{
-                background: secondsRemaining < 600 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(0, 212, 255, 0.08)',
-                borderColor: secondsRemaining < 600 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(0, 212, 255, 0.25)',
-                color: secondsRemaining < 600 ? '#EF4444' : '#00D4FF',
-              }}
-            >
-              <Clock className="w-4 h-4 animate-pulse" />
-              <span>{formatTimer(secondsRemaining)}</span>
-            </div>
-
-            {/* Instructions toggle */}
-            <button
-              onClick={() => setShowInstructions(!showInstructions)}
-              className="px-3 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition-colors"
-              style={{
-                background: showInstructions ? 'rgba(124, 107, 174, 0.3)' : 'rgba(27, 21, 48, 0.6)',
-                borderColor: BB.border,
-                color: BB.text,
-              }}
-            >
-              <Info className="w-4 h-4 text-[#00D4FF]" />
-              <span>Rubric & Specs</span>
-            </button>
-
-            {/* Final Submit Button */}
-            {!submissionReceipt ? (
-              <button
-                onClick={() => setShowConfirmSubmit(true)}
-                className="px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-lg flex items-center gap-1.5"
-                style={{
-                  background: 'linear-gradient(135deg, #00D4FF 0%, #0099FF 100%)',
-                  color: '#0B0912',
-                }}
-              >
-                <Award className="w-4 h-4" />
-                <span>Submit Final Exam</span>
-              </button>
-            ) : (
-              <div className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#00F5A0]/20 text-[#00F5A0] border border-[#00F5A0]/40 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Score: {submissionReceipt.grade_score}/100</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Problem Specifications Dropdown / Banner */}
-        <AnimatePresence>
-          {showInstructions && activeExam && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="mt-4 pt-4 border-t border-[rgba(107,92,166,0.2)] text-xs text-[#9E93B8] space-y-3"
-            >
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-3 rounded-xl bg-[#1C1534] border border-[rgba(107,92,166,0.2)]">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#00D4FF] block mb-1">
-                    Problem Objective
-                  </span>
-                  <p className="text-[#F5F1EC] text-[11px] leading-relaxed">{activeExam.description}</p>
-                </div>
-                <div className="p-3 rounded-xl bg-[#1C1534] border border-[rgba(107,92,166,0.2)]">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#00F5A0] block mb-1">
-                    Target & Features
-                  </span>
-                  <div className="text-[11px] text-[#F5F1EC]">
-                    <div><strong>Target Column:</strong> <span className="font-mono text-[#00D4FF]">{activeExam.target_column}</span></div>
-                    <div><strong>Lab Dataset:</strong> <span className="font-mono text-slate-300">{activeExam.dataset_name}</span></div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {activeExam.feature_columns.map((fc) => (
-                        <span key={fc} className="px-1.5 py-0.5 rounded bg-[#2A2247] text-[10px] text-slate-300 font-mono">
-                          {fc}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <div className="p-3 rounded-xl bg-[#1C1534] border border-[rgba(107,92,166,0.2)]">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-[#C9A24B] block mb-1">
-                    Grading Rubric
-                  </span>
-                  <ul className="text-[11px] text-[#F5F1EC] space-y-1">
-                    <li>• Serving Endpoint Health: <strong>15 pts</strong></li>
-                    <li>• Feature Preprocessing & Schema: <strong>20 pts</strong></li>
-                    <li>• Latency Benchmark (&lt; {activeExam.rubric.max_latency_ms || 100}ms): <strong>30 pts</strong></li>
-                    <li>• Performance Metric Threshold: <strong>35 pts</strong></li>
-                  </ul>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* ── 2. Main Lab Workspace: Left (Editor + Terminal) & Right (Deployment + Grading) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+    <div className="space-y-4">
+      {/* ── Main Lab Workspace: Left (Editor + Terminal) & Right (Deployment + Grading) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Left 7 Columns: Manual Code Studio & Terminal Output */}
         <div className="lg:col-span-7 space-y-4">
           <div
@@ -527,16 +349,35 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
             }}
           >
             {/* Editor Action Toolbar */}
-            <div className="px-4 py-3 border-b border-[rgba(107,92,166,0.2)] flex items-center justify-between flex-wrap gap-2 bg-[#100C1E]">
-              <div className="flex items-center gap-2">
-                <FileCode className="w-4 h-4 text-[#00D4FF]" />
-                <span className="text-xs font-mono font-bold text-[#F5F1EC]">lab_exam.py</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#4B3B7C]/30 text-[#9E93B8] font-mono">
-                  Python 3.14 (Scikit-Learn)
-                </span>
+            <div className="px-4 py-2.5 border-b border-[rgba(107,92,166,0.2)] flex items-center justify-between flex-wrap gap-2 bg-[#100C1E]">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <FileCode className="w-4 h-4 text-[#00D4FF]" />
+                  <span className="text-xs font-mono font-bold text-[#F5F1EC]">lab_exam.py</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#4B3B7C]/30 text-[#9E93B8] font-mono">
+                    Python 3.14 (Scikit-Learn)
+                  </span>
+                </div>
+
+                {/* Compact Exam Selector Dropdown */}
+                <div className="relative">
+                  <select
+                    value={selectedExamId}
+                    onChange={(e) => handleSelectExam(e.target.value)}
+                    disabled={Boolean(submissionReceipt)}
+                    className="px-2.5 py-1 pr-7 rounded-lg text-xs font-semibold bg-[#1C1534] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] focus:outline-none appearance-none cursor-pointer"
+                  >
+                    {exams.map((ex) => (
+                      <option key={ex.id} value={ex.id} className="bg-[#151026]">
+                        {ex.title}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-[#9E93B8] absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   onClick={() => {
                     if (activeExam) setCode(activeExam.starter_code);
@@ -599,11 +440,32 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
                     </>
                   )}
                 </button>
+
+                {/* Final Submit Exam Button */}
+                {!submissionReceipt ? (
+                  <button
+                    onClick={() => setShowConfirmSubmit(true)}
+                    className="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
+                    style={{
+                      background: 'linear-gradient(135deg, #00D4FF 0%, #0099FF 100%)',
+                      color: '#0B0912',
+                    }}
+                    title="Lock and submit final exam"
+                  >
+                    <Award className="w-3.5 h-3.5" />
+                    <span>Submit Exam</span>
+                  </button>
+                ) : (
+                  <div className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#00F5A0]/20 text-[#00F5A0] border border-[#00F5A0]/40 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Score: {submissionReceipt.grade_score}/100</span>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Monaco Python Editor Component */}
-            <div className="h-[460px] relative">
+            <div className="h-[560px] xl:h-[600px] relative">
               <MonacoCodeStudioEditor
                 code={code}
                 onChange={(newVal) => setCode(newVal)}
