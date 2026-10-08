@@ -276,7 +276,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
         ]);
       }
     } catch (err: any) {
-      onShowToast?.('Deployment Failed', err.message || 'Could not instantiate serving slot.', 'error');
+      const errMsg = err.message || 'Could not instantiate serving slot.';
+      onShowToast?.('Deployment Failed', errMsg, 'error');
+      setOutputLines((prev) => [
+        ...prev,
+        `[Deployment Error] ${errMsg}`,
+      ]);
     } finally {
       setIsDeploying(false);
     }
@@ -328,9 +333,20 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
       const receipt = await ClassroomService.submitExam(selectedExamId, code, deployment?.deployment_id);
       setSubmissionReceipt(receipt);
       setShowConfirmSubmit(false);
+      setOutputLines((prev) => [
+        ...prev,
+        '─────────────────────────────────────────────────────────────',
+        `[Submission Recorded] Receipt: ${receipt.submission_id} | Final Grade: ${receipt.grade_score}/100`,
+        `[Status] ${receipt.status} (${receipt.passed ? 'PASSED' : 'COMPLETED'})`,
+      ]);
       onShowToast?.('Lab Exam Submitted!', 'Your code and final model have been officially recorded.', 'success');
     } catch (err: any) {
-      onShowToast?.('Submission Error', err.message, 'error');
+      const errMsg = err.message || 'Submission failed.';
+      onShowToast?.('Submission Error', errMsg, 'error');
+      setOutputLines((prev) => [
+        ...prev,
+        `[Submission Error] ${errMsg}`,
+      ]);
     } finally {
       setIsSubmitting(false);
     }

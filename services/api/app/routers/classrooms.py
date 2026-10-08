@@ -303,25 +303,77 @@ async def deploy_lab_model(
     student_id = str(current_user.id) if current_user else "guest-student"
     session_key = f"{student_id}:{exam_id}"
 
+    session_data = _STUDENT_LAB_SESSIONS.get(session_key, {})
+
     # 1. Resolve Model ID
     target_model_id = payload.model_id
+    from app.ml.model_registry import list_versions, get_latest_model, get_model_by_id
+
+    # If model_id was not explicitly passed, compile/train student code or find registered model
     if not target_model_id:
-        from app.ml.model_registry import _MODELS
-        # Look for most recent model matching code-studio or exec pattern
-        matching = [
-            m_id for m_id in reversed(list(_MODELS.keys()))
-            if "exec" in m_id or "model" in m_id
-        ]
-        if matching:
-            target_model_id = matching[0]
-        else:
+        code_to_run = (payload.code or session_data.get("code_draft") or "").strip()
+        if code_to_run:
+            from app.services.code_execution_service import start_execution
+            try:
+                rec = await start_execution(
+                    code=code_to_run,
+                    dataset_id=exam.get("dataset_id"),
+                    filename="lab_exam.py",
+                    prefer_celery=False,
+                )
+                waited = 0.0
+                while rec.status in ("queued", "running") and waited < 25.0:
+                    await asyncio.sleep(0.2)
+                    waited += 0.2
+                if rec.status == "completed" and rec.registered_model_id:
+                    target_model_id = rec.registered_model_id
+                    logger.info("Lab Exam [%s]: Compiled and registered model %s from student code.", exam_id, target_model_id)
+                elif rec.status == "failed":
+                    err_msg = rec.error or rec.stderr or "Code execution failed."
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Code training execution failed: {err_msg}",
+                    )
+            except HTTPException:
+                raise
+            except Exception as train_exc:
+                logger.warning("Code compilation error during lab deploy: %s", train_exc)
+
+        # Fallback to latest registered model
+        if not target_model_id:
+            latest = get_latest_model()
+            if latest and latest.get("model_id"):
+                target_model_id = latest["model_id"]
+            else:
+                versions = list_versions()
+                if versions:
+                    target_model_id = versions[0].get("model_id")
+
+        # Fallback to training the starter code as baseline
+        if not target_model_id:
+            starter = exam.get("starter_code", "").strip()
+            if starter:
+                from app.services.code_execution_service import start_execution
+                rec = await start_execution(
+                    code=starter,
+                    dataset_id=exam.get("dataset_id"),
+                    filename="lab_exam.py",
+                    prefer_celery=False,
+                )
+                waited = 0.0
+                while rec.status in ("queued", "running") and waited < 25.0:
+                    await asyncio.sleep(0.2)
+                    waited += 0.2
+                if rec.registered_model_id:
+                    target_model_id = rec.registered_model_id
+
+        if not target_model_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No registered model found. Please run your Python script first and verify it exports 'trained_model_pipeline.joblib'.",
+                detail="No registered model could be created. Please verify your Python code and ensure it exports 'trained_model_pipeline.joblib'.",
             )
 
     # 2. Check for Existing Deployment Slot (Singleton Logic)
-    session_data = _STUDENT_LAB_SESSIONS.get(session_key, {})
     existing_dep_id = session_data.get("active_deployment_id")
     is_updated_in_place = False
     dep_response = None
@@ -534,7 +586,8 @@ async def submit_lab_exam(
     session_data = _STUDENT_LAB_SESSIONS.get(session_key, {})
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    final_score = session_data.get("grade_score", 85.0)
+    raw_score = session_data.get("grade_score")
+    final_score: float = float(raw_score) if raw_score is not None else 85.0
 
     # Record completed session
     sub_id = f"sub-lab-{uuid.uuid4().hex[:8]}"
