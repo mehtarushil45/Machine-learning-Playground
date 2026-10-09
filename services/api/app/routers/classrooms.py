@@ -132,6 +132,7 @@ CURATED_LAB_EXAMS: Dict[str, Dict[str, Any]] = {
         "target_column": "churn",
         "feature_columns": ["tenure", "monthly_charges", "total_charges", "contract", "tech_support"],
         "copilot_policy": "explain-only",  # off | explain-only | full
+        "learning_aids_enabled": True,  # Instructors can toggle learning aids off
         "open_time": None,
         "close_time": None,
         "protected_regions": [
@@ -208,6 +209,7 @@ CURATED_LAB_EXAMS: Dict[str, Dict[str, Any]] = {
         "target_column": "target",
         "feature_columns": ["feature1", "feature2", "category"],
         "copilot_policy": "full",
+        "learning_aids_enabled": True,
         "open_time": None,
         "close_time": None,
         "protected_regions": [

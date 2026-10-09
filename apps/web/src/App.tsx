@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 import {
@@ -21,6 +21,12 @@ import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { DeploymentsHub } from './features/deployments/DeploymentsHub';
 import { ClassroomHub } from './features/classrooms/ClassroomHub';
+import {
+  LearningProvider,
+  LearningModeToggle,
+  LessonGuideDrawer,
+  type LearningProjectState,
+} from './features/learning';
 
 export type PlatformTab =
   | 'workspace'
@@ -53,7 +59,21 @@ const BB = {
 } as const;
 
 function AppContent() {
-  const { setLifecycleStage, isProjectInitialized, dataset, activeExperimentFile, resetProject } = useProject();
+  const project = useProject();
+  const { setLifecycleStage, isProjectInitialized, dataset, activeExperimentFile, resetProject } = project;
+  const [isLessonDrawerOpen, setIsLessonDrawerOpen] = useState(false);
+
+  // Map ProjectContext to reactive LearningProjectState for Heads-Up Rules (Part B)
+  const learningState: LearningProjectState = useMemo(() => ({
+    dataset: project.dataset,
+    selectedFeatures: project.selectedFeatures,
+    selectedTarget: project.selectedTarget,
+    taskType: project.inferredTaskType,
+    activeJob: project.activeJob,
+    jobHistory: Object.values(project.fileJobs || {}),
+    code: project.activeExperimentFile ? project.experimentFiles?.[project.activeExperimentFile] : undefined,
+    splitRatio: project.trainingConfig?.split_ratio,
+  }), [project]);
 
   const [activeTab, setActiveTab] = useState<PlatformTab>(() => {
     if (typeof window !== 'undefined') {
@@ -106,10 +126,19 @@ function AppContent() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const handleNavigate = (tab: PlatformTab, deploymentId?: string) => {
-    setActiveTab(tab);
+  const handleNavigate = (tab: PlatformTab | string, deploymentId?: string) => {
+    let resolvedTab: PlatformTab = 'workspace';
+    if (tab === '/datasets' || tab === 'workspace') resolvedTab = 'workspace';
+    else if (tab === '/studio' || tab === '/pipelines' || tab === 'code-studio') resolvedTab = 'code-studio';
+    else if (tab === '/results' || tab === '/explainability' || tab === 'training-results') resolvedTab = 'training-results';
+    else if (tab === '/deployments' || tab === 'deployments') resolvedTab = 'deployments';
+    else if (tab === '/classroom' || tab === 'classroom') resolvedTab = 'classroom';
+    else if (tab.startsWith('/')) resolvedTab = 'workspace';
+    else resolvedTab = tab as PlatformTab;
+
+    setActiveTab(resolvedTab);
     if (typeof window !== 'undefined') {
-      window.location.hash = tab === 'workspace' ? '' : `#${tab}`;
+      window.location.hash = resolvedTab === 'workspace' ? '' : `#${resolvedTab}`;
     }
     if (deploymentId) {
       setActiveDeploymentId(deploymentId);
@@ -120,7 +149,7 @@ function AppContent() {
       'training-results': 'evaluate',
       deployments:        'deploy',
     };
-    const stage = tabToStage[tab];
+    const stage = tabToStage[resolvedTab];
     if (stage) setLifecycleStage(stage);
   };
 
@@ -133,8 +162,9 @@ function AppContent() {
   ];
 
   return (
-    <div
-      className="flex h-screen w-screen overflow-hidden antialiased"
+    <LearningProvider projectState={learningState}>
+      <div
+        className="flex h-screen w-screen overflow-hidden antialiased"
       style={{
         backgroundColor: BB.base,
         color: BB.text,
@@ -456,8 +486,42 @@ function AppContent() {
             </span>
           </div>
 
-          {/* Header Right: AI Copilot Symbol */}
+          {/* Header Right: Learning Mode + Lessons + AI Copilot */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            {/* Global Learning Mode Toggle (Part E1) */}
+            <LearningModeToggle />
+
+            {/* Guided Lessons Drawer Button (Part C) */}
+            <button
+              type="button"
+              data-testid="open-lesson-guide-btn"
+              onClick={() => setIsLessonDrawerOpen(true)}
+              title="Open Guided ML Curriculum"
+              style={{
+                height: 32,
+                padding: '0 10px',
+                borderRadius: 7,
+                border: `1px solid ${BB.border}`,
+                background: 'rgba(27,21,48,0.8)',
+                color: BB.text,
+                fontSize: 11,
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                cursor: 'pointer',
+                transition: 'all 150ms',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = BB.primaryLight;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = BB.border;
+              }}
+            >
+              <span>🎓</span>
+              <span>Lessons</span>
+            </button>
 
             {/* A4: AI Copilot on top of right side — Symbol only */}
             <button
@@ -595,7 +659,15 @@ function AppContent() {
           />
         ))}
       </div>
+
+      {/* Guided ML Curriculum Drawer (Part C) */}
+      <LessonGuideDrawer
+        isOpen={isLessonDrawerOpen}
+        onClose={() => setIsLessonDrawerOpen(false)}
+        onNavigate={(route) => handleNavigate(route)}
+      />
     </div>
+  </LearningProvider>
   );
 }
 

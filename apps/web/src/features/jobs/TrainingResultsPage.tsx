@@ -39,6 +39,7 @@ import { FeatureImportanceCard } from './FeatureImportanceCard';
 import type { JobEntity } from '../../types/job';
 import type { PlatformTab } from '../../App';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
+import { PanelLearningCollapsible, HeadsUpCardsContainer, MetricLearningTooltip, BaselineDisplay } from '../learning';
 
 /* ── Premium High-Contrast Design Tokens ─────────────────────────────────────── */
 const BB = {
@@ -846,6 +847,15 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
           />
         ) : (
           <>
+            {/* Student Learning Layer: Diagnostic Guidance & Heads-Up Mistake Cards */}
+            <PanelLearningCollapsible
+              title="Model Evaluation & Diagnostic Benchmarking"
+              concept="Evaluating test metrics requires comparison against simple baselines (majority class or mean predictor) and checking for overfitting gaps."
+              details="Rule B4 & B6: A model with 95% accuracy on a 95/5 imbalanced dataset has learned nothing beyond the majority class. If the train-to-test performance gap is large, the model has memorized noise (overfitting)."
+              practicalTip="Always compare accuracy to the majority-class baseline and examine ROC-AUC / PR-AUC for imbalanced targets."
+              citation="scikit-learn documentation: Model evaluation and scoring metrics"
+            />
+            <HeadsUpCardsContainer />
 
         {/* Live Training In Progress Banner */}
         {isRunning && (
@@ -1265,7 +1275,9 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                               marginBottom: 8,
                             }}
                           >
-                            {fmtKey(k)}
+                            <MetricLearningTooltip metricName={k}>
+                              <span>{fmtKey(k)}</span>
+                            </MetricLearningTooltip>
                           </div>
                           <div
                             style={{
@@ -1325,6 +1337,17 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Student Learning Layer: Baseline Model & Wilson Confidence Interval (B4, B5) */}
+                <div style={{ padding: '16px 20px', background: BB.elevated, borderTop: `1px solid ${BB.border}` }}>
+                  <BaselineDisplay
+                    taskType={isClassification ? 'classification' : 'regression'}
+                    modelScore={typeof (metrics?.accuracy ?? pv) === 'number' ? Number(metrics?.accuracy ?? pv) : undefined}
+                    baselineScore={isClassification ? (typeof (job as any).baseline_accuracy === 'number' ? (job as any).baseline_accuracy : 0.50) : 0.0}
+                    testSampleSize={testRows ?? undefined}
+                    wilsonInterval={(job as any).wilson_ci}
+                  />
                 </div>
               </div>
             )}

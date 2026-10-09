@@ -50,6 +50,7 @@ import {
 } from '../../services/modelRegistryService';
 import { DeploymentStudio } from './DeploymentStudio';
 import { useProject } from '../../providers/ProjectContext';
+import { PanelLearningCollapsible } from '../learning';
 
 interface DeploymentsHubProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'error') => void;
@@ -555,6 +556,17 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
               ? 'Production-grade local endpoints with persistent inference audits, schema validation, and zero-downtime redeployment.'
               : 'End-to-end lineage tracing from Dataset → Training Job → Model Weights → Active Serving Endpoints with Champion/Challenger promotion.'}
           </p>
+        </div>
+
+        {/* Student Learning Layer: Educational Guidance */}
+        <div style={{ width: '100%', marginTop: 14 }}>
+          <PanelLearningCollapsible
+            title="Model Serving & Production Endpoints"
+            concept="Deploying a model turns a serialized pipeline artifact into an HTTP microservice exposing an inference API."
+            details="Serving systems validate JSON payloads against the feature schema, enforce input bounds, and log latency telemetry (P50/P95/P99) and data drift."
+            practicalTip="Always test endpoint predictions with representative edge-case inputs before sending live traffic."
+            citation="scikit-learn documentation: Model persistence and FastAPI deployment patterns"
+          />
         </div>
 
         <button

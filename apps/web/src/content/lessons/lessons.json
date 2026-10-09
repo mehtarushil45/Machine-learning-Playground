@@ -1,0 +1,193 @@
+[
+  {
+    "id": "lesson-01-read-data",
+    "number": 1,
+    "title": "Read Your Data: Profiling & Feature Distributions",
+    "page_route": "/datasets",
+    "goal": "Inspect summary statistics, column data types, and null counts before writing any model code.",
+    "short_explanation": "Tabular data often contains subtle defects such as skewed continuous distributions, mixed data types, or unexpected null frequencies. Looking at summary statistics—such as median, minimum, maximum, and cardinality—usually reveals data entry errors and uninformative features before training begins.",
+    "task": "Load a dataset on the Datasets page and review the column profiles, noting the difference between continuous numerical and discrete categorical columns.",
+    "check_type": "platform_state",
+    "check_details": {
+      "metric": "dataset_loaded",
+      "description": "Verify that a dataset profile with valid columns has been loaded into the active project session."
+    },
+    "why_it_matters": "Fitting estimators on uninspected data often leads to silent numerical failures, such as zero-variance columns producing singular covariance matrices.",
+    "primary_source": "scikit-learn documentation: Inspection and Data Preprocessing (https://scikit-learn.org/stable/modules/preprocessing.html)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-02-missing-identifiers",
+    "number": 2,
+    "title": "Missing Values & Identifier Columns",
+    "page_route": "/datasets",
+    "goal": "Distinguish genuine predictive features from database keys and establish principled imputation strategies.",
+    "short_explanation": "Identifier columns (like customer UUIDs or sequential row IDs) have high cardinality and usually carry no generalizing signal. Feeding them to decision trees can cause rapid memorization. For missing values, median or mean imputation is typically suitable for numeric variables, while modal or indicator imputation is standard for categoricals.",
+    "task": "Open the Data Governance tab on the Datasets page and inspect the flagged Identifier Columns and recommended Imputation Strategies.",
+    "check_type": "knowledge_check",
+    "check_details": {
+      "question": "Why should high-cardinality primary keys (such as account_seq_id or uuid) typically be dropped from model training features?",
+      "options": [
+        "They cause memory overflow because databases cannot store strings.",
+        "They allow flexible models like decision trees to memorize individual rows rather than learning generalizing patterns.",
+        "They always cause numerical division-by-zero errors in matrix multiplication.",
+        "They force all subsequent features to have zero variance."
+      ],
+      "correct_index": 1,
+      "explanation": "High-cardinality unique IDs allow estimators to achieve near-zero training error by splitting on unique keys, which completely fails to generalize to unseen test instances."
+    },
+    "why_it_matters": "Accidentally including primary keys creates models that score well on training data by memorizing row identity rather than real signal.",
+    "primary_source": "Hastie, Tibshirani, Friedman: The Elements of Statistical Learning, Section 7.2 (Model Selection and Bias-Variance Tradeoff)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-03-features-target-leakage",
+    "number": 3,
+    "title": "Features, Targets & Target Leakage",
+    "page_route": "/datasets",
+    "goal": "Identify and eliminate target leakage before splitting data.",
+    "short_explanation": "Target leakage occurs when an input feature incorporates information that would not be available at the moment a prediction is actually required in production. This frequently occurs when post-event logs (such as cancellation fees or exit survey flags) are mistakenly retained as features.",
+    "task": "Review the Data Governance card to check for Critical Target Leakage or high correlation (|r| >= 0.90) between any candidate feature and the target.",
+    "check_type": "platform_state",
+    "check_details": {
+      "metric": "governance_checked",
+      "description": "Inspect data governance report and select features that do not include the target column itself or leaked post-outcome variables."
+    },
+    "why_it_matters": "Models trained with leaked features deliver spectacular validation metrics in offline evaluation but collapse when deployed to real production environments.",
+    "primary_source": "Kaufman et al. (2012): Leakage in Data Mining: Formulation, Detection, and Avoidance (ACM TKDD, Vol. 6)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-04-train-test-split",
+    "number": 4,
+    "title": "Train/Test Splitting & Stratification",
+    "page_route": "/studio",
+    "goal": "Partition data into disjoint training and test subsets using appropriate stratification.",
+    "short_explanation": "An honest evaluation requires testing your estimator on instances it has never seen during parameter estimation or feature selection. For classification problems with imbalanced classes, stratified splitting helps ensure both subsets reflect the population class proportions.",
+    "task": "Navigate to Code Studio or Pipeline Designer and inspect the train/test split ratio (typically between 70/30 and 80/20).",
+    "check_type": "platform_state",
+    "check_details": {
+      "metric": "split_configured",
+      "description": "A valid train/test split ratio between 50% and 90% is set in project configuration."
+    },
+    "why_it_matters": "Evaluating an estimator on training data measures memorization capacity rather than generalization ability.",
+    "primary_source": "scikit-learn documentation: Cross-validation: evaluating estimator performance (https://scikit-learn.org/stable/modules/cross_validation.html)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-05-first-model-code",
+    "number": 5,
+    "title": "Your First Model & Reading Generated Code",
+    "page_route": "/studio",
+    "goal": "Train an estimator and trace the Python scikit-learn pipeline code from preprocessing to fit.",
+    "short_explanation": "Modern ML platforms should generate transparent, reproducible code. A clean pipeline encapsulates data transformations (like StandardScaler or SimpleImputer) alongside the final estimator so transformations are fit on training data only.",
+    "task": "Open Code Studio, review the generated Python script, and verify that preprocessing transformers are wrapped inside a scikit-learn Pipeline.",
+    "check_type": "platform_state",
+    "check_details": {
+      "metric": "code_reviewed",
+      "description": "Model code contains Pipeline and train_test_split execution."
+    },
+    "why_it_matters": "Understanding the generated Python code ensures you can audit pipelines for subtle bugs like preprocessing leakage and deploy models to standard environments.",
+    "primary_source": "scikit-learn documentation: Pipeline: chaining estimators (https://scikit-learn.org/stable/modules/compose.html#pipeline)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-06-overfitting-cv",
+    "number": 6,
+    "title": "Overfitting & Cross-Validation",
+    "page_route": "/pipelines",
+    "goal": "Detect high variance by comparing training performance to validation/test scores.",
+    "short_explanation": "When an estimator scores much higher on training data than on validation folds (for example, 99% train accuracy vs 74% test accuracy), it is usually overfitting to sample noise. K-fold cross-validation provides a more reliable estimate of out-of-sample performance than a single train/test split.",
+    "task": "Run training with cross-validation or check the train vs test metric gap in the experiment results.",
+    "check_type": "knowledge_check",
+    "check_details": {
+      "question": "If your decision tree achieves 100% training accuracy but only 68% cross-validation accuracy, which adjustment is generally most appropriate?",
+      "options": [
+        "Increase tree depth and turn off all pruning constraints.",
+        "Add regularization, such as restricting max_depth or increasing min_samples_split.",
+        "Duplicate the test data so the model sees it during training.",
+        "Change the random seed until cross-validation matches 100%."
+      ],
+      "correct_index": 1,
+      "explanation": "Restricting model capacity (e.g. limiting tree depth or penalizing large weights) reduces model variance and encourages learning generalized decision boundaries."
+    },
+    "why_it_matters": "Overfit models fail in production because their decisions rely on idiosyncrasies and noise in the training sample.",
+    "primary_source": "scikit-learn documentation: Underfitting vs. Overfitting (https://scikit-learn.org/stable/auto_examples/model_selection/plot_underfitting_overfitting.html)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-07-metrics-thresholds",
+    "number": 7,
+    "title": "Metrics Beyond Accuracy & Classification Thresholds",
+    "page_route": "/results",
+    "goal": "Evaluate classification tradeoffs using Confusion Matrices, Precision, Recall, and ROC/PR curves.",
+    "short_explanation": "On imbalanced datasets, overall accuracy can be misleading because a model that always predicts the majority class may show high accuracy while detecting zero positives. Precision, Recall, PR-AUC, and the decision threshold let you balance false positives against false negatives according to operational costs.",
+    "task": "Open the Results page, inspect the Confusion Matrix, and adjust the decision threshold slider on the ROC/PR curve.",
+    "check_type": "platform_state",
+    "check_details": {
+      "metric": "results_inspected",
+      "description": "Confusion matrix and classification metrics (precision, recall, F1) have been inspected."
+    },
+    "why_it_matters": "In domains like medical diagnostics and fraud detection, false negatives are typically far more costly than false positives, making threshold tuning essential.",
+    "primary_source": "scikit-learn documentation: Model evaluation: quantifying the quality of predictions (https://scikit-learn.org/stable/modules/model_evaluation.html)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-08-explaining-model",
+    "number": 8,
+    "title": "Model Interpretability, SHAP & Demographic Fairness",
+    "page_route": "/explainability",
+    "goal": "Interpret feature contributions with SHAP values and audit predictions for demographic parity.",
+    "short_explanation": "Understanding which features drive individual predictions builds stakeholder trust and helps verify that the model is relying on sound domain logic rather than spurious artifacts. Evaluating disparate impact ratios helps ensure models adhere to fairness guidelines across protected groups.",
+    "task": "Navigate to the Explainability page to view Global SHAP feature importances and run a demographic fairness audit.",
+    "check_type": "platform_state",
+    "check_details": {
+      "metric": "explainability_viewed",
+      "description": "Model explainability or fairness audit panel has been viewed."
+    },
+    "why_it_matters": "Regulated industries (credit, employment, healthcare) require explainability and documented fairness compliance before models can be deployed.",
+    "primary_source": "Lundberg & Lee (2017): A Unified Approach to Interpreting Model Predictions (NeurIPS 2017)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-09-deployment",
+    "number": 9,
+    "title": "Production Deployment & REST Endpoints",
+    "page_route": "/deployments",
+    "goal": "Deploy a trained model pipeline to an isolated HTTP serving endpoint.",
+    "short_explanation": "Deploying an ML model requires bundling the fitted preprocessing transformations with the estimator weights so raw JSON requests can be scored directly with low latency and input validation.",
+    "task": "On the Deployments page, promote a model or launch an active local deployment endpoint.",
+    "check_type": "platform_state",
+    "check_details": {
+      "metric": "model_deployed",
+      "description": "At least one local or cloud model deployment endpoint is active."
+    },
+    "why_it_matters": "A model only delivers value when downstream applications and decision systems can reliably invoke it over high-availability interfaces.",
+    "primary_source": "Sculley et al. (2015): Hidden Technical Debt in Machine Learning Systems (NeurIPS 2015)",
+    "needs_instructor_review": true
+  },
+  {
+    "id": "lesson-10-drift-retraining",
+    "number": 10,
+    "title": "Data Drift, Telemetry & Retraining Guardrails",
+    "page_route": "/deployments",
+    "goal": "Monitor production telemetry to detect distribution shifts before model accuracy decays.",
+    "short_explanation": "Real-world data distributions change over time (covariate shift), causing offline performance guarantees to degrade. Statistical tests—such as the Kolmogorov-Smirnov test for numerical features and the Population Stability Index (PSI)—signal when incoming features differ significantly from the training baseline.",
+    "task": "Open the Drift Telemetry panel on the Deployments page, review feature p-values, or run simulated drift to observe guardrail alerts.",
+    "check_type": "knowledge_check",
+    "check_details": {
+      "question": "What does a high Population Stability Index (PSI > 0.25) between production inputs and training data indicate?",
+      "options": [
+        "The model is running 25% faster than expected.",
+        "A significant distributional shift has occurred in the feature, indicating model predictions may be unreliable and retraining should be considered.",
+        "The server memory is 25% full and needs a restart.",
+        "The model has achieved 25% higher accuracy in production."
+      ],
+      "correct_index": 1,
+      "explanation": "A PSI above 0.25 indicates substantial distributional drift from the baseline training population, signaling that model assumptions may no longer hold."
+    },
+    "why_it_matters": "Silent data drift is one of the leading causes of production ML failures, often degrading model reliability without throwing any runtime software errors.",
+    "primary_source": "Yurdakul (2018): Statistical Properties of Population Stability Index (Journal of Risk Model Validation)",
+    "needs_instructor_review": true
+  }
+]

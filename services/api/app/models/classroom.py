@@ -103,6 +103,7 @@ class Assignment(UUIDPrimaryKeyMixin, TimeStampMixin, Base):
     due_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     rubric: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     max_score: Mapped[float] = mapped_column(Float, default=100.0, nullable=False)
+    learning_aids_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_by_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

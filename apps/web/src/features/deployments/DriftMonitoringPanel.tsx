@@ -48,6 +48,7 @@ import {
   type FeatureDriftDetail,
   type RollingWindowTrend,
 } from '../../services/localDeploymentService';
+import { PanelLearningCollapsible, MetricLearningTooltip } from '../learning';
 
 interface DriftMonitoringPanelProps {
   deploymentId: string;
@@ -226,6 +227,15 @@ export const DriftMonitoringPanel: React.FC<DriftMonitoringPanelProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Student Learning Layer: Educational Guidance */}
+      <PanelLearningCollapsible
+        title="Production Telemetry & Data Drift Monitoring"
+        concept="Production data distributions inevitably diverge from training data over time due to seasonal, behavioral, or systemic shifts."
+        details="Kolmogorov-Smirnov (KS) tests and Population Stability Index (PSI) quantify whether feature distributions in inference requests match the training baseline."
+        practicalTip="When high-importance features exhibit statistically significant drift (PSI > 0.25), consider collecting fresh labels and retraining."
+        citation="scikit-learn documentation: Model evaluation and covariate shift"
+      />
+
       {/* ── D1: Prominent Simulation Mode Banner (When Active) ── */}
       {isSimulationMode && (
         <motion.div
@@ -714,18 +724,18 @@ export const DriftMonitoringPanel: React.FC<DriftMonitoringPanelProps> = ({
                     <th style={{ padding: '8px 6px' }}>Feature</th>
                     <th style={{ padding: '8px 6px' }}>Type</th>
                     <th style={{ padding: '8px 6px' }}>
-                      <Tooltip content="Population Stability Index: measures distribution shift across training deciles (smoothing constant ε = 0.0001).">
+                      <MetricLearningTooltip metricName="psi">
                         <span style={{ cursor: 'help', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           PSI <HelpCircle size={10} />
                         </span>
-                      </Tooltip>
+                      </MetricLearningTooltip>
                     </th>
                     <th style={{ padding: '8px 6px' }}>
-                      <Tooltip content="Specific statistical hypothesis test evaluated based on feature type and sample volume.">
+                      <MetricLearningTooltip metricName="ks_test">
                         <span style={{ cursor: 'help', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           Statistical Test <HelpCircle size={10} />
                         </span>
-                      </Tooltip>
+                      </MetricLearningTooltip>
                     </th>
                     <th style={{ padding: '8px 6px' }}>
                       <Tooltip content="Feature importance weight from trained model. High-importance features trigger retraining when shifted.">

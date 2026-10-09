@@ -33,6 +33,7 @@ import { DataGovernanceCard } from './DataGovernanceCard';
 import { AlgorithmRecommendationPanel } from './AlgorithmRecommendationPanel';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { FeatureTargetSelector } from '../../components/shared/FeatureTargetSelector';
+import { PanelLearningCollapsible, HeadsUpCardsContainer } from '../learning';
 import { Select } from '../../components/ui/Select';
 import type {
   ColumnProfile,
@@ -1391,6 +1392,16 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       />
                     )}
                   </div>
+
+                  {/* Student Learning Layer: Educational Guidance & Mistake Cards */}
+                  <PanelLearningCollapsible
+                    title="Dataset Profiling & Feature Governance"
+                    concept="Out-of-core streaming profiling checks distribution statistics, missingness patterns, and flags target leakage or identifier keys."
+                    details="Verify that primary keys (IDs/UUIDs) and features that occur after the outcome event are dropped. High-correlation features (>0.90) or high Cramér's V associations indicate target leakage."
+                    practicalTip="Review flagged columns in the Governance tab (🛡️) before selecting features for training."
+                    citation="scikit-learn documentation: Inspection and Data Preprocessing"
+                  />
+                  <HeadsUpCardsContainer />
 
                   {/* Dataset Stats Row */}
                   <div

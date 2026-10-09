@@ -395,6 +395,47 @@ class DuckDBProfilerEngine:
                     except Exception as corr_exc:
                         logger.debug("Leakage corr query failed for %s: %s", num_col, corr_exc)
 
+            # Categorical association scan (Cramér's V) to catch derived categorical leakage
+            if candidate_target:
+                escaped_target = escape_sql_identifier(candidate_target)
+                for cat_col in categorical_columns:
+                    if cat_col == candidate_target:
+                        continue
+                    try:
+                        escaped_cat = escape_sql_identifier(cat_col)
+                        ct_query = f"""
+                            SELECT {escaped_cat}::VARCHAR, {escaped_target}::VARCHAR, COUNT(*) 
+                            FROM (SELECT * FROM dataset_view LIMIT 10000)
+                            WHERE {escaped_cat} IS NOT NULL AND {escaped_target} IS NOT NULL
+                            GROUP BY 1, 2;
+                        """
+                        ct_rows = con.execute(ct_query).fetchall()
+                        contingency = {(str(r[0]), str(r[1])): int(r[2]) for r in ct_rows}
+                        from app.services.learning_rules import compute_cramers_v_from_contingency
+                        v_score = compute_cramers_v_from_contingency(contingency)
+                        if v_score >= 0.95:
+                            leaked_features.append(
+                                DataLeakageFinding(
+                                    feature=cat_col,
+                                    target=candidate_target,
+                                    correlation=round(v_score, 4),
+                                    severity="critical",
+                                    recommendation=f"Critical Categorical Leakage (Cramér's V={round(v_score, 4)}). Feature nearly deterministically encodes the target; drop immediately.",
+                                )
+                            )
+                        elif v_score >= 0.85:
+                            leaked_features.append(
+                                DataLeakageFinding(
+                                    feature=cat_col,
+                                    target=candidate_target,
+                                    correlation=round(v_score, 4),
+                                    severity="high",
+                                    recommendation=f"High Risk Categorical Association (Cramér's V={round(v_score, 4)}). Inspect feature to confirm it is not a derived outcome code.",
+                                )
+                            )
+                    except Exception as cat_exc:
+                        logger.debug("Categorical Cramers V scan failed for %s: %s", cat_col, cat_exc)
+
             # Multicollinearity scan across numeric pairs (cap at first 20 numeric columns for speed)
             tested_numeric = numeric_columns[:20]
             for i in range(len(tested_numeric)):

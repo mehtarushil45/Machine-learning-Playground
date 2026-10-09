@@ -32,6 +32,7 @@ import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 import { MonacoCodeStudioEditor } from './MonacoCodeStudioEditor';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
+import { PanelLearningCollapsible, HeadsUpCardsContainer, useLearning } from '../learning';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -586,6 +587,8 @@ export function ViewAsCodeStudio({
     setFileJob,
   } = useProject();
 
+  const { learningMode, currentLessonId, lessons, activeCards } = useLearning();
+
   /* ── Local Sizing & Layout States (with persistence) ─────────────── */
   const [explorerWidth, setExplorerWidth] = useState<number>(() => {
     if (typeof localStorage !== 'undefined') {
@@ -755,6 +758,39 @@ export function ViewAsCodeStudio({
             source: d.source,
             code: d.code,
           }));
+        // B7 AST Check: audit preprocessing leakage via learning API
+        try {
+          const leakRes = await fetch('/api/v1/learning/code-lint', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: displayedCode, filename: currentFile }),
+          });
+          if (leakRes.ok) {
+            const leakData = await leakRes.json();
+            if (leakData.has_leakage) {
+              if (Array.isArray(leakData.leaks)) {
+                for (const leak of leakData.leaks) {
+                  mapped.push({
+                    line: leak.line || 1,
+                    col: 1,
+                    severity: 'warning',
+                    message: `Data Leakage Alert (Rule B7): ${leak.message}`,
+                    source: 'static',
+                  });
+                }
+              } else {
+                mapped.push({
+                  line: leakData.line_number || 1,
+                  col: 1,
+                  severity: 'warning',
+                  message: `Data Leakage Alert (Rule B7): ${leakData.message}`,
+                  source: 'static',
+                });
+              }
+            }
+          }
+        } catch {}
+
         setServerDiagnostics(mapped);
         setServerLintDone(true);
       } catch {
@@ -1416,14 +1452,26 @@ export function ViewAsCodeStudio({
 
     // Generate intelligent AI contextual response
     setTimeout(() => {
-      let reply = `Here is insight on "${textToSend}":\n\n`;
+      let reply = '';
+      if (learningMode) {
+        const activeLesson = lessons.find((l) => l.id === currentLessonId);
+        reply += `🎓 **[Learning Mode: Educational Explanation]**\n`;
+        if (activeCards.length > 0) {
+          reply += `*Active Heads-Up Guidance: ${activeCards.map((c) => c.title).join(', ')}*\n`;
+        }
+        if (activeLesson) {
+          reply += `*Current Curriculum Goal:* ${activeLesson.goal}\n\n`;
+        }
+      }
+
+      reply += `Here is insight on "${textToSend}":\n\n`;
       const lower = textToSend.toLowerCase();
       if (lower.includes('hyperparameter') || lower.includes('tune')) {
-        reply += `To tune **${canonicalAlgorithm}**, consider GridSearchCV over n_estimators (100, 200), max_depth (4, 8, None), and min_samples_split (2, 5). You can add cross-validation folds in Step 3.`;
+        reply += `To tune **${canonicalAlgorithm}**, consider GridSearchCV over n_estimators (100, 200), max_depth (4, 8, None), and min_samples_split (2, 5). In machine learning, tuning parameters requires validating on cross-validation folds rather than the test split to prevent data snooping.`;
       } else if (lower.includes('leakage') || lower.includes('exclude')) {
-        reply += `Data leakage is prevented by isolating StandardScaler and SimpleImputer inside a Pipeline so they fit ONLY on X_train, and evaluating holdout X_test separately.`;
+        reply += `Data leakage occurs when information outside the training dataset is used to create the model. In scikit-learn, this is prevented by isolating StandardScaler and SimpleImputer inside a Pipeline so they fit ONLY on X_train, and evaluating holdout X_test separately without refitting.`;
       } else if (lower.includes('explain') || lower.includes('pipeline')) {
-        reply += `This pipeline loads **${activeDatasetName}**, applies **${canonicalImputer}** imputation, **${canonicalScaler}** normalization, splits data (${Math.round(trainRatio * 100)}% train / ${Math.round(testRatio * 100)}% test), and fits a **${canonicalAlgorithm}** estimator with **${canonicalCvFolds}-fold CV**.`;
+        reply += `This pipeline loads **${activeDatasetName}**, applies **${canonicalImputer}** imputation, **${canonicalScaler}** normalization, splits data (${Math.round(trainRatio * 100)}% train / ${Math.round(testRatio * 100)}% test), and fits a **${canonicalAlgorithm}** estimator with **${canonicalCvFolds}-fold CV**. Pipelines encapsulate all transformers and estimators so evaluation is rigorously unbiased.`;
       } else {
         reply += `The scikit-learn pipeline DAG is structured modularly. You can edit any parameter directly in the code editor, run it using the **Run** button, and view live stdout/stderr in the bottom Terminal.`;
       }
@@ -1936,6 +1984,18 @@ export function ViewAsCodeStudio({
             background: BB.codeBg,
           }}
         >
+          {/* Student Learning Layer: Educational Guidance & Preprocessing Mistake Cards */}
+          <PanelLearningCollapsible
+            title="Code Studio & Pipeline Construction"
+            concept="Scikit-learn Pipelines encapsulate preprocessing transformers and estimators into a single object, guaranteeing strict isolation between train and test splits."
+            details="Rule B7: Transformers (e.g. StandardScaler, SimpleImputer) must NEVER be fit on the entire dataset before train_test_split. Fitting on all data leaks test distributions into your training parameters."
+            practicalTip="Always wrap transformers in a Pipeline or ColumnTransformer and fit exclusively on X_train."
+            citation="scikit-learn documentation: Common pitfalls and recommended practices"
+          />
+          <div style={{ padding: '0 12px' }}>
+            <HeadsUpCardsContainer />
+          </div>
+
           {/* Find Bar (Ctrl+F) */}
           {isFindOpen && (
             <div

@@ -13,6 +13,7 @@ import { parseCsvFile } from '../../services/csvService';
 import { validateCsvFile } from '../../utils/validation';
 import { apiClient } from '../../services/apiClient';
 import type { Dataset } from '../../types/dataset';
+import { StoryCatalogModal } from '../learning/components/StoryCatalogModal';
 
 const BB = {
   base:'#08070F',surface:'#120E22',elevated:'#18132E',
@@ -42,6 +43,7 @@ function Step1Upload({ onComplete }: { onComplete: (d: Dataset) => void }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [isStoryModalOpen, setIsStoryModalOpen] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(async (file: File) => {
@@ -135,6 +137,67 @@ function Step1Upload({ onComplete }: { onComplete: (d: Dataset) => void }) {
         <input ref={ref} type="file" accept=".csv,text/csv" style={{ display:'none' }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value=''; }} />
       </div>
+
+      {/* Start with a story button (Part D) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 4 }}>
+        <span style={{ fontSize: 12, color: BB.muted }}>or</span>
+        <button
+          type="button"
+          data-testid="start-with-story-btn"
+          onClick={() => setIsStoryModalOpen(true)}
+          style={{
+            padding: '7px 16px',
+            borderRadius: 8,
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            background: 'rgba(245, 158, 11, 0.12)',
+            color: '#FCD34D',
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            transition: 'all 150ms',
+          }}
+        >
+          <span>📚</span>
+          <span>Start with a Story (Pitfall Datasets)</span>
+        </button>
+      </div>
+
+      <StoryCatalogModal
+        isOpen={isStoryModalOpen}
+        onClose={() => setIsStoryModalOpen(false)}
+        onSelectStory={async (story) => {
+          try {
+            setIsProcessing(true);
+            const loadRes = await fetch(`/api/v1/learning/stories/${story.id}/load`, { method: 'POST' });
+            if (loadRes.ok) {
+              const fileRes = await fetch(`/api/v1/uploads/${story.filename}`).catch(() => null);
+              if (fileRes && fileRes.ok) {
+                const text = await fileRes.text();
+                const blob = new Blob([text], { type: 'text/csv' });
+                const file = new File([blob], story.filename, { type: 'text/csv' });
+                await processFile(file);
+              } else {
+                // Generate locally using dummy rows or fetch directly
+                const fallbackRes = await fetch(`/uploads/${story.filename}`).catch(() => null);
+                if (fallbackRes && fallbackRes.ok) {
+                  const text = await fallbackRes.text();
+                  const blob = new Blob([text], { type: 'text/csv' });
+                  const file = new File([blob], story.filename, { type: 'text/csv' });
+                  await processFile(file);
+                }
+              }
+            }
+          } catch (e: any) {
+            setError(e.message || 'Failed to load story dataset');
+          } finally {
+            setIsProcessing(false);
+          }
+        }}
+      />
+
       {error && (
         <div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(248,113,113,0.1)',
           border:'1px solid rgba(248,113,113,0.3)', color:BB.error, fontSize:13 }}>

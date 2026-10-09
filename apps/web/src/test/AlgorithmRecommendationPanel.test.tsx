@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AlgorithmRecommendationPanel } from '../features/datasets/AlgorithmRecommendationPanel';
 import * as recommendationService from '../services/recommendationService';
 import type { Dataset } from '../types/dataset';
 import type { RecommendationJobDetail } from '../types/recommendation';
 import { ApiError } from '../services/apiClient';
+import { ProjectProvider } from '../providers/ProjectContext';
+
+const render = (ui: React.ReactElement, options?: any) => rtlRender(ui, { wrapper: ProjectProvider, ...options });
 
 vi.mock('../services/recommendationService', () => ({
   startRecommendation: vi.fn(),

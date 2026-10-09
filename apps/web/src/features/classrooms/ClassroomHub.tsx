@@ -41,6 +41,7 @@ import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { MonacoCodeStudioEditor } from '../pipelines/MonacoCodeStudioEditor';
 import { AICopilotDrawer, type ChatMessage } from '../../components/shared/AICopilotDrawer';
 import { AuthContext } from '../../providers/AuthContext';
+import { useLearning, PanelLearningCollapsible } from '../learning';
 
 /* ── Enterprise Design Tokens ─────────────────────────────────────────── */
 const BB = {
@@ -83,8 +84,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
   // Primary View Mode: 'instructor' | 'student'
   const [viewMode, setViewMode] = useState<'instructor' | 'student'>('student');
 
-  // Instructor Tabs: 'submissions' | 'create-assignment' | 'roster' | 'templates'
-  const [instructorTab, setInstructorTab] = useState<'submissions' | 'create-assignment' | 'roster' | 'templates'>('submissions');
+  // Instructor Tabs: 'submissions' | 'create-assignment' | 'roster' | 'templates' | 'curriculum'
+  const [instructorTab, setInstructorTab] = useState<'submissions' | 'create-assignment' | 'roster' | 'templates' | 'curriculum'>('submissions');
+  const [curriculumSummary, setCurriculumSummary] = useState<any[]>([]);
 
   // Student Workspace State
   const [exams, setExams] = useState<LabExamInfo[]>([]);
@@ -148,11 +150,15 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
   const [newAssignmentTitle, setNewAssignmentTitle] = useState('');
   const [newAssignmentDesc, setNewAssignmentDesc] = useState('');
   const [newAssignmentType, setNewAssignmentType] = useState('classification');
+  const [newAssignmentDataset, setNewAssignmentDataset] = useState('churn_lab_dataset.csv');
   const [newAssignmentMinAcc, setNewAssignmentMinAcc] = useState('0.80');
   const [newAssignmentMaxLat, setNewAssignmentMaxLat] = useState('100.0');
   const [newAssignmentCopilotPolicy, setNewAssignmentCopilotPolicy] = useState('explain-only');
+  const [newAssignmentLearningAids, setNewAssignmentLearningAids] = useState(true);
   const [newAssignmentStarterCode, setNewAssignmentStarterCode] = useState('');
   const [saveAsTemplateChecked, setSaveAsTemplateChecked] = useState(false);
+
+  const { setLearningAidsAllowed, stories } = useLearning();
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -172,6 +178,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
             setSelectedExamId(initial.id);
             setCode(initial.starter_code);
             setNewAssignmentStarterCode(initial.starter_code);
+            setLearningAidsAllowed(initial.learning_aids_enabled ?? true);
 
             // Fetch active session state for this exam
             try {
@@ -260,6 +267,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
     setSubmissionReceipt(null);
     setOutputLines([`[System] Switched to ${target.title}. Starter pipeline loaded.`]);
     onShowToast?.('Exam Switched', `Switched to ${target.title}`, 'info');
+    setLearningAidsAllowed(target.learning_aids_enabled ?? true);
 
     try {
       const sess = await ClassroomService.getSession(examId);
@@ -588,7 +596,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
         classroom_id: selectedClassroomId,
         title: newAssignmentTitle,
         description: newAssignmentDesc || 'Practical ML Lab Exam',
-        dataset_id: 'churn_lab_dataset.csv',
+        dataset_id: newAssignmentDataset,
         rubric: {
           min_accuracy: parseFloat(newAssignmentMinAcc) || 0.8,
           max_latency_ms: parseFloat(newAssignmentMaxLat) || 100.0,
@@ -596,6 +604,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
           starter_code: newAssignmentStarterCode,
         },
         max_score: 100.0,
+        learning_aids_enabled: newAssignmentLearningAids,
       });
 
       if (saveAsTemplateChecked) {
@@ -603,8 +612,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
           title: newAssignmentTitle,
           description: newAssignmentDesc || 'Template',
           problem_type: newAssignmentType,
-          dataset_name: 'churn_lab_dataset.csv',
-          dataset_id: 'churn_lab_dataset.csv',
+          dataset_name: newAssignmentDataset,
+          dataset_id: newAssignmentDataset,
           target_column: 'churn',
           starter_code: newAssignmentStarterCode,
           rubric: { min_accuracy: parseFloat(newAssignmentMinAcc) || 0.8 },
@@ -683,6 +692,23 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span>Assignment Templates (B3)</span>
+            </button>
+            <button
+              onClick={() => {
+                setInstructorTab('curriculum');
+                fetch('/api/v1/learning/progress/instructor-summary')
+                  .then((res) => (res.ok ? res.json() : []))
+                  .then((data) => setCurriculumSummary(data))
+                  .catch(() => {});
+              }}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                instructorTab === 'curriculum'
+                  ? 'bg-[#241B42] text-[#00F5A0] border border-[#00F5A0]/40'
+                  : 'text-[#9E93B8] hover:text-white hover:bg-[#1C1534]'
+              }`}
+            >
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>Curriculum Progress (C4)</span>
             </button>
             {isLoadingInstructor && (
               <span className="text-[11px] text-[#00D4FF] font-mono animate-pulse ml-auto">
@@ -916,6 +942,38 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
                     <option value="explain-only">Explain-Only (Conceptual explanations; code generation blocked)</option>
                     <option value="full">Full (Assistance permitted)</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Dataset / Pitfall Story (Part D2)</label>
+                  <select
+                    value={newAssignmentDataset}
+                    onChange={(e) => setNewAssignmentDataset(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
+                  >
+                    <option value="churn_lab_dataset.csv">Default: Customer Churn (1,000 rows)</option>
+                    <option value="story_churn_leakage.csv">Story: Churn with Target Leakage (Leakage Pitfall)</option>
+                    <option value="story_credit_imbalance.csv">Story: Credit Default (95/5 Class Imbalance)</option>
+                    <option value="story_housing_multicollinearity.csv">Story: Housing (Multicollinearity Pitfall)</option>
+                    <option value="story_hospital_simpsons_paradox.csv">Story: Hospital (Simpson's Paradox Pitfall)</option>
+                    <option value="story_ecommerce_identifier.csv">Story: E-Commerce (Identifier Leaking Order)</option>
+                    <option value="story_medical_mnar.csv">Story: Medical (MNAR Missingness Pattern)</option>
+                    {stories && stories.map((s) => (
+                      <option key={s.id} value={s.filename}>{s.title} ({s.pitfall})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2 flex items-center gap-2 pt-1 pb-1">
+                  <label className="flex items-center gap-2 text-xs text-[#9E93B8] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newAssignmentLearningAids}
+                      onChange={(e) => setNewAssignmentLearningAids(e.target.checked)}
+                      className="rounded bg-[#1C1534]"
+                    />
+                    <span className="text-[#F5F1EC] font-semibold">Enable Student Learning Aids (Heads-Up mistake cards & guidance during this lab)</span>
+                  </label>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -1168,6 +1226,43 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
             </div>
           )}
 
+          {/* TAB 5: Curriculum Progress (Part C4) */}
+          {instructorTab === 'curriculum' && (
+            <div
+              className="rounded-2xl p-6 border space-y-4"
+              style={{ background: BB.surface, borderColor: BB.border }}
+            >
+              <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-3">
+                <div className="flex items-center gap-2">
+                  <GraduationCap className="w-5 h-5 text-[#00F5A0]" />
+                  <h3 className="text-sm font-bold text-[#F5F1EC]">Curriculum Lesson Progress (Minimal, Read-Only)</h3>
+                </div>
+                <span className="text-xs text-[#9E93B8]">Cohort Student Metrics</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {curriculumSummary.length === 0 ? (
+                  <div className="text-xs text-[#9E93B8] italic py-4 col-span-3 text-center">
+                    No student curriculum progress recorded yet. Student activity in Guided Lessons will appear here.
+                  </div>
+                ) : (
+                  curriculumSummary.map((item: any) => (
+                    <div
+                      key={item.lesson_id}
+                      className="p-3.5 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] space-y-1.5"
+                    >
+                      <div className="text-xs font-bold text-[#F5F1EC] truncate">{item.lesson_title}</div>
+                      <div className="text-[11px] text-[#9E93B8] font-mono">ID: {item.lesson_id}</div>
+                      <div className="flex justify-between items-center pt-2 border-t border-[rgba(107,92,166,0.15)] text-xs">
+                        <span className="text-[#9E93B8]">Completed Students:</span>
+                        <span className="font-bold text-[#00F5A0] font-mono">{item.completed_count}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Manual Grade Modal (B6) */}
           <AnimatePresence>
             {gradingSubmission && (
@@ -1231,6 +1326,17 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
         /* STUDENT EXPERIENCE (Parts C1 - C5, D, E)                               */
         /* ══════════════════════════════════════════════════════════════════════ */
         <div className="space-y-4">
+          {/* Student Learning Layer: Educational Guidance (when aids allowed) */}
+          {activeExam && (activeExam.learning_aids_enabled ?? true) && (
+            <PanelLearningCollapsible
+              title="University Practical Lab Exam Environment"
+              concept="In lab exams, you demonstrate machine learning mastery by structuring clean pipelines, training estimators, and deploying to an isolated serving slot."
+              details="Heads-Up mistake cards and diagnostic hints are active to assist your learning journey. Follow rubric guidelines for minimum accuracy and latency."
+              practicalTip="Ensure all data transformers fit on train splits only, and verify deployment responses using sample record test queries."
+              citation="University Lab Exam Curriculum & scikit-learn standard evaluation"
+            />
+          )}
+
           {/* Main Lab Workspace: Left (Editor + Terminal) & Right (Deployment + Grading) */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
             {/* Left 7 Columns: Manual Code Studio & Terminal Output */}

@@ -67,6 +67,7 @@ class AssignmentCreate(BaseModel):
     due_date: Optional[datetime] = Field(None, description="Submission deadline")
     rubric: Optional[Dict[str, Any]] = Field(None, description="Evaluation rubric criteria")
     max_score: float = Field(100.0, ge=0.0, description="Maximum assignment score")
+    learning_aids_enabled: bool = Field(True, description="Whether heads-up mistake cards & learning aids are enabled")
 
 
 class AssignmentResponse(BaseModel):
@@ -81,6 +82,7 @@ class AssignmentResponse(BaseModel):
     due_date: Optional[datetime] = None
     rubric: Optional[Dict[str, Any]] = None
     max_score: float
+    learning_aids_enabled: bool = True
     created_by_id: UUID
     created_at: datetime
 
@@ -136,6 +138,7 @@ class LabExamInfo(BaseModel):
     rubric: Dict[str, Any] = Field(default_factory=dict, description="Grading rubric thresholds")
     starter_code: str = Field(..., description="Python starter code for student")
     copilot_policy: str = Field("full", description="Copilot policy: off | explain-only | full")
+    learning_aids_enabled: bool = Field(True, description="Whether learning aids/heads-up cards are enabled")
     open_time: Optional[datetime] = Field(None, description="Exam window open time")
     close_time: Optional[datetime] = Field(None, description="Exam window close deadline")
     is_closed: bool = Field(False, description="Whether exam is past close time")
