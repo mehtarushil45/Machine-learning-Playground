@@ -286,14 +286,17 @@ export const LocalDeploymentService = {
   },
 
   /** Retrieve real-time statistical drift report and serving latency telemetry */
-  getDriftReport: (deploymentId: string, minSamples = 5): Promise<DeploymentDriftReport> =>
+  getDriftReport: (deploymentId: string, minSamples = 50): Promise<DeploymentDriftReport> =>
     request<DeploymentDriftReport>(`/local-deployments/${deploymentId}/drift?min_samples=${minSamples}`),
 
-  /** Run simulated drift with synthetic production samples to preview drift detection */
-  simulateDrift: (deploymentId: string, shiftFactor = 2.5): Promise<DeploymentDriftReport> =>
-    request<DeploymentDriftReport>(`/local-deployments/${deploymentId}/drift/simulate?shift_factor=${shiftFactor}`, {
+  /** Run simulated drift with synthetic production samples in isolated simulation mode */
+  simulateDrift: (deploymentId: string, shiftFactor = 2.5, targetFeature?: string): Promise<DeploymentDriftReport> => {
+    const params = new URLSearchParams({ shift_factor: String(shiftFactor) });
+    if (targetFeature) params.append('target_feature', targetFeature);
+    return request<DeploymentDriftReport>(`/local-deployments/${deploymentId}/drift/simulate?${params.toString()}`, {
       method: 'POST',
-    }),
+    });
+  },
 };
 
 export interface DistributionBinComparison {
@@ -302,13 +305,26 @@ export interface DistributionBinComparison {
   current_pct: number;
 }
 
+export interface RollingWindowTrend {
+  window: string;
+  sample_count: number;
+  metric_value: number;
+  psi: number;
+  status: string;
+}
+
 export interface FeatureDriftDetail {
   feature: string;
-  type: 'numeric' | 'categorical';
+  type: 'numeric' | 'categorical' | 'binary' | 'excluded_identifier' | 'excluded_temporal' | string;
   psi: number;
-  status: 'STABLE' | 'MODERATE' | 'CRITICAL';
-  ks_statistic: number;
-  p_value: number;
+  status: 'STABLE' | 'MODERATE' | 'CRITICAL' | 'INSUFFICIENT_DATA' | 'EXCLUDED' | string;
+  status_display?: string;
+  test_name?: string;
+  test_statistic?: number;
+  p_value?: number | null;
+  test_display?: string;
+  importance?: number;
+  ks_statistic?: number;
   baseline_mean?: number;
   current_mean?: number;
   baseline_mode?: string;
@@ -326,15 +342,37 @@ export interface ServingTelemetry {
   throughput_rps: number;
 }
 
+export interface DeploymentDrrainContext {
+  primary_feature: string;
+  primary_feature_importance: number;
+  drifted_features: string[];
+  severity: string;
+  importance_weighted_score: number;
+  guidance: string;
+}
+
 export interface DeploymentDriftReport {
   deployment_id: string;
   drift_detected: boolean;
-  overall_status: 'HEALTHY' | 'MODERATE_DRIFT' | 'CRITICAL_DRIFT';
+  overall_status: 'HEALTHY' | 'MODERATE_SHIFT' | 'CRITICAL_DRIFT' | 'INSUFFICIENT_DATA' | string;
+  overall_status_display?: string;
   insufficient_data?: boolean;
   sample_count: number;
   min_required: number;
   highest_psi: number;
   drifted_features: string[];
+  drifted_features_count?: number;
+  total_features_count?: number;
+  drifted_share?: number;
+  importance_weighted_drift_score?: number;
+  retrain_recommended?: boolean;
+  smoothing_constant?: number;
+  performance_confirmed?: boolean;
+  alert_badge_label?: string | null;
+  live_performance?: any;
+  drift_over_time?: Record<string, RollingWindowTrend[]>;
+  retrain_context?: DeploymentDrrainContext | null;
+  is_simulation?: boolean;
   features: Record<string, FeatureDriftDetail>;
   telemetry: ServingTelemetry;
   recommendation: string;

@@ -330,9 +330,9 @@ async def get_deployment_drift(
     deployment_id: str,
     current_user: CurrentUser,
     db: DBSession,
-    min_samples: int = Query(5, ge=1, le=100),
+    min_samples: int = Query(50, ge=1, le=500),
 ) -> Dict[str, Any]:
-    """Retrieve statistical data drift report (PSI, KS test) and serving latency telemetry."""
+    """Retrieve statistical data drift report (PSI, statistical test) and serving latency telemetry."""
     return await svc.get_deployment_drift_report(
         deployment_id,
         owner_id=str(current_user.id),
@@ -350,13 +350,15 @@ async def simulate_deployment_drift(
     current_user: CurrentUser,
     db: DBSession,
     shift_factor: float = Query(2.5, ge=0.5, le=5.0),
+    target_feature: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
-    """Simulate production inferences with distribution shifts to test drift guardrails."""
+    """Simulate production inferences with distribution shifts to test drift guardrails in isolation."""
     return await svc.simulate_deployment_drift(
         deployment_id,
         owner_id=str(current_user.id),
         db=db,
         shift_factor=shift_factor,
+        target_feature=target_feature,
     )
 
 

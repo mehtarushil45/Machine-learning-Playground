@@ -1239,7 +1239,7 @@ async def get_deployment_drift_report(
     *,
     owner_id: str,
     db: AsyncSession,
-    min_samples: int = 5,
+    min_samples: int = 50,
 ) -> Dict[str, Any]:
     """Retrieve real-time drift analysis and serving telemetry for a deployment."""
     dep = await _get_deployment(deployment_id, db)
@@ -1265,6 +1265,16 @@ async def get_deployment_drift_report(
         except Exception as exc:
             logger.warning("Dynamic baseline extraction failed: %s", exc)
 
+    # Extract model feature importances from config, registry metadata, or metrics
+    fi = config.get("feature_importances") or {}
+    if not fi:
+        try:
+            from app.ml.model_registry import get_model_by_id
+            reg = get_model_by_id(dep.model_id) or {}
+            fi = reg.get("feature_importances") or reg.get("metrics", {}).get("feature_importances") or {}
+        except Exception:
+            pass
+
     # Fetch recent inference history records (most recent 500 records)
     dep_uuid = dep.id
     history_res = await db.execute(
@@ -1275,8 +1285,13 @@ async def get_deployment_drift_report(
     )
     records = list(history_res.scalars().all())
 
+    # Check for submitted actuals
+    actuals = config.get("actuals") or []
+
     from app.services.drift_monitoring_service import generate_drift_report
-    return generate_drift_report(dep, records, min_samples=min_samples)
+    report = generate_drift_report(dep, records, min_samples=min_samples, feature_importances=fi, actuals=actuals)
+    report["is_simulation"] = False
+    return report
 
 
 async def simulate_deployment_drift(
@@ -1285,8 +1300,12 @@ async def simulate_deployment_drift(
     owner_id: str,
     db: AsyncSession,
     shift_factor: float = 2.5,
+    target_feature: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Generate a simulated drift analysis with synthetic production samples to preview drift detection."""
+    """Generate an isolated simulated drift analysis with synthetic production samples to preview drift detection.
+    
+    Runs entirely in-memory and never writes to real prediction logs or databases.
+    """
     dep = await _get_deployment(deployment_id, db)
     if dep.owner_id and dep.owner_id != owner_id:
         raise HTTPException(
@@ -1298,26 +1317,49 @@ async def simulate_deployment_drift(
     baseline = config.get("baseline_distribution", {})
     feature_cols = dep.feature_columns or []
 
-    # Generate 50 synthetic records with simulated drift on the first feature
-    simulated_records = []
-    drift_target_feature = feature_cols[0] if feature_cols else ""
+    # Target feature: specified or first active numeric feature
+    drift_target_feature = target_feature or (feature_cols[0] if feature_cols else "")
+    if target_feature and target_feature in feature_cols:
+        drift_target_feature = target_feature
 
+    # Extract feature importances
+    fi = config.get("feature_importances") or {}
+    if not fi:
+        try:
+            from app.ml.model_registry import get_model_by_id
+            reg = get_model_by_id(dep.model_id) or {}
+            fi = reg.get("feature_importances") or reg.get("metrics", {}).get("feature_importances") or {}
+        except Exception:
+            pass
+
+    # Generate 50 synthetic records purely in-memory
+    simulated_records = []
     for i in range(50):
         fake_inputs: Dict[str, Any] = {}
         for col in feature_cols:
             col_info = baseline.get(col, {})
-            if col_info.get("type") == "numeric":
+            col_type = col_info.get("type", "numeric")
+            if col_type == "numeric":
                 mean_val = float(col_info.get("mean", 50.0))
                 std_val = float(col_info.get("std", 10.0))
-                # Inject significant mean shift on target feature
                 if col == drift_target_feature:
                     val = float(np.random.normal(mean_val + shift_factor * std_val, max(std_val, 1.0)))
                 else:
                     val = float(np.random.normal(mean_val, max(std_val, 1.0)))
                 fake_inputs[col] = round(val, 2)
+            elif col_type == "binary":
+                cats = col_info.get("categories", ["0", "1"])
+                if col == drift_target_feature:
+                    # Inverted binary distribution
+                    fake_inputs[col] = cats[0] if (i < 45) else cats[1]
+                else:
+                    fake_inputs[col] = cats[i % len(cats)]
             else:
-                cats = col_info.get("categories", ["A", "B"])
-                fake_inputs[col] = cats[i % len(cats)] if cats else "sample"
+                cats = col_info.get("categories", ["A", "B", "C"])
+                if col == drift_target_feature:
+                    fake_inputs[col] = cats[-1] if (i < 40) else cats[0]
+                else:
+                    fake_inputs[col] = cats[i % len(cats)] if cats else "sample"
 
         simulated_records.append(
             type("SimulatedRec", (), {
@@ -1329,6 +1371,10 @@ async def simulate_deployment_drift(
         )
 
     from app.services.drift_monitoring_service import generate_drift_report
-    return generate_drift_report(dep, simulated_records, min_samples=5)
+    report = generate_drift_report(dep, simulated_records, min_samples=5, feature_importances=fi)
+    report["is_simulation"] = True
+    report["simulation_target_feature"] = drift_target_feature
+    report["simulation_shift_factor"] = shift_factor
+    return report
 
 
