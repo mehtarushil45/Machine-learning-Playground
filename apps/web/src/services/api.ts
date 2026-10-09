@@ -210,6 +210,11 @@ export interface LabExamInfo {
     max_score?: number;
   };
   starter_code: string;
+  copilot_policy?: string;
+  open_time?: string | null;
+  close_time?: string | null;
+  is_closed?: boolean;
+  protected_regions?: string[];
 }
 
 export interface LabExamSession {
@@ -221,6 +226,8 @@ export interface LabExamSession {
   status: string;
   grade_score?: number | null;
   submitted_at?: string | null;
+  is_locked?: boolean;
+  submission_receipt?: any;
 }
 
 export interface LabDeployResponse {
@@ -245,6 +252,7 @@ export interface RubricCriterionResult {
   passed: boolean;
   points_awarded: number;
   max_points: number;
+  hint?: string | null;
 }
 
 export interface LabEvaluateResponse {
@@ -254,6 +262,8 @@ export interface LabEvaluateResponse {
   passed: boolean;
   criteria_results: RubricCriterionResult[];
   summary: string;
+  guardrail_warnings?: string[];
+  latency_method?: string;
 }
 
 export interface LabSubmitResponse {
@@ -263,15 +273,71 @@ export interface LabSubmitResponse {
   percentage: number;
   passed: boolean;
   submitted_at: string;
+  code_sha256?: string;
+  model_sha256?: string;
+  rubric_snapshot?: any;
+  reproducibility_verified?: boolean;
+  guardrail_flags?: string[];
   message: string;
 }
 
+export interface ClassroomRosterMember {
+  user_id: string;
+  email: string;
+  full_name?: string | null;
+  role: string;
+  joined_at: string;
+}
+
+export interface SubmissionDashboardItem {
+  submission_id: string;
+  learner_id: string;
+  learner_name: string;
+  learner_email: string;
+  status: string;
+  grade_score?: number | null;
+  submitted_at?: string | null;
+  reproducibility_verified: boolean;
+  code_sha256?: string | null;
+  model_sha256?: string | null;
+  guardrail_flags: string[];
+  code_snippet?: string | null;
+}
+
+export interface ReproduceAuditResponse {
+  submission_id: string;
+  original_score: number;
+  reproduced_score: number;
+  tolerance: number;
+  verified: boolean;
+  reproduced_metrics: Record<string, any>;
+  details: string;
+}
+
 export const ClassroomService = {
+  // Student Lab Exam Methods
   listExams: () => request<LabExamInfo[]>('/classrooms/exams'),
 
   getExam: (examId: string) => request<LabExamInfo>(`/classrooms/exams/${examId}`),
 
   getSession: (examId: string) => request<LabExamSession>(`/classrooms/exams/${examId}/session`),
+
+  saveDraft: (examId: string, code: string) =>
+    request<{ saved_at: string; message: string }>(`/classrooms/exams/${examId}/draft`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  copilotAsk: (examId: string, prompt: string, codeContext?: string) =>
+    request<{ reply: string; policy: string; allowed: boolean }>(`/classrooms/exams/${examId}/copilot`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt, code_context: codeContext }),
+    }),
+
+  stopLabSlot: (examId: string) =>
+    request<{ status: string; message: string }>(`/classrooms/exams/${examId}/stop`, {
+      method: 'POST',
+    }),
 
   deployModel: (examId: string, modelId?: string, code?: string) =>
     request<LabDeployResponse>(`/classrooms/exams/${examId}/deploy`, {
@@ -289,6 +355,56 @@ export const ClassroomService = {
     request<LabSubmitResponse>(`/classrooms/exams/${examId}/submit`, {
       method: 'POST',
       body: JSON.stringify({ code, deployment_id: deploymentId }),
+    }),
+
+  // Instructor Management Methods (Parts B1-B6)
+  listClassrooms: () => request<any[]>('/classrooms'),
+
+  createClassroom: (data: { course_id: string; name: string; code: string; term?: string }) =>
+    request<any>('/classrooms', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getRoster: (classroomId: string) => request<ClassroomRosterMember[]>(`/classrooms/${classroomId}/roster`),
+
+  inviteStudent: (classroomId: string, data: { email?: string; invite_code?: string; role?: string }) =>
+    request<any>(`/classrooms/${classroomId}/invite`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listAssignments: (classroomId?: string) =>
+    request<any[]>(classroomId ? `/classrooms/assignments?classroom_id=${classroomId}` : '/classrooms/assignments'),
+
+  createAssignment: (data: any) =>
+    request<any>('/classrooms/assignments', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getSubmissions: (assignmentId: string) =>
+    request<SubmissionDashboardItem[]>(`/classrooms/assignments/${assignmentId}/submissions`),
+
+  getGradesCsvUrl: (assignmentId: string) => `/api/v1/classrooms/assignments/${assignmentId}/grades.csv`,
+
+  auditReproducibility: (submissionId: string) =>
+    request<ReproduceAuditResponse>(`/classrooms/submissions/${submissionId}/reproduce`, {
+      method: 'POST',
+    }),
+
+  gradeSubmission: (submissionId: string, data: { score: number; comments: string }) =>
+    request<any>(`/classrooms/submissions/${submissionId}/grade`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listTemplates: () => request<any[]>('/classrooms/templates'),
+
+  saveTemplate: (data: any) =>
+    request<any>('/classrooms/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 };
 

@@ -135,6 +135,11 @@ class LabExamInfo(BaseModel):
     description: str = Field(..., description="Detailed lab problem statement")
     rubric: Dict[str, Any] = Field(default_factory=dict, description="Grading rubric thresholds")
     starter_code: str = Field(..., description="Python starter code for student")
+    copilot_policy: str = Field("full", description="Copilot policy: off | explain-only | full")
+    open_time: Optional[datetime] = Field(None, description="Exam window open time")
+    close_time: Optional[datetime] = Field(None, description="Exam window close deadline")
+    is_closed: bool = Field(False, description="Whether exam is past close time")
+    protected_regions: List[str] = Field(default_factory=list, description="Protected starter code snippets")
 
 
 class LabExamSessionResponse(BaseModel):
@@ -147,6 +152,8 @@ class LabExamSessionResponse(BaseModel):
     status: str = "IN_PROGRESS"
     grade_score: Optional[float] = None
     submitted_at: Optional[str] = None
+    is_locked: bool = False
+    submission_receipt: Optional[Dict[str, Any]] = None
 
 
 class LabDeployRequest(BaseModel):
@@ -184,6 +191,7 @@ class RubricCriterionResult(BaseModel):
     passed: bool
     points_awarded: float
     max_points: float
+    hint: Optional[str] = None
 
 
 class LabEvaluateResponse(BaseModel):
@@ -194,11 +202,13 @@ class LabEvaluateResponse(BaseModel):
     passed: bool
     criteria_results: List[RubricCriterionResult]
     summary: str
+    guardrail_warnings: List[str] = Field(default_factory=list)
+    latency_method: str = "Warm-up (2 calls) + Median of 5 serving process calls"
 
 
 class LabSubmitRequest(BaseModel):
     """Final submission of student lab exam."""
-    code: str
+    code: Optional[str] = None
     deployment_id: Optional[str] = None
 
 
@@ -210,4 +220,94 @@ class LabSubmitResponse(BaseModel):
     percentage: float
     passed: bool
     submitted_at: str
+    code_sha256: str
+    model_sha256: Optional[str] = None
+    rubric_snapshot: Optional[Any] = None
+    reproducibility_verified: bool = False
+    guardrail_flags: List[str] = Field(default_factory=list)
     message: str
+
+
+# ── Student Draft & Integrity Schemas ────────────────────────────────────────
+
+class StudentDraftRequest(BaseModel):
+    code: str = Field(..., description="Draft Python source code")
+
+
+class StudentDraftResponse(BaseModel):
+    exam_id: str
+    student_id: str
+    saved_at: str
+    code_length: int
+    message: str
+
+
+class CopilotProxyRequest(BaseModel):
+    prompt: str = Field(..., description="Student query to Copilot")
+    code_context: Optional[str] = Field(None, description="Current student editor code context")
+
+
+class CopilotProxyResponse(BaseModel):
+    reply: str
+    policy: str
+    allowed: bool
+
+
+# ── Instructor Dashboard & Grading Schemas ───────────────────────────────────
+
+class ClassroomInviteRequest(BaseModel):
+    email: Optional[str] = Field(None, description="Student email to invite")
+    invite_code: Optional[str] = Field(None, description="Classroom join code")
+    role: ClassroomRole = Field(ClassroomRole.learner, description="Role")
+
+
+class ClassroomRosterMember(BaseModel):
+    user_id: UUID
+    email: str
+    full_name: Optional[str] = None
+    role: ClassroomRole
+    joined_at: datetime
+
+
+class SubmissionDashboardItem(BaseModel):
+    submission_id: str
+    learner_id: str
+    learner_name: str
+    learner_email: str
+    status: str
+    grade_score: Optional[float] = None
+    submitted_at: Optional[str] = None
+    reproducibility_verified: bool = False
+    code_sha256: Optional[str] = None
+    model_sha256: Optional[str] = None
+    guardrail_flags: List[str] = Field(default_factory=list)
+    code_snippet: Optional[str] = None
+
+
+class ReproduceAuditResponse(BaseModel):
+    submission_id: str
+    original_score: float
+    reproduced_score: float
+    tolerance: float = 0.05
+    verified: bool
+    reproduced_metrics: Dict[str, Any] = Field(default_factory=dict)
+    details: str
+
+
+class ManualGradeRequest(BaseModel):
+    score: float = Field(..., ge=0.0, le=100.0, description="Manual adjusted score")
+    comments: str = Field(..., description="Instructor feedback comments")
+
+
+class AssignmentTemplateCreate(BaseModel):
+    title: str
+    description: str
+    problem_type: str = "classification"
+    dataset_name: str
+    dataset_id: str
+    target_column: str
+    feature_columns: List[str] = Field(default_factory=list)
+    starter_code: str
+    rubric: Dict[str, Any]
+    copilot_policy: str = "full"
+
