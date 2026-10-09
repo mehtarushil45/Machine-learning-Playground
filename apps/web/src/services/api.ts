@@ -339,6 +339,11 @@ export const ClassroomService = {
       method: 'POST',
     }),
 
+  resetSession: (examId: string) =>
+    request<{ status: string; message: string }>(`/classrooms/exams/${examId}/reset`, {
+      method: 'POST',
+    }),
+
   deployModel: (examId: string, modelId?: string, code?: string) =>
     request<LabDeployResponse>(`/classrooms/exams/${examId}/deploy`, {
       method: 'POST',

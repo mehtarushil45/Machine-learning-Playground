@@ -475,6 +475,29 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
     }
   };
 
+  // Reset & Unlock Lab Exam Session (Practice/Instructor Mode)
+  const handleResetSession = async () => {
+    if (!selectedExamId) return;
+    try {
+      await ClassroomService.resetSession(selectedExamId);
+      setSubmissionReceipt(null);
+      setDeployment(null);
+      setEvaluationResult(null);
+      setPredictionResult(null);
+      if (activeExam) {
+        setCode(activeExam.starter_code);
+      }
+      setOutputLines((prev) => [
+        ...prev,
+        '─────────────────────────────────────────────────────────────',
+        `[Session Reset] Lab exam unlocked. Starter pipeline restored. Ready for new training & deployment.`,
+      ]);
+      onShowToast?.('Lab Exam Unlocked', 'Session reset to active. You can now edit code, run, deploy, and evaluate.', 'success');
+    } catch (err: any) {
+      onShowToast?.('Reset Failed', err.message, 'error');
+    }
+  };
+
   // 10. AI Copilot Chat Handler (Server-Enforced)
   const handleSendCopilotMessage = async (promptText?: string) => {
     const textToSend = (promptText || '').trim();
@@ -1395,9 +1418,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
                         <span>Submit Exam</span>
                       </button>
                     ) : (
-                      <div className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#00F5A0]/20 text-[#00F5A0] border border-[#00F5A0]/40 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Locked: {submissionReceipt.grade_score}/100</span>
+                      <div className="flex items-center gap-2">
+                        <div className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#00F5A0]/20 text-[#00F5A0] border border-[#00F5A0]/40 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Locked: {submissionReceipt.grade_score}/100</span>
+                        </div>
+                        <button
+                          onClick={handleResetSession}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#2A1E4A] hover:bg-[#3D2C6A] text-[#00D4FF] border border-[#00D4FF]/40 transition-colors flex items-center gap-1 shadow cursor-pointer"
+                          title="Reset locked session to practice or re-test the full deployment workflow"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Unlock Lab</span>
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1416,9 +1449,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
 
                   {/* Submission Lock Overlay (C5) */}
                   {submissionReceipt && (
-                    <div className="absolute top-3 right-3 z-10 px-3 py-1.5 rounded-xl bg-[#090614]/90 border border-[#00F5A0]/40 text-xs text-[#00F5A0] flex items-center gap-1.5 shadow-xl backdrop-blur-sm">
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Exam Locked & Submitted</span>
+                    <div className="absolute top-3 right-3 z-10 px-3.5 py-2 rounded-xl bg-[#090614]/95 border border-[#00F5A0]/40 text-xs text-[#00F5A0] flex items-center gap-3 shadow-2xl backdrop-blur-md">
+                      <div className="flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-[#00F5A0]" />
+                        <span className="font-semibold">Exam Locked & Submitted ({submissionReceipt.grade_score}/100)</span>
+                      </div>
+                      <button
+                        onClick={handleResetSession}
+                        className="px-2.5 py-1 rounded-lg bg-[#00D4FF] hover:bg-[#00F5A0] text-[#0B0912] text-[11px] font-bold transition-all shadow cursor-pointer flex items-center gap-1"
+                        title="Unlock exam session to practice or re-test the workflow"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Unlock & Practice</span>
+                      </button>
                     </div>
                   )}
                 </div>

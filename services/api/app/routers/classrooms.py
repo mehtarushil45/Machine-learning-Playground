@@ -809,6 +809,54 @@ async def stop_lab_slot(
     return {"message": "Lab deployment slot stopped successfully.", "deployment_id": dep_id, "status": "STOPPED"}
 
 
+@router.post("/exams/{exam_id}/reset", summary="Reset/Unlock student lab exam session for testing & practice")
+async def reset_lab_session(
+    request: Request,
+    exam_id: str,
+    current_user: OptionalCurrentUser = None,
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Reset the student's lab session back to IN_PROGRESS so they can re-test the workflow."""
+    student_id = _resolve_student_id(request, current_user)
+    session_key = f"{student_id}:{exam_id}"
+    exam = CURATED_LAB_EXAMS.get(exam_id, {})
+    starter = exam.get("starter_code", "")
+
+    # Stop any running deployment slot
+    old_dep_id = _STUDENT_LAB_SESSIONS.get(session_key, {}).get("active_deployment_id")
+    if old_dep_id:
+        try:
+            await dep_svc.stop_local_deployment(old_dep_id, owner_id=student_id, db=db)
+        except Exception:
+            pass
+
+    _STUDENT_LAB_SESSIONS[session_key] = {
+        "exam_id": exam_id,
+        "student_id": student_id,
+        "active_deployment_id": None,
+        "code_draft": starter,
+        "version_count": 0,
+        "status": "IN_PROGRESS",
+        "grade_score": None,
+        "submitted_at": None,
+        "is_locked": False,
+        "submission_receipt": None,
+    }
+
+    # Also clear any default/demo sessions so user is completely unlocked
+    for k in list(_STUDENT_LAB_SESSIONS.keys()):
+        if k.endswith(f":{exam_id}") or exam_id == "all":
+            _STUDENT_LAB_SESSIONS[k]["status"] = "IN_PROGRESS"
+            _STUDENT_LAB_SESSIONS[k]["is_locked"] = False
+            _STUDENT_LAB_SESSIONS[k]["submission_receipt"] = None
+
+    return {
+        "message": f"Lab session for exam '{exam_id}' has been reset. The editor and workflow are unlocked.",
+        "exam_id": exam_id,
+        "status": "IN_PROGRESS",
+    }
+
+
 @router.post("/exams/{exam_id}/evaluate", response_model=LabEvaluateResponse, summary="Run automated rubric tests on deployed model")
 async def evaluate_lab_model(
     request: Request,
