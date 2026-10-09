@@ -71,22 +71,30 @@ from sklearn.compose import ColumnTransformer
 
 # Synthetic lab training
 np.random.seed(42)
-X = pd.DataFrame({
+df = pd.DataFrame({
     'tenure': np.random.randint(1, 60, size=50),
     'monthly_charges': np.random.uniform(20.0, 100.0, size=50),
     'total_charges': np.random.uniform(100.0, 5000.0, size=50),
+    'churn': np.random.choice([0, 1], size=50),
 })
-y = np.random.choice([0, 1], size=50)
+
+# [PROTECTED: START - TARGET & SPLIT]
+target = 'churn'
+X = df.drop(columns=[target])
+y = df[target]
+# [PROTECTED: END - TARGET & SPLIT]
 
 prep = ColumnTransformer([
     ('num', StandardScaler(), ['tenure', 'monthly_charges', 'total_charges'])
 ])
-pipe = Pipeline([
+pipeline = Pipeline([
     ('preprocessor', prep),
     ('classifier', RandomForestClassifier(n_estimators=10, random_state=42))
 ])
-pipe.fit(X, y)
-joblib.dump(pipe, 'trained_model_pipeline.joblib')
+pipeline.fit(X, y)
+# [PROTECTED: START - MANDATORY PIPELINE EXPORT]
+joblib.dump(pipeline, 'trained_model_pipeline.joblib')
+# [PROTECTED: END - MANDATORY PIPELINE EXPORT]
 print("[Student Script] Trained and exported model v1 successfully.")
 """
 
@@ -133,22 +141,30 @@ from sklearn.compose import ColumnTransformer
 
 # V2: Improved hyperparameter tuning (n_estimators=30)
 np.random.seed(99)
-X = pd.DataFrame({
+df = pd.DataFrame({
     'tenure': np.random.randint(1, 60, size=50),
     'monthly_charges': np.random.uniform(20.0, 100.0, size=50),
     'total_charges': np.random.uniform(100.0, 5000.0, size=50),
+    'churn': np.random.choice([0, 1], size=50),
 })
-y = np.random.choice([0, 1], size=50)
+
+# [PROTECTED: START - TARGET & SPLIT]
+target = 'churn'
+X = df.drop(columns=[target])
+y = df[target]
+# [PROTECTED: END - TARGET & SPLIT]
 
 prep = ColumnTransformer([
     ('num', StandardScaler(), ['tenure', 'monthly_charges', 'total_charges'])
 ])
-pipe = Pipeline([
+pipeline = Pipeline([
     ('preprocessor', prep),
     ('classifier', RandomForestClassifier(n_estimators=30, random_state=99))
 ])
-pipe.fit(X, y)
-joblib.dump(pipe, 'trained_model_pipeline.joblib')
+pipeline.fit(X, y)
+# [PROTECTED: START - MANDATORY PIPELINE EXPORT]
+joblib.dump(pipeline, 'trained_model_pipeline.joblib')
+# [PROTECTED: END - MANDATORY PIPELINE EXPORT]
 print("[Student Script] Trained and exported model v2 with updated hyperparameters.")
 """
 

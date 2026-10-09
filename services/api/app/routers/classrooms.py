@@ -25,7 +25,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from uuid import UUID
 
 import numpy as np
@@ -105,13 +105,14 @@ def _get_session_lock(student_id: str, exam_id: str) -> asyncio.Lock:
     return _SESSION_LOCKS[key]
 
 
-def _resolve_student_id(request: Request, current_user: OptionalCurrentUser = None) -> str:
+def _resolve_student_id(request: Optional[Request] = None, current_user: OptionalCurrentUser = None) -> str:
     """Resolve student identity from auth token or X-User-Id header for complete session isolation (D3)."""
     if current_user and hasattr(current_user, "id"):
         return str(current_user.id)
-    header_val = request.headers.get("x-user-id")
-    if header_val and header_val.strip():
-        return header_val.strip()
+    if request is not None and hasattr(request, "headers"):
+        header_val = request.headers.get("x-user-id")
+        if header_val and header_val.strip():
+            return header_val.strip()
     return "guest-student"
 
 
@@ -322,7 +323,7 @@ def _get_hidden_test_cases(exam_id: str) -> List[Dict[str, Any]]:
     rng = np.random.RandomState(999)
     cases = []
     for _ in range(30):
-        tenure = int(rng.randint(2, 70))
+        tenure = rng.randint(2, 70)
         monthly = round(float(rng.uniform(22.0, 110.0)), 2)
         total = round(tenure * monthly * float(rng.uniform(0.92, 1.08)), 2)
         contract = str(rng.choice(["month-to-month", "one-year", "two-year"], p=[0.5, 0.3, 0.2]))
@@ -454,8 +455,8 @@ async def get_lab_exam(exam_id: str) -> LabExamInfo:
 
 @router.get("/exams/{exam_id}/session", response_model=LabExamSessionResponse, summary="Get student lab session state")
 async def get_lab_session(
-    request: Request,
     exam_id: str,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
     db: AsyncSession = Depends(get_db),
 ) -> LabExamSessionResponse:
@@ -509,14 +510,25 @@ async def get_lab_session(
         }
         _STUDENT_LAB_SESSIONS[session_key] = state
 
-    return LabExamSessionResponse(**state)
+    return LabExamSessionResponse(
+        exam_id=str(state.get("exam_id") or exam_id),
+        student_id=str(state.get("student_id") or student_id),
+        active_deployment_id=state.get("active_deployment_id"),
+        code_draft=state.get("code_draft"),
+        version_count=int(state.get("version_count", 1)),
+        status=str(state.get("status", "IN_PROGRESS")),
+        grade_score=float(state["grade_score"]) if state.get("grade_score") is not None else None,
+        submitted_at=state.get("submitted_at"),
+        is_locked=bool(state.get("is_locked", False)),
+        submission_receipt=state.get("submission_receipt"),
+    )
 
 
 @router.post("/exams/{exam_id}/draft", response_model=StudentDraftResponse, summary="Save code draft server-side (E3)")
 async def save_code_draft(
-    request: Request,
     exam_id: str,
     payload: StudentDraftRequest,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
     db: AsyncSession = Depends(get_db),
 ) -> StudentDraftResponse:
@@ -549,9 +561,9 @@ async def save_code_draft(
 
 @router.post("/exams/{exam_id}/copilot", response_model=CopilotProxyResponse, summary="Server-enforced Copilot Proxy (B2)")
 async def copilot_proxy(
-    request: Request,
     exam_id: str,
     payload: CopilotProxyRequest,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
 ) -> CopilotProxyResponse:
     """Enforce Copilot policies server-side: 'off' | 'explain-only' | 'full'."""
@@ -609,9 +621,9 @@ async def copilot_proxy(
 
 @router.post("/exams/{exam_id}/deploy", response_model=LabDeployResponse, summary="Deploy model to lab slot (in-place singleton)")
 async def deploy_lab_model(
-    request: Request,
     exam_id: str,
     payload: LabDeployRequest,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
     db: AsyncSession = Depends(get_db),
 ) -> LabDeployResponse:
@@ -793,8 +805,8 @@ async def deploy_lab_model(
 
 @router.post("/exams/{exam_id}/stop", summary="Stop student lab deployment slot (Part A2)")
 async def stop_lab_slot(
-    request: Request,
     exam_id: str,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -811,8 +823,8 @@ async def stop_lab_slot(
 
 @router.post("/exams/{exam_id}/reset", summary="Reset/Unlock student lab exam session for testing & practice")
 async def reset_lab_session(
-    request: Request,
     exam_id: str,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -859,9 +871,9 @@ async def reset_lab_session(
 
 @router.post("/exams/{exam_id}/evaluate", response_model=LabEvaluateResponse, summary="Run automated rubric tests on deployed model")
 async def evaluate_lab_model(
-    request: Request,
     exam_id: str,
     payload: Optional[LabEvaluateRequest] = None,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
     db: AsyncSession = Depends(get_db),
 ) -> LabEvaluateResponse:
@@ -923,7 +935,7 @@ async def evaluate_lab_model(
                 hint="Start or redeploy your model pipeline to ensure the inference endpoint transitions to RUNNING." if not is_running else None,
             ))
 
-            if not is_running:
+            if not is_running or dep is None:
                 # If stopped, all other criteria fail cleanly (Proves A2: stopped endpoint = 0 score)
                 criteria.extend([
                     RubricCriterionResult(
@@ -967,10 +979,13 @@ async def evaluate_lab_model(
                     guardrail_warnings=[],
                 )
 
+            dep_id_str: str = str(target_dep_id or "")
+
             # Criterion 2: Schema Introspection & Feature Completeness (20 pts)
             schema = dep.input_schema or {}
-            expected_features = set(exam.get("feature_columns", []))
-            actual_features = set(schema.keys())
+            raw_features: List[str] = [str(c) for c in (exam.get("feature_columns") or [])]
+            expected_features: set[str] = set(raw_features)
+            actual_features: set[str] = set(schema.keys())
             if not actual_features and dep.feature_columns:
                 actual_features = set(dep.feature_columns)
             matched = expected_features.intersection(actual_features)
@@ -994,13 +1009,13 @@ async def evaluate_lab_model(
             test_inputs = dep.sample_inputs or sample_input_fallback
             inference_passed = False
             latencies: List[float] = []
-            if test_inputs:
+            if test_inputs and dep_id_str:
                 from app.schemas.local_deployment import LocalPredictRequest
                 try:
                     for _ in range(2):
-                        await dep_svc.predict_local(target_dep_id, LocalPredictRequest(inputs=test_inputs), owner_id=student_id, db=db)
+                        await dep_svc.predict_local(dep_id_str, LocalPredictRequest(inputs=test_inputs), owner_id=student_id, db=db)
                     for _ in range(5):
-                        pr = await dep_svc.predict_local(target_dep_id, LocalPredictRequest(inputs=test_inputs), owner_id=student_id, db=db)
+                        pr = await dep_svc.predict_local(dep_id_str, LocalPredictRequest(inputs=test_inputs), owner_id=student_id, db=db)
                         latencies.append(pr.latency_ms)
                     inference_passed = len(latencies) == 5
                 except Exception as exc:
@@ -1027,12 +1042,12 @@ async def evaluate_lab_model(
             correct_preds = 0
             total_cases = len(hidden_cases)
 
-            if inference_passed and total_cases > 0:
+            if inference_passed and total_cases > 0 and dep_id_str:
                 from app.schemas.local_deployment import LocalPredictRequest
                 for c in hidden_cases:
                     try:
                         p_res = await dep_svc.predict_local(
-                            target_dep_id,
+                            dep_id_str,
                             LocalPredictRequest(inputs=c["inputs"]),
                             owner_id=student_id,
                             db=db,
@@ -1099,9 +1114,9 @@ async def evaluate_lab_model(
 
 @router.post("/exams/{exam_id}/submit", response_model=LabSubmitResponse, summary="Finalize and submit lab exam (A3, C2)")
 async def submit_lab_exam(
-    request: Request,
     exam_id: str,
     payload: Optional[LabSubmitRequest] = None,
+    request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
     db: AsyncSession = Depends(get_db),
 ) -> LabSubmitResponse:

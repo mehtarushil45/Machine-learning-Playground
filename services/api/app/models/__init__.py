@@ -45,7 +45,6 @@ __all__ = [
     "Submission",
     "SubmissionStatus",
     "Feedback",
-    "PortfolioProject",
     # V7A
     "Workspace",
     "WorkspaceStatus",

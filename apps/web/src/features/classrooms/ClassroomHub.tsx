@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Play,
@@ -40,7 +40,7 @@ import {
 import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { MonacoCodeStudioEditor } from '../pipelines/MonacoCodeStudioEditor';
 import { AICopilotDrawer, type ChatMessage } from '../../components/shared/AICopilotDrawer';
-import { useAuthContext } from '../../providers/AuthContext';
+import { AuthContext } from '../../providers/AuthContext';
 
 /* ── Enterprise Design Tokens ─────────────────────────────────────────── */
 const BB = {
@@ -70,7 +70,8 @@ export interface ClassroomHubProps {
 }
 
 export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
-  const { user } = useAuthContext();
+  const authCtx = useContext(AuthContext);
+  const user = authCtx?.user;
 
   // Role Detection: faculty, lab coordinator, admin can view Instructor Side
   const isFacultyRole = useMemo(() => {
@@ -175,8 +176,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
             // Fetch active session state for this exam
             try {
               const sess = await ClassroomService.getSession(initial.id);
-              if (sess.code_draft) setCode(sess.code_draft);
-              if (sess.status === 'SUBMITTED' && sess.submission_receipt) {
+              if (sess?.code_draft) setCode(sess.code_draft);
+              if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
                 setSubmissionReceipt({
                   submission_id: sess.submission_receipt.submission_id || 'sub-locked',
                   status: 'SUBMITTED',
@@ -257,12 +258,13 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
     setEvaluationResult(null);
     setPredictionResult(null);
     setSubmissionReceipt(null);
-    setOutputLines([`[System] Scoped to ${target.title}. Starter pipeline loaded.`]);
+    setOutputLines([`[System] Switched to ${target.title}. Starter pipeline loaded.`]);
+    onShowToast?.('Exam Switched', `Switched to ${target.title}`, 'info');
 
     try {
       const sess = await ClassroomService.getSession(examId);
-      if (sess.code_draft) setCode(sess.code_draft);
-      if (sess.status === 'SUBMITTED' && sess.submission_receipt) {
+      if (sess?.code_draft) setCode(sess.code_draft);
+      if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
         setSubmissionReceipt({
           submission_id: sess.submission_receipt.submission_id || 'sub-locked',
           status: 'SUBMITTED',
@@ -629,70 +631,15 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
   }
 
   return (
-    <div className="space-y-4">
-      {/* ── Top Role & Navigation Banner ── */}
-      <div
-        className="px-5 py-3 rounded-2xl border flex items-center justify-between flex-wrap gap-3 shadow-lg"
-        style={{
-          background: 'linear-gradient(135deg, #151026 0%, #1A1333 100%)',
-          borderColor: BB.border,
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-xl bg-[#00D4FF]/15 text-[#00D4FF]">
-            <GraduationCap className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-[#F5F1EC]">University ML Laboratory Hub</h2>
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-[#4B3B7C]/40 text-[#00D4FF] border border-[#00D4FF]/30">
-                CS401 Applied Machine Learning
-              </span>
-            </div>
-            <p className="text-[11px] text-[#9E93B8]">
-              {viewMode === 'instructor'
-                ? 'Faculty Portal: Manage batches, assignments, grading rosters & reproducibility audits'
-                : 'Student Exam Workspace: Sandboxed coding, in-place singleton serving & automated rubric evaluation'}
-            </p>
-          </div>
-        </div>
-
-        {/* Role Toggle Switcher (Permitted for Faculty/Admins) */}
-        {isFacultyRole && (
-          <div className="flex items-center gap-2 bg-[#0B0912]/80 p-1 rounded-xl border border-[rgba(107,92,166,0.3)]">
-            <button
-              onClick={() => setViewMode('student')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                viewMode === 'student'
-                  ? 'bg-[#00D4FF] text-[#0B0912] shadow'
-                  : 'text-[#9E93B8] hover:text-white'
-              }`}
-            >
-              <FileCode className="w-3.5 h-3.5" />
-              <span>Student Workspace</span>
-            </button>
-            <button
-              onClick={() => setViewMode('instructor')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                viewMode === 'instructor'
-                  ? 'bg-[#C9A24B] text-[#0B0912] shadow'
-                  : 'text-[#9E93B8] hover:text-white'
-              }`}
-            >
-              <Settings className="w-3.5 h-3.5" />
-              <span>Instructor Portal</span>
-            </button>
-          </div>
-        )}
-      </div>
-
+    <div className="space-y-3 pt-0">
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {/* INSTRUCTOR EXPERIENCE (Parts B1 - B6)                                  */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {viewMode === 'instructor' ? (
         <div className="space-y-4">
           {/* Instructor Tab Header */}
-          <div className="flex items-center gap-2 border-b border-[rgba(107,92,166,0.2)] pb-2 flex-wrap">
+          <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-2 flex-wrap gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setInstructorTab('submissions')}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -741,6 +688,18 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
               <span className="text-[11px] text-[#00D4FF] font-mono animate-pulse ml-auto">
                 Syncing Faculty Hub...
               </span>
+            )}
+            </div>
+
+            {/* Back to student workspace */}
+            {isFacultyRole && (
+              <button
+                onClick={() => setViewMode('student')}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#00D4FF] text-[#0B0912] hover:bg-[#00F5A0] transition-colors flex items-center gap-1.5 shadow"
+              >
+                <FileCode className="w-3.5 h-3.5" />
+                <span>Student Workspace</span>
+              </button>
             )}
           </div>
 
@@ -1317,6 +1276,18 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
                         <Check className="w-3 h-3" /> Draft saved ({draftSavedAt})
                       </span>
                     )}
+
+                    {/* Faculty Toggle to Instructor Portal */}
+                    {isFacultyRole && (
+                      <button
+                        onClick={() => setViewMode('instructor')}
+                        className="px-2 py-1 rounded-lg text-xs font-semibold bg-[#C9A24B]/20 text-[#C9A24B] hover:bg-[#C9A24B]/30 border border-[#C9A24B]/40 transition-colors flex items-center gap-1 shadow-sm"
+                        title="Switch to Instructor Portal"
+                      >
+                        <Settings className="w-3.5 h-3.5" />
+                        <span>Instructor Portal</span>
+                      </button>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
@@ -1437,7 +1408,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
                 </div>
 
                 {/* Monaco Python Editor Component (B4 Protected Regions) */}
-                <div className="h-[560px] xl:h-[600px] relative">
+                <div className="h-[680px] xl:h-[760px] 2xl:h-[820px] relative">
                   <MonacoCodeStudioEditor
                     code={code}
                     onChange={(newVal) => setCode(newVal)}

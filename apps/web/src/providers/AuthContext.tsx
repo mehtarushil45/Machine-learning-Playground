@@ -72,7 +72,7 @@ export interface AuthContextValue {
 // Context
 // ---------------------------------------------------------------------------
 
-const AuthContext = createContext<AuthContextValue | null>(null)
+export const AuthContext = createContext<AuthContextValue | null>(null)
 
 // ---------------------------------------------------------------------------
 // API helpers (cookie-aware)

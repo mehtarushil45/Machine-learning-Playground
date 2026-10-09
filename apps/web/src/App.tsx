@@ -515,7 +515,7 @@ function AppContent() {
                true and we drop through to the studio pages below.
           ─────────────────────────────────────────────────────────────────── */}
           {activeTab === 'classroom' ? (
-            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '16px 20px', width: '100%' }}>
+            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '10px 16px', width: '100%' }}>
               <ErrorBoundary key="classroom" onReset={() => handleNavigate('classroom')}>
                 <ClassroomHub onShowToast={showToast} />
               </ErrorBoundary>

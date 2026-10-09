@@ -195,7 +195,7 @@ def extract_baseline_distribution(
                 val_counts = str_series.value_counts()
                 top_categories = val_counts.head(20).to_dict()
                 category_proportions = {str(cat): float(count / total) for cat, count in top_categories.items()}
-                mode_val = str(str_series.mode()[0]) if not str_series.mode().empty else "N/A"
+                mode_val = str_series.mode()[0] if not str_series.mode().empty else "N/A"
 
                 baseline[col] = {
                     "type": "categorical",
@@ -318,7 +318,7 @@ def calculate_ks_test(
         return 0.0, 1.0
 
     try:
-        from scipy import stats
+        from scipy import stats  # type: ignore
         res = stats.ks_2samp(b_arr, c_arr)
         return round(float(res.statistic), 4), round(float(res.pvalue), 4)
     except Exception:
@@ -347,7 +347,7 @@ def calculate_wasserstein_distance(
         return 0.0, None
 
     try:
-        from scipy import stats
+        from scipy import stats  # type: ignore
         dist = stats.wasserstein_distance(b_arr, c_arr)
         base_std = float(np.std(b_arr))
         norm_dist = dist / base_std if base_std > 1e-5 else dist
@@ -397,7 +397,7 @@ def calculate_chi_squared_test(
         expected = [e * (total_curr / exp_sum) for e in expected]
 
     try:
-        from scipy import stats
+        from scipy import stats  # type: ignore
         res = stats.chisquare(f_obs=observed, f_exp=expected)
         stat = float(res.statistic) if np.isfinite(res.statistic) else 0.0
         pval = float(res.pvalue) if np.isfinite(res.pvalue) else 1.0
@@ -441,7 +441,7 @@ def calculate_jensen_shannon_divergence(
     q = np.array(q) / sum(q)
 
     try:
-        from scipy.spatial import distance
+        from scipy.spatial import distance  # type: ignore
         js_val = float(distance.jensenshannon(p, q, base=2))
         return round(js_val, 4), None
     except Exception:
@@ -478,7 +478,7 @@ def calculate_two_proportion_z_test(
     z_stat = (curr_p - base_p) / denom
 
     try:
-        from scipy import stats
+        from scipy import stats  # type: ignore
         p_val = float(2.0 * (1.0 - stats.norm.cdf(abs(z_stat))))
         return round(float(z_stat), 4), round(min(max(p_val, 0.0), 1.0), 4)
     except Exception:
@@ -515,11 +515,14 @@ def compute_telemetry_metrics(history_records: List[Any]) -> Dict[str, Any]:
     p99 = float(np.percentile(lat_arr, 99))
     avg_lat = float(np.mean(lat_arr))
 
-    timestamps = [getattr(r, "created_at", None) for r in history_records if getattr(r, "created_at", None)]
+    valid_timestamps: List[datetime] = [
+        r.created_at for r in history_records
+        if hasattr(r, "created_at") and getattr(r, "created_at", None) is not None
+    ]
     throughput = 0.0
-    if len(timestamps) >= 2:
+    if len(valid_timestamps) >= 2:
         try:
-            span_seconds = abs((max(timestamps) - min(timestamps)).total_seconds())
+            span_seconds = abs((max(valid_timestamps) - min(valid_timestamps)).total_seconds())
             if span_seconds > 0:
                 throughput = round(total_requests / span_seconds, 2)
         except Exception:
@@ -776,7 +779,7 @@ def generate_drift_report(
         # ── 2. Numeric Continuous Features (B1) ─────────────────────────────
         elif col_type == "numeric":
             try:
-                numeric_vals = [float(v) for v in col_values]
+                numeric_vals: List[float] = [float(v) for v in col_values if v is not None]
                 base_edges = col_base.get("bin_edges", [])
                 base_props = col_base.get("bin_proportions", [])
                 base_reservoir = col_base.get("sample_reservoir", [])

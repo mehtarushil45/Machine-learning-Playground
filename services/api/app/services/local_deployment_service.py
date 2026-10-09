@@ -436,6 +436,7 @@ async def create_local_deployment(
     from app.ml.inference_engine import load_model as _load_model_for_schema
     _loaded_model_for_schema = None
     _dataset_sample_for_schema = None
+    _csv_path: Optional[str] = None
     try:
         _loaded_model_for_schema = _load_model_for_schema(model_id=job_model_id)
     except Exception:

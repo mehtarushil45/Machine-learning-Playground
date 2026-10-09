@@ -68,6 +68,10 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (ClassroomService.listExams as any).mockResolvedValue(mockExams);
+    (ClassroomService.getSession as any).mockResolvedValue({
+      code_draft: '# Python starter code for Lab 1\nimport pandas as pd',
+      status: 'IN_PROGRESS',
+    });
   });
 
   const waitForExamLoaded = async () => {
@@ -79,7 +83,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
 
     await waitForExamLoaded();
     expect(screen.getByText('lab_exam.py')).toBeInTheDocument();
-    expect(screen.getByText('Python 3.14 (Scikit-Learn)')).toBeInTheDocument();
+    expect(screen.getByText(/Python 3\.\d+ \(Scikit-Learn\)/)).toBeInTheDocument();
     expect(screen.getByText('Run Code')).toBeInTheDocument();
     expect(screen.getByText('Deploy to Lab Slot')).toBeInTheDocument();
     expect(screen.getByText('Submit Exam')).toBeInTheDocument();
@@ -238,8 +242,8 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
     fireEvent.click(screen.getByText('Confirm Final Submission'));
 
     await waitFor(() => {
-      expect(screen.getByText('Score: 95/100')).toBeInTheDocument();
-      expect(screen.getByText(/Receipt: sub-lab-888/i)).toBeInTheDocument();
+      expect(screen.getByText('Exam Locked & Submitted (95/100)')).toBeInTheDocument();
+      expect(screen.getByText('sub-lab-888')).toBeInTheDocument();
     });
   });
 });

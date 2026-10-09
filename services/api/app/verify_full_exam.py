@@ -10,7 +10,7 @@ import uuid
 import urllib.request
 import urllib.error
 import concurrent.futures
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from app.auth.jwt import create_access_token
@@ -24,9 +24,9 @@ def get_auth_token():
     return create_access_token(FACULTY_USER_ID, FACULTY_ORG_ID)
 
 def safe_print(text: str):
-    print(str(text).encode("ascii", errors="replace").decode("ascii"), flush=True)
+    print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
 
-def http_req(method: str, path: str, data: dict = None, headers: dict = None) -> Tuple[int, Any]:
+def http_req(method: str, path: str, data: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None) -> Tuple[int, Any]:
     url = f"{BASE_URL}{path}"
     h = {"Content-Type": "application/json"}
     if headers:
