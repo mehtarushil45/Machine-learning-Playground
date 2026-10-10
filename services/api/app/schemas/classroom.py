@@ -314,3 +314,155 @@ class AssignmentTemplateCreate(BaseModel):
     rubric: Dict[str, Any]
     copilot_policy: str = "full"
 
+
+# ── Entry, Join, Details, Lobby & Roster Schemas ───────────────────────────────
+
+class ClassroomCreateEnhanced(BaseModel):
+    name: str = Field(..., min_length=2, max_length=255, description="Classroom name")
+    course_id: Optional[UUID] = Field(None, description="Optional Course UUID")
+    description: Optional[str] = Field(None, max_length=2000, description="Optional description")
+    term: str = Field("Fall 2026", max_length=100)
+    require_approval: bool = Field(False, description="Require instructor approval to join")
+    allowed_divisions: Optional[List[str]] = Field(None, description="Pre-configured division list")
+    allowed_batches: Optional[List[str]] = Field(None, description="Pre-configured batch list")
+    enrollment_format_hint: Optional[str] = Field(None, max_length=255, description="Enrollment number format hint")
+    enrollment_pattern: Optional[str] = Field(None, max_length=255, description="Regex pattern for enrollment number")
+    exam_start_time: Optional[datetime] = None
+    exam_end_time: Optional[datetime] = None
+    assignment_id: Optional[UUID] = None
+    exam_template_id: Optional[str] = None
+
+
+class ClassroomSummary(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    term: str
+    join_code: Optional[str] = None
+    join_code_active: bool = True
+    require_approval: bool = False
+    role: str
+    status: str
+    is_owner: bool
+    is_exam_started: bool
+    exam_start_time: Optional[datetime] = None
+    exam_end_time: Optional[datetime] = None
+    created_at: datetime
+    member_count: int = 0
+    assignment_title: Optional[str] = None
+
+
+class MyClassroomsResponse(BaseModel):
+    owned: List[ClassroomSummary]
+    joined: List[ClassroomSummary]
+    active_exam_resume: Optional[Dict[str, Any]] = None
+
+
+class JoinPreviewResponse(BaseModel):
+    classroom_id: UUID
+    name: str
+    owner_name: str
+    term: str
+    description: Optional[str] = None
+    require_approval: bool = False
+    allowed_divisions: Optional[List[str]] = None
+    allowed_batches: Optional[List[str]] = None
+    enrollment_format_hint: Optional[str] = None
+
+
+class JoinClassroomRequest(BaseModel):
+    code: str = Field(..., min_length=1, max_length=32, description="Join code")
+
+
+class JoinClassroomResponse(BaseModel):
+    classroom_id: UUID
+    status: str
+    require_approval: bool
+    message: str
+
+
+class SaveMemberDetailsRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=255)
+    enrollment_number: str = Field(..., min_length=1, max_length=100)
+    division: str = Field(..., min_length=1, max_length=50)
+    batch: str = Field(..., min_length=1, max_length=50)
+
+
+class MemberDetailsResponse(BaseModel):
+    classroom_id: UUID
+    user_id: UUID
+    full_name: str
+    enrollment_number: str
+    division: str
+    batch: str
+    status: str
+    can_edit: bool
+
+
+class ExamLobbyResponse(BaseModel):
+    classroom_id: UUID
+    classroom_name: str
+    is_exam_started: bool
+    exam_start_time: Optional[datetime] = None
+    exam_end_time: Optional[datetime] = None
+    server_time: datetime
+    student_status: str
+    time_remaining_seconds: Optional[int] = None
+    can_enter_workspace: bool = False
+
+
+class RosterMemberItem(BaseModel):
+    id: UUID
+    user_id: UUID
+    full_name: Optional[str] = None
+    enrollment_number: Optional[str] = None
+    division: Optional[str] = None
+    batch: Optional[str] = None
+    role: str
+    status: str
+    score: Optional[float] = None
+    submission_time: Optional[datetime] = None
+    last_activity: Optional[datetime] = None
+    joined_at: datetime
+    has_submission: bool = False
+    submission_id: Optional[UUID] = None
+
+
+class RosterPaginationResponse(BaseModel):
+    items: List[RosterMemberItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ParticipantInspectionResponse(BaseModel):
+    user_id: UUID
+    full_name: Optional[str] = None
+    enrollment_number: Optional[str] = None
+    division: Optional[str] = None
+    batch: Optional[str] = None
+    status: str
+    grade_score: Optional[float] = None
+    final_code: Optional[str] = None
+    starter_code: Optional[str] = None
+    rubric_breakdown: Optional[Dict[str, Any]] = None
+    metrics_summary: Optional[Dict[str, Any]] = None
+    timeline: List[Dict[str, Any]] = Field(default_factory=list)
+    reproducibility_verified: bool = False
+    submission_id: Optional[UUID] = None
+    comments: Optional[str] = None
+
+
+class TimeExtensionRequest(BaseModel):
+    extension_minutes: int = Field(..., ge=1, le=240, description="Minutes to extend exam")
+
+
+class ReopenSubmissionRequest(BaseModel):
+    reason: Optional[str] = Field(None, max_length=500)
+
+
+class ApprovalActionRequest(BaseModel):
+    action: str = Field(..., pattern="^(approve|decline)$")
+
+

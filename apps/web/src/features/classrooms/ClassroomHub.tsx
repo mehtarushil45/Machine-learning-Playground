@@ -33,10 +33,14 @@ import {
   type LabDeployResponse,
   type LabEvaluateResponse,
   type LabSubmitResponse,
-  type ClassroomRosterMember,
   type SubmissionDashboardItem,
+  type ClassroomSummary,
   CodeExecutionService,
 } from '../../services/api';
+import { ClassroomEntryView } from './ClassroomEntryView';
+import { ClassroomRosterTab } from './ClassroomRosterTab';
+import { ExamLobbyView } from './ExamLobbyView';
+import { StudentDetailsModal } from './StudentDetailsModal';
 import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { MonacoCodeStudioEditor } from '../pipelines/MonacoCodeStudioEditor';
 import { AICopilotDrawer, type ChatMessage } from '../../components/shared/AICopilotDrawer';
@@ -68,9 +72,10 @@ const BB = {
 
 export interface ClassroomHubProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
+  initialView?: 'entry' | 'instructor' | 'student' | 'lobby';
 }
 
-export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
+export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initialView }) => {
   const authCtx = useContext(AuthContext);
   const user = authCtx?.user;
 
@@ -81,8 +86,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
     return ['faculty', 'org_admin', 'admin', 'platform_admin', 'platform_owner', 'lab_coordinator', 'reviewer'].includes(r);
   }, [user]);
 
-  // Primary View Mode: 'instructor' | 'student'
-  const [viewMode, setViewMode] = useState<'instructor' | 'student'>('student');
+  // Primary View Mode: 'entry' | 'instructor' | 'student' | 'lobby'
+  const [viewMode, setViewMode] = useState<'entry' | 'instructor' | 'student' | 'lobby'>(
+    initialView || (typeof ClassroomService.listMyClassrooms === 'function' ? 'entry' : 'student')
+  );
+  const [activeClassroom, setActiveClassroom] = useState<ClassroomSummary | null>(null);
+  const [detailsClassroomId, setDetailsClassroomId] = useState<string | null>(null);
 
   // Instructor Tabs: 'submissions' | 'create-assignment' | 'roster' | 'templates' | 'curriculum'
   const [instructorTab, setInstructorTab] = useState<'submissions' | 'create-assignment' | 'roster' | 'templates' | 'curriculum'>('submissions');
@@ -124,18 +133,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
   const [copilotChat, setCopilotChat] = useState<ChatMessage[]>([]);
   const [isCopilotThinking, setIsCopilotThinking] = useState(false);
 
-  // Instructor State: Classrooms, Roster, Submissions, Templates
+  // Instructor State: Classrooms, Submissions, Templates
   const [classrooms, setClassrooms] = useState<any[]>([]);
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>('');
-  const [roster, setRoster] = useState<ClassroomRosterMember[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionDashboardItem[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [isLoadingInstructor, setIsLoadingInstructor] = useState(false);
-
-  // Instructor Form States
-  const [newClassroomName, setNewClassroomName] = useState('');
-  const [newClassroomCode, setNewClassroomCode] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
 
   // Manual Grading Modal State
   const [gradingSubmission, setGradingSubmission] = useState<SubmissionDashboardItem | null>(null);
@@ -230,11 +233,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
       if (clsList.length > 0) {
         const activeCls = clsList[0];
         setSelectedClassroomId(activeCls.id);
-        const [rosterData, asgnList] = await Promise.all([
-          ClassroomService.getRoster(activeCls.id).catch(() => []),
-          ClassroomService.listAssignments(activeCls.id).catch(() => []),
-        ]);
-        setRoster(rosterData);
+        const asgnList = await ClassroomService.listAssignments(activeCls.id).catch(() => []);
 
         if (asgnList.length > 0) {
           const subData = await ClassroomService.getSubmissions(asgnList[0].id).catch(() => []);
@@ -630,7 +629,82 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
     }
   };
 
-  if (isLoadingExams) {
+  if (viewMode === 'entry') {
+    return (
+      <div className="space-y-3 pt-0">
+        <ClassroomEntryView
+          onOpenClassroom={async (cls, role) => {
+            setActiveClassroom(cls);
+            setSelectedClassroomId(cls.id);
+            if (role === 'owner') {
+              setViewMode('instructor');
+              setInstructorTab('roster');
+            } else {
+              try {
+                const details = await ClassroomService.getMyDetails(cls.id);
+                if (!details.enrollment_number) {
+                  setDetailsClassroomId(cls.id);
+                  return;
+                }
+                const lobby = await ClassroomService.getExamLobby(cls.id);
+                if (!lobby.can_enter_workspace) {
+                  setViewMode('lobby');
+                } else {
+                  setViewMode('student');
+                }
+              } catch {
+                setViewMode('student');
+              }
+            }
+          }}
+          onResumeExam={(resumeInfo) => {
+            setSelectedClassroomId(resumeInfo.classroom_id);
+            setViewMode('student');
+          }}
+          onShowToast={onShowToast}
+        />
+        {detailsClassroomId && (
+          <StudentDetailsModal
+            classroomId={detailsClassroomId}
+            onClose={() => setDetailsClassroomId(null)}
+            onSaved={() => {
+              const cid = detailsClassroomId;
+              setDetailsClassroomId(null);
+              ClassroomService.getExamLobby(cid)
+                .then((lob) => {
+                  if (lob.can_enter_workspace) setViewMode('student');
+                  else setViewMode('lobby');
+                })
+                .catch(() => setViewMode('student'));
+            }}
+            onShowToast={onShowToast}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (viewMode === 'lobby') {
+    return (
+      <div className="space-y-3 pt-0">
+        <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-2">
+          <button
+            onClick={() => setViewMode('entry')}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#9E93B8] hover:text-white transition-colors border border-[rgba(107,92,166,0.3)]"
+          >
+            ← Back to All Classrooms
+          </button>
+        </div>
+        <ExamLobbyView
+          classroomId={activeClassroom?.id || selectedClassroomId || 'cls-default'}
+          onEnterWorkspace={() => setViewMode('student')}
+          onShowToast={onShowToast}
+        />
+      </div>
+    );
+  }
+
+  if (viewMode === 'student' && isLoadingExams) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] text-center space-y-4">
         <Cpu className="w-10 h-10 text-[#00D4FF] animate-spin" />
@@ -649,6 +723,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
           {/* Instructor Tab Header */}
           <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-2 flex-wrap gap-2">
             <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setViewMode('entry')}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#2E2254] text-[#9E93B8] hover:text-white transition-colors flex items-center gap-1.5 border border-[rgba(107,92,166,0.3)]"
+              >
+                ← All Classrooms
+              </button>
             <button
               onClick={() => setInstructorTab('submissions')}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -1050,143 +1130,20 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
             </div>
           )}
 
-          {/* TAB 3: Classrooms & Student Roster (B1) */}
+          {/* TAB 3: Classrooms & Student Roster (B1, G1-G4) */}
           {instructorTab === 'roster' && (
-            <div className="space-y-4">
-              <div
-                className="rounded-2xl p-5 border space-y-4"
-                style={{ background: BB.surface, borderColor: BB.border }}
-              >
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-5 h-5 text-[#00D4FF]" />
-                    <h3 className="text-sm font-bold text-[#F5F1EC]">Classroom Roster & Enrollment (B1)</h3>
-                    {classrooms.length > 0 && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#00D4FF]/20 text-[#00D4FF] font-mono">
-                        {classrooms.length} Sections
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="email"
-                      placeholder="student@university.edu"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      className="px-3 py-1.5 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] placeholder:text-[#9E93B8]/50 focus:outline-none focus:border-[#00D4FF] min-w-[200px]"
-                    />
-                    <button
-                      onClick={() => {
-                        if (!inviteEmail.trim()) {
-                          onShowToast?.('Enter Email', 'Please enter a student email to invite.', 'info');
-                          return;
-                        }
-                        onShowToast?.('Invite Sent', `Invite link generated for ${inviteEmail}.`, 'success');
-                        setRoster((prev) => [
-                          ...prev,
-                          {
-                            user_id: `u-${Date.now().toString().slice(-4)}`,
-                            full_name: inviteEmail.split('@')[0],
-                            email: inviteEmail,
-                            role: 'learner',
-                            joined_at: new Date().toISOString(),
-                          },
-                        ]);
-                        setInviteEmail('');
-                      }}
-                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#4B3B7C] text-white hover:bg-[#5C4A96] transition-colors"
-                    >
-                      + Enroll Student
-                    </button>
-                  </div>
-                </div>
-
-                {/* Section to Create New Classroom */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)]">
-                  <div>
-                    <label className="text-[10px] text-[#9E93B8] block mb-1">New Classroom Name</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. CS401 Fall 2026 - Section A"
-                      value={newClassroomName}
-                      onChange={(e) => setNewClassroomName(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#17112B] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-[#9E93B8] block mb-1">Classroom Code</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. CS401-FA26"
-                      value={newClassroomCode}
-                      onChange={(e) => setNewClassroomCode(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#17112B] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                    />
-                  </div>
-                  <div className="flex items-end">
-                    <button
-                      onClick={() => {
-                        if (!newClassroomName.trim()) return;
-                        onShowToast?.('Classroom Created', `Classroom "${newClassroomName}" initialized for organization.`, 'success');
-                        setClassrooms((prev) => [...prev, { id: `cls-${Date.now()}`, name: newClassroomName, code: newClassroomCode }]);
-                        setNewClassroomName('');
-                        setNewClassroomCode('');
-                      }}
-                      className="w-full py-1.5 rounded-lg text-xs font-bold bg-[#00D4FF] text-[#0B0912] hover:bg-[#00F5A0] transition-colors"
-                    >
-                      + Create Classroom
-                    </button>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-[rgba(107,92,166,0.2)] bg-[#17112B] text-[#9E93B8]">
-                        <th className="p-3 font-semibold">User UUID</th>
-                        <th className="p-3 font-semibold">Full Name</th>
-                        <th className="p-3 font-semibold">Email</th>
-                        <th className="p-3 font-semibold">Role</th>
-                        <th className="p-3 font-semibold">Joined At</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[rgba(107,92,166,0.15)] text-[#F5F1EC]">
-                      {[
-                        {
-                          user_id: 'u-101',
-                          full_name: 'Aarav Sharma',
-                          email: 'aarav.sharma@university.edu',
-                          role: 'learner',
-                          joined_at: '2026-09-01T09:00:00Z',
-                        },
-                        {
-                          user_id: 'u-102',
-                          full_name: 'Priya Patel',
-                          email: 'priya.patel@university.edu',
-                          role: 'learner',
-                          joined_at: '2026-09-01T09:05:00Z',
-                        },
-                        ...roster,
-                      ].map((m, idx) => (
-                        <tr key={m.user_id + idx} className="hover:bg-[#1A1432]">
-                          <td className="p-3 font-mono text-[10px] text-[#9E93B8]">{m.user_id}</td>
-                          <td className="p-3 font-semibold">{m.full_name || 'Student Candidate'}</td>
-                          <td className="p-3 font-mono text-[11px] text-[#00D4FF]">{m.email}</td>
-                          <td className="p-3">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#4B3B7C]/40 text-[#9E93B8]">
-                              {m.role}
-                            </span>
-                          </td>
-                          <td className="p-3 text-[11px] text-[#9E93B8]">
-                            {new Date(m.joined_at).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+            <ClassroomRosterTab
+              classroom={
+                activeClassroom || {
+                  id: selectedClassroomId || (classrooms[0] as any)?.id || 'cls-default',
+                  name: (activeClassroom as any)?.name || (classrooms[0] as any)?.name || 'University Lab Section',
+                  course_id: (activeClassroom as any)?.course_id || (classrooms[0] as any)?.course_id,
+                  join_code: (activeClassroom as any)?.join_code || (classrooms[0] as any)?.join_code || 'LABEX1',
+                  join_code_active: (activeClassroom as any)?.join_code_active ?? true,
+                }
+              }
+              onShowToast={onShowToast}
+            />
           )}
 
           {/* TAB 4: Assignment Templates (B3) */}
@@ -1326,6 +1283,28 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
         /* STUDENT EXPERIENCE (Parts C1 - C5, D, E)                               */
         /* ══════════════════════════════════════════════════════════════════════ */
         <div className="space-y-4">
+          {/* Navigation Bar for Student Workspace */}
+          <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-2 flex-wrap gap-2">
+            <button
+              onClick={() => setViewMode('entry')}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#9E93B8] hover:text-white transition-colors border border-[rgba(107,92,166,0.3)] flex items-center gap-1.5"
+            >
+              ← Back to All Classrooms
+            </button>
+            {activeClassroom && (
+              <div className="text-xs font-mono text-[#00D4FF]">
+                Classroom: <strong className="text-[#F5F1EC]">{activeClassroom.name}</strong>
+              </div>
+            )}
+            {isFacultyRole && (
+              <button
+                onClick={() => setViewMode('instructor')}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/30 hover:bg-[#2E2254] transition-colors"
+              >
+                Instructor Hub
+              </button>
+            )}
+          </div>
           {/* Student Learning Layer: Educational Guidance (when aids allowed) */}
           {activeExam && (activeExam.learning_aids_enabled ?? true) && (
             <PanelLearningCollapsible

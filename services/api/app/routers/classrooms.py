@@ -29,9 +29,10 @@ from typing import Any, Dict, List, Optional, cast
 from uuid import UUID
 
 import numpy as np
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import select
+from sqlalchemy import select, func, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import Permission, check_user_permission
@@ -42,6 +43,8 @@ from app.models.classroom import (
     Classroom,
     ClassroomMember,
     ClassroomRole,
+    ClassroomAuditLog,
+    ClassroomCodeSnapshot,
     Course,
     Feedback,
     Submission,
@@ -49,20 +52,33 @@ from app.models.classroom import (
 )
 from app.models.user import User, UserRole
 import app.services.local_deployment_service as dep_svc
+from app.services.classroom_code_service import (
+    generate_join_code,
+    normalize_join_code,
+    join_rate_limiter,
+    UNIFORM_JOIN_ERROR_MESSAGE,
+)
 from app.schemas.classroom import (
+    ApprovalActionRequest,
     AssignmentCreate,
     AssignmentResponse,
     AssignmentTemplateCreate,
     ClassroomCreate,
+    ClassroomCreateEnhanced,
     ClassroomInviteRequest,
     ClassroomMemberAdd,
     ClassroomResponse,
     ClassroomRosterMember,
+    ClassroomSummary,
     CopilotProxyRequest,
     CopilotProxyResponse,
     CourseCreate,
     CourseResponse,
+    ExamLobbyResponse,
     FeedbackCreate,
+    JoinClassroomRequest,
+    JoinClassroomResponse,
+    JoinPreviewResponse,
     LabDeployRequest,
     LabDeployResponse,
     LabEvaluateRequest,
@@ -72,13 +88,21 @@ from app.schemas.classroom import (
     LabSubmitRequest,
     LabSubmitResponse,
     ManualGradeRequest,
+    MemberDetailsResponse,
+    MyClassroomsResponse,
+    ParticipantInspectionResponse,
+    ReopenSubmissionRequest,
     ReproduceAuditResponse,
+    RosterMemberItem,
+    RosterPaginationResponse,
     RubricCriterionResult,
+    SaveMemberDetailsRequest,
     StudentDraftRequest,
     StudentDraftResponse,
     SubmissionCreate,
     SubmissionDashboardItem,
     SubmissionResponse,
+    TimeExtensionRequest,
 )
 
 logger = logging.getLogger("apex_ml.classrooms")
@@ -1275,11 +1299,1456 @@ async def list_courses(
     return [CourseResponse.model_validate(c) for c in res.scalars().all()]
 
 
+# ---------------------------------------------------------------------------
+# Classroom Entry, Join, Details, Lobby & Roster Management (Parts B - I)
+# ---------------------------------------------------------------------------
+
+def _neutralize_cell(val: Any) -> str:
+    """Neutralize spreadsheet formula injection (Part G2)."""
+    if val is None:
+        return ""
+    s = str(val)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{s}"
+    return s
+
+
+async def _record_code_snapshot(
+    db: AsyncSession,
+    classroom_id: UUID,
+    user_id: UUID,
+    event_type: str,
+    code: str,
+) -> None:
+    """Store compact code snapshot with retention limit of 20 per student (Part G3)."""
+    try:
+        snap = ClassroomCodeSnapshot(
+            classroom_id=classroom_id,
+            user_id=user_id,
+            event_type=event_type,
+            code=code,
+        )
+        db.add(snap)
+        await db.flush()
+
+        stmt = (
+            select(ClassroomCodeSnapshot)
+            .where(
+                ClassroomCodeSnapshot.classroom_id == classroom_id,
+                ClassroomCodeSnapshot.user_id == user_id,
+            )
+            .order_by(ClassroomCodeSnapshot.created_at.desc())
+        )
+        res = await db.execute(stmt)
+        all_snaps = res.scalars().all()
+        if len(all_snaps) > 20:
+            for old in all_snaps[20:]:
+                await db.delete(old)
+        await db.commit()
+    except Exception as exc:
+        logger.warning(f"Error persisting code snapshot: {exc}")
+
+
+@router.get(
+    "/my",
+    response_model=MyClassroomsResponse,
+    summary="List user's owned and joined classrooms (Part B1)",
+)
+async def list_my_classrooms(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MyClassroomsResponse:
+    # 1. Classrooms owned by the user
+    stmt_owned = (
+        select(Classroom)
+        .where(
+            Classroom.faculty_id == current_user.id,
+            Classroom.is_archived == False,
+        )
+        .order_by(Classroom.created_at.desc())
+    )
+    res_owned = await db.execute(stmt_owned)
+    owned_classrooms = res_owned.scalars().all()
+
+    # 2. Classrooms joined by the user (not owned)
+    stmt_joined = (
+        select(Classroom, ClassroomMember)
+        .join(ClassroomMember, Classroom.id == ClassroomMember.classroom_id)
+        .where(
+            ClassroomMember.user_id == current_user.id,
+            Classroom.faculty_id != current_user.id,
+            Classroom.is_archived == False,
+            ClassroomMember.status != "removed",
+        )
+        .order_by(ClassroomMember.created_at.desc())
+    )
+    res_joined = await db.execute(stmt_joined)
+    joined_records = res_joined.all()
+
+    # Build owned summaries
+    owned_summaries: List[ClassroomSummary] = []
+    for c in owned_classrooms:
+        m_count = (
+            await db.execute(
+                select(func.count(ClassroomMember.id)).where(
+                    ClassroomMember.classroom_id == c.id,
+                    ClassroomMember.status != "removed",
+                )
+            )
+        ).scalar() or 0
+
+        owned_summaries.append(
+            ClassroomSummary(
+                id=c.id,
+                name=c.name,
+                description=c.description,
+                term=c.term,
+                join_code=c.join_code,
+                join_code_active=c.join_code_active,
+                require_approval=c.require_approval,
+                role="owner",
+                status="owner",
+                is_owner=True,
+                is_exam_started=c.is_exam_started,
+                exam_start_time=c.exam_start_time,
+                exam_end_time=c.exam_end_time,
+                created_at=c.created_at,
+                member_count=m_count,
+            )
+        )
+
+    # Build joined summaries
+    joined_summaries: List[ClassroomSummary] = []
+    active_resume: Optional[Dict[str, Any]] = None
+    now = datetime.now(timezone.utc)
+
+    for c, m in joined_records:
+        m_count = (
+            await db.execute(
+                select(func.count(ClassroomMember.id)).where(
+                    ClassroomMember.classroom_id == c.id,
+                    ClassroomMember.status != "removed",
+                )
+            )
+        ).scalar() or 0
+
+        if m.status in ("in_progress", "details_saved") and not active_resume:
+            effective_end = (c.exam_end_time + timedelta(minutes=m.time_extension_minutes)) if c.exam_end_time else None
+            is_open = (c.is_exam_started or (c.exam_start_time and now >= c.exam_start_time)) and (not effective_end or now <= effective_end)
+            if is_open:
+                active_resume = {
+                    "classroom_id": str(c.id),
+                    "name": c.name,
+                    "status": m.status,
+                    "exam_id": "lab-exam-01",
+                }
+
+        joined_summaries.append(
+            ClassroomSummary(
+                id=c.id,
+                name=c.name,
+                description=c.description,
+                term=c.term,
+                join_code=None,
+                join_code_active=c.join_code_active,
+                require_approval=c.require_approval,
+                role=m.role.value if hasattr(m.role, "value") else str(m.role),
+                status=m.status,
+                is_owner=False,
+                is_exam_started=c.is_exam_started,
+                exam_start_time=c.exam_start_time,
+                exam_end_time=c.exam_end_time,
+                created_at=c.created_at,
+                member_count=m_count,
+            )
+        )
+
+    return MyClassroomsResponse(
+        owned=owned_summaries,
+        joined=joined_summaries,
+        active_exam_resume=active_resume,
+    )
+
+
+@router.post(
+    "/enhanced",
+    response_model=ClassroomSummary,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new classroom with 6-char join code (Part C)",
+)
+async def create_classroom_enhanced(
+    payload: ClassroomCreateEnhanced,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClassroomSummary:
+    MAX_ACTIVE_PER_USER = 10
+    active_count = (
+        await db.execute(
+            select(func.count(Classroom.id)).where(
+                Classroom.faculty_id == current_user.id,
+                Classroom.is_archived == False,
+                Classroom.is_active == True,
+            )
+        )
+    ).scalar() or 0
+
+    if active_count >= MAX_ACTIVE_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Active classroom limit reached (maximum {MAX_ACTIVE_PER_USER} active classrooms per user).",
+        )
+
+    join_code = None
+    for _ in range(10):
+        candidate = generate_join_code(6)
+        existing = (
+            await db.execute(
+                select(Classroom.id).where(Classroom.join_code == candidate)
+            )
+        ).scalar_one_or_none()
+        if not existing:
+            join_code = candidate
+            break
+
+    if not join_code:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate a unique join code. Please try again.",
+        )
+
+    classroom = Classroom(
+        organisation_id=current_user.organisation_id,
+        course_id=payload.course_id,
+        name=payload.name.strip(),
+        code=join_code,
+        term=payload.term.strip(),
+        description=payload.description.strip() if payload.description else None,
+        join_code=join_code,
+        join_code_active=True,
+        require_approval=payload.require_approval,
+        allowed_divisions=payload.allowed_divisions,
+        allowed_batches=payload.allowed_batches,
+        enrollment_format_hint=payload.enrollment_format_hint.strip() if payload.enrollment_format_hint else None,
+        enrollment_pattern=payload.enrollment_pattern.strip() if payload.enrollment_pattern else None,
+        exam_start_time=payload.exam_start_time,
+        exam_end_time=payload.exam_end_time,
+        is_exam_started=False,
+        is_archived=False,
+        faculty_id=current_user.id,
+        is_active=True,
+    )
+    db.add(classroom)
+    await db.flush()
+
+    owner_member = ClassroomMember(
+        classroom_id=classroom.id,
+        user_id=current_user.id,
+        role=ClassroomRole.faculty,
+        status="active",
+        full_name=current_user.full_name or current_user.email,
+    )
+    db.add(owner_member)
+
+    assignment_title = None
+    if payload.exam_template_id:
+        tpl = CURATED_LAB_EXAMS.get(payload.exam_template_id)
+        if tpl:
+            assignment_title = tpl["title"]
+            asgn = Assignment(
+                organisation_id=current_user.organisation_id,
+                classroom_id=classroom.id,
+                title=tpl["title"],
+                description=tpl["description"],
+                dataset_id=tpl.get("dataset_id"),
+                rubric=tpl.get("rubric"),
+                max_score=100.0,
+                created_by_id=current_user.id,
+            )
+            db.add(asgn)
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom.id,
+        actor_id=current_user.id,
+        action="create_classroom",
+        details={"name": classroom.name, "join_code": join_code, "term": classroom.term},
+    )
+    db.add(audit)
+    await db.commit()
+    await db.refresh(classroom)
+
+    return ClassroomSummary(
+        id=classroom.id,
+        name=classroom.name,
+        description=classroom.description,
+        term=classroom.term,
+        join_code=classroom.join_code,
+        join_code_active=classroom.join_code_active,
+        require_approval=classroom.require_approval,
+        role="owner",
+        status="owner",
+        is_owner=True,
+        is_exam_started=classroom.is_exam_started,
+        exam_start_time=classroom.exam_start_time,
+        exam_end_time=classroom.exam_end_time,
+        created_at=classroom.created_at,
+        member_count=1,
+        assignment_title=assignment_title,
+    )
+
+
+@router.get(
+    "/join-preview",
+    response_model=JoinPreviewResponse,
+    summary="Validate join code and preview classroom info (Part D2)",
+)
+async def preview_join_code(
+    code: str = Query(..., description="Join code to preview"),
+    request: Request = cast(Request, None),
+    current_user: OptionalCurrentUser = None,
+    db: AsyncSession = Depends(get_db),
+) -> JoinPreviewResponse:
+    client_ip = request.client.host if request and request.client else "unknown-ip"
+    uid = str(current_user.id) if current_user and hasattr(current_user, "id") else None
+
+    join_rate_limiter.check_allowed(uid, client_ip)
+    normalized = normalize_join_code(code)
+
+    stmt = (
+        select(Classroom, User)
+        .join(User, Classroom.faculty_id == User.id)
+        .where(
+            Classroom.join_code == normalized,
+            Classroom.join_code_active == True,
+            Classroom.is_archived == False,
+            Classroom.is_active == True,
+        )
+    )
+    res = await db.execute(stmt)
+    row = res.first()
+
+    if not row:
+        join_rate_limiter.record_failure(uid, client_ip)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNIFORM_JOIN_ERROR_MESSAGE,
+        )
+
+    classroom, owner = row
+    join_rate_limiter.record_success(uid, client_ip)
+
+    return JoinPreviewResponse(
+        classroom_id=classroom.id,
+        name=classroom.name,
+        owner_name=owner.full_name or owner.email.split("@")[0],
+        term=classroom.term,
+        description=classroom.description,
+        require_approval=classroom.require_approval,
+        allowed_divisions=classroom.allowed_divisions,
+        allowed_batches=classroom.allowed_batches,
+        enrollment_format_hint=classroom.enrollment_format_hint,
+    )
+
+
+@router.post(
+    "/join",
+    response_model=JoinClassroomResponse,
+    summary="Join classroom using join code (Part D)",
+)
+async def join_classroom_by_code(
+    payload: JoinClassroomRequest,
+    request: Request = cast(Request, None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JoinClassroomResponse:
+    client_ip = request.client.host if request and request.client else "unknown-ip"
+    uid = str(current_user.id)
+
+    join_rate_limiter.check_allowed(uid, client_ip)
+    normalized = normalize_join_code(payload.code)
+
+    stmt = (
+        select(Classroom)
+        .where(
+            Classroom.join_code == normalized,
+            Classroom.join_code_active == True,
+            Classroom.is_archived == False,
+            Classroom.is_active == True,
+        )
+    )
+    res = await db.execute(stmt)
+    classroom = res.scalar_one_or_none()
+
+    if not classroom:
+        join_rate_limiter.record_failure(uid, client_ip)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=UNIFORM_JOIN_ERROR_MESSAGE,
+        )
+
+    if classroom.faculty_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owners cannot join their own classroom as students.",
+        )
+
+    join_rate_limiter.record_success(uid, client_ip)
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom.id,
+        ClassroomMember.user_id == current_user.id,
+    )
+    res_m = await db.execute(stmt_m)
+    member = res_m.scalar_one_or_none()
+
+    if member:
+        if member.status == "removed":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You have been removed from this classroom and cannot re-join.",
+            )
+        return JoinClassroomResponse(
+            classroom_id=classroom.id,
+            status=member.status,
+            require_approval=classroom.require_approval,
+            message="Already enrolled in this classroom.",
+        )
+
+    init_status = "pending_approval" if classroom.require_approval else "joined"
+    new_member = ClassroomMember(
+        classroom_id=classroom.id,
+        user_id=current_user.id,
+        role=ClassroomRole.learner,
+        status=init_status,
+        full_name=current_user.full_name or current_user.email,
+        joined_at=datetime.now(timezone.utc),
+    )
+    db.add(new_member)
+
+    db.add(
+        ClassroomAuditLog(
+            classroom_id=classroom.id,
+            actor_id=current_user.id,
+            action="join_classroom",
+            details={"status": init_status, "require_approval": classroom.require_approval},
+        )
+    )
+    await db.commit()
+
+    msg = (
+        "Waiting for approval from the classroom instructor."
+        if classroom.require_approval
+        else "Successfully joined classroom."
+    )
+    return JoinClassroomResponse(
+        classroom_id=classroom.id,
+        status=init_status,
+        require_approval=classroom.require_approval,
+        message=msg,
+    )
+
+
+@router.get(
+    "/{classroom_id}/my-details",
+    response_model=MemberDetailsResponse,
+    summary="Get participant's details prefilled (Part E1)",
+)
+async def get_my_details(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemberDetailsResponse:
+    stmt = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == current_user.id,
+    )
+    res = await db.execute(stmt)
+    member = res.scalar_one_or_none()
+
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom membership not found.")
+
+    if member.status == "removed":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You have been removed from this classroom.")
+
+    full_name = member.full_name or current_user.full_name or current_user.email.split("@")[0]
+    enrollment = member.enrollment_number or ""
+    division = member.division or ""
+    batch = member.batch or ""
+
+    if not enrollment:
+        stmt_prev = (
+            select(ClassroomMember)
+            .where(
+                ClassroomMember.user_id == current_user.id,
+                ClassroomMember.classroom_id != classroom_id,
+                ClassroomMember.enrollment_number.isnot(None),
+            )
+            .order_by(ClassroomMember.created_at.desc())
+            .limit(1)
+        )
+        prev = (await db.execute(stmt_prev)).scalar_one_or_none()
+        if prev:
+            enrollment = prev.enrollment_number or ""
+            division = prev.division or ""
+            batch = prev.batch or ""
+
+    can_edit = (
+        member.status in ("joined", "details_saved", "pending_approval")
+        and member.exam_started_at is None
+    )
+
+    return MemberDetailsResponse(
+        classroom_id=classroom_id,
+        user_id=current_user.id,
+        full_name=full_name,
+        enrollment_number=enrollment,
+        division=division,
+        batch=batch,
+        status=member.status,
+        can_edit=can_edit,
+    )
+
+
+@router.put(
+    "/{classroom_id}/my-details",
+    response_model=MemberDetailsResponse,
+    summary="Save participant registration details (Part E)",
+)
+async def save_my_details(
+    classroom_id: UUID,
+    payload: SaveMemberDetailsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MemberDetailsResponse:
+    stmt = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == current_user.id,
+    )
+    res = await db.execute(stmt)
+    member = res.scalar_one_or_none()
+
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom membership not found.")
+
+    if member.status == "removed":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You have been removed from this classroom.")
+
+    if member.exam_started_at is not None or member.status in ("in_progress", "submitted", "late", "graded"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Details cannot be edited after starting the exam. Please contact your instructor.",
+        )
+
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    clean_name = payload.full_name.strip()
+    clean_enrollment = payload.enrollment_number.strip().upper()
+    clean_division = payload.division.strip().upper()
+    clean_batch = payload.batch.strip().upper()
+
+    if not clean_name or not clean_enrollment or not clean_division or not clean_batch:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="All fields (Full Name, Enrollment Number, Division, Batch) are required.",
+        )
+
+    if classroom.allowed_divisions:
+        allowed_divs = [d.strip().upper() for d in classroom.allowed_divisions if d]
+        if clean_division not in allowed_divs:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Division '{clean_division}' is not allowed. Must be one of: {', '.join(allowed_divs)}.",
+            )
+
+    if classroom.allowed_batches:
+        allowed_bts = [b.strip().upper() for b in classroom.allowed_batches if b]
+        if clean_batch not in allowed_bts:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Batch '{clean_batch}' is not allowed. Must be one of: {', '.join(allowed_bts)}.",
+            )
+
+    if classroom.enrollment_pattern:
+        import re
+        if not re.search(classroom.enrollment_pattern, clean_enrollment):
+            hint = f" ({classroom.enrollment_format_hint})" if classroom.enrollment_format_hint else ""
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Enrollment number does not match expected format{hint}.",
+            )
+
+    stmt_dup = select(ClassroomMember.id).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.enrollment_number == clean_enrollment,
+        ClassroomMember.user_id != current_user.id,
+    )
+    dup = (await db.execute(stmt_dup)).scalar_one_or_none()
+    if dup:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Enrollment number '{clean_enrollment}' is already registered by another participant in this classroom. If this is an error, please contact your instructor.",
+        )
+
+    old_details = {
+        "full_name": member.full_name,
+        "enrollment_number": member.enrollment_number,
+        "division": member.division,
+        "batch": member.batch,
+    }
+    member.full_name = clean_name
+    member.enrollment_number = clean_enrollment
+    member.division = clean_division
+    member.batch = clean_batch
+    if member.status == "joined":
+        member.status = "details_saved"
+    member.last_activity_at = datetime.now(timezone.utc)
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        target_user_id=current_user.id,
+        action="save_details",
+        details={"old": old_details, "new": {"full_name": clean_name, "enrollment_number": clean_enrollment, "division": clean_division, "batch": clean_batch}},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return MemberDetailsResponse(
+        classroom_id=classroom_id,
+        user_id=current_user.id,
+        full_name=clean_name,
+        enrollment_number=clean_enrollment,
+        division=clean_division,
+        batch=clean_batch,
+        status=member.status,
+        can_edit=True,
+    )
+
+
+@router.get(
+    "/{classroom_id}/lobby",
+    response_model=ExamLobbyResponse,
+    summary="Get exam lobby status and countdown (Part F1)",
+)
+async def get_exam_lobby(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExamLobbyResponse:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    res_m = await db.execute(
+        select(ClassroomMember).where(
+            ClassroomMember.classroom_id == classroom_id,
+            ClassroomMember.user_id == current_user.id,
+        )
+    )
+    member = res_m.scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not a member of this classroom.")
+
+    if member.status == "removed":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You have been removed from this classroom.")
+
+    now = datetime.now(timezone.utc)
+
+    time_remaining = None
+    if classroom.exam_end_time:
+        effective_end = classroom.exam_end_time + timedelta(minutes=member.time_extension_minutes)
+        diff = int((effective_end - now).total_seconds())
+        time_remaining = max(0, diff)
+
+    is_open = classroom.is_exam_started
+    if classroom.exam_start_time and now >= classroom.exam_start_time:
+        is_open = True
+
+    if classroom.exam_end_time:
+        effective_end = classroom.exam_end_time + timedelta(minutes=member.time_extension_minutes)
+        if now > effective_end:
+            is_open = False
+
+    can_enter = bool(is_open and member.status in ("details_saved", "in_progress"))
+
+    return ExamLobbyResponse(
+        classroom_id=classroom.id,
+        classroom_name=classroom.name,
+        is_exam_started=classroom.is_exam_started,
+        exam_start_time=classroom.exam_start_time,
+        exam_end_time=classroom.exam_end_time,
+        server_time=now,
+        student_status=member.status,
+        time_remaining_seconds=time_remaining,
+        can_enter_workspace=can_enter,
+    )
+
+
+@router.post(
+    "/{classroom_id}/start-exam",
+    summary="Owner manually starts exam for all participants (Part F1)",
+)
+async def start_classroom_exam(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the classroom owner can start the exam.")
+
+    classroom.is_exam_started = True
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        action="start_exam",
+        details={"started_at": datetime.now(timezone.utc).isoformat()},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"message": "Exam has been started for all students.", "is_exam_started": True}
+
+
+@router.post(
+    "/{classroom_id}/enter-workspace",
+    summary="Student enters exam workspace from lobby (Part F3)",
+)
+async def enter_exam_workspace(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    res_m = await db.execute(
+        select(ClassroomMember).where(
+            ClassroomMember.classroom_id == classroom_id,
+            ClassroomMember.user_id == current_user.id,
+        )
+    )
+    member = res_m.scalar_one_or_none()
+    if not member or member.status == "removed":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    now = datetime.now(timezone.utc)
+
+    is_open = classroom.is_exam_started or (classroom.exam_start_time and now >= classroom.exam_start_time)
+    if not is_open:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Exam has not started yet. Please wait in the lobby.",
+        )
+
+    if classroom.exam_end_time:
+        effective_end = classroom.exam_end_time + timedelta(minutes=member.time_extension_minutes)
+        if now > effective_end:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Exam window has ended. Submissions are closed.",
+            )
+
+    if not member.exam_started_at:
+        member.exam_started_at = now
+    if member.status in ("joined", "details_saved"):
+        member.status = "in_progress"
+    member.last_activity_at = now
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        target_user_id=current_user.id,
+        action="start_workspace",
+        details={"started_at": now.isoformat()},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"status": member.status, "exam_started_at": member.exam_started_at.isoformat()}
+
+
+@router.get(
+    "/{classroom_id}/roster-paginated",
+    response_model=RosterPaginationResponse,
+    summary="Owner paginated roster with search, filter, and sort (Part G1)",
+)
+async def get_classroom_roster_paginated(
+    classroom_id: UUID,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    search: Optional[str] = Query(None),
+    division: Optional[str] = Query(None),
+    batch: Optional[str] = Query(None),
+    member_status: Optional[str] = Query(None, alias="status"),
+    sort_by: str = Query("joined_at"),
+    sort_order: str = Query("desc"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RosterPaginationResponse:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Only the classroom owner can view the participant roster.",
+        )
+
+    query = (
+        select(ClassroomMember, User)
+        .join(User, ClassroomMember.user_id == User.id)
+        .where(
+            ClassroomMember.classroom_id == classroom_id,
+            ClassroomMember.user_id != classroom.faculty_id,
+        )
+    )
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.where(
+            or_(
+                ClassroomMember.full_name.ilike(term),
+                ClassroomMember.enrollment_number.ilike(term),
+                User.email.ilike(term),
+            )
+        )
+
+    if division and division.strip():
+        query = query.where(ClassroomMember.division == division.strip().upper())
+
+    if batch and batch.strip():
+        query = query.where(ClassroomMember.batch == batch.strip().upper())
+
+    if member_status and member_status.strip():
+        query = query.where(ClassroomMember.status == member_status.strip())
+
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar() or 0
+
+    sort_col = ClassroomMember.joined_at
+    if sort_by == "name":
+        sort_col = ClassroomMember.full_name
+    elif sort_by == "enrollment":
+        sort_col = ClassroomMember.enrollment_number
+    elif sort_by == "status":
+        sort_col = ClassroomMember.status
+    elif sort_by == "last_activity":
+        sort_col = ClassroomMember.last_activity_at
+
+    query = query.order_by(asc(sort_col) if sort_order == "asc" else desc(sort_col))
+    query = query.offset((page - 1) * page_size).limit(page_size)
+
+    results = (await db.execute(query)).all()
+
+    items: List[RosterMemberItem] = []
+    for m, u in results:
+        stmt_sub = (
+            select(Submission)
+            .join(Assignment, Submission.assignment_id == Assignment.id)
+            .where(
+                Assignment.classroom_id == classroom_id,
+                Submission.learner_id == m.user_id,
+            )
+            .order_by(Submission.created_at.desc())
+            .limit(1)
+        )
+        sub = (await db.execute(stmt_sub)).scalar_one_or_none()
+
+        score = sub.grade_score if sub else None
+        sub_time = sub.submitted_at if sub else None
+
+        items.append(
+            RosterMemberItem(
+                id=m.id,
+                user_id=m.user_id,
+                full_name=m.full_name or u.full_name or u.email.split("@")[0],
+                enrollment_number=m.enrollment_number,
+                division=m.division,
+                batch=m.batch,
+                role=m.role.value if hasattr(m.role, "value") else str(m.role),
+                status=m.status,
+                score=score,
+                submission_time=sub_time,
+                last_activity=m.last_activity_at,
+                joined_at=m.joined_at,
+                has_submission=bool(sub),
+                submission_id=sub.id if sub else None,
+            )
+        )
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    return RosterPaginationResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
+
+
+@router.get(
+    "/{classroom_id}/roster/export.csv",
+    summary="CSV export of roster and grades with formula injection protection (Part G2)",
+)
+async def export_roster_csv(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PlainTextResponse:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only classroom owners can export grades.")
+
+    query = (
+        select(ClassroomMember, User)
+        .join(User, ClassroomMember.user_id == User.id)
+        .where(
+            ClassroomMember.classroom_id == classroom_id,
+            ClassroomMember.user_id != classroom.faculty_id,
+        )
+        .order_by(ClassroomMember.enrollment_number.asc().nullslast())
+    )
+    records = (await db.execute(query)).all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "Full Name",
+        "Enrollment Number",
+        "Division",
+        "Batch",
+        "Email",
+        "Status",
+        "Score",
+        "Submission Time",
+        "Last Activity",
+    ])
+
+    for m, u in records:
+        stmt_sub = (
+            select(Submission)
+            .join(Assignment, Submission.assignment_id == Assignment.id)
+            .where(
+                Assignment.classroom_id == classroom_id,
+                Submission.learner_id == m.user_id,
+            )
+            .order_by(Submission.created_at.desc())
+            .limit(1)
+        )
+        sub = (await db.execute(stmt_sub)).scalar_one_or_none()
+        score_val = f"{sub.grade_score:.1f}" if sub and sub.grade_score is not None else "N/A"
+        sub_time = sub.submitted_at.isoformat() if sub and sub.submitted_at else "N/A"
+        last_act = m.last_activity_at.isoformat() if m.last_activity_at else "N/A"
+
+        writer.writerow([
+            _neutralize_cell(m.full_name or u.full_name or u.email.split("@")[0]),
+            _neutralize_cell(m.enrollment_number or "N/A"),
+            _neutralize_cell(m.division or "N/A"),
+            _neutralize_cell(m.batch or "N/A"),
+            _neutralize_cell(u.email),
+            _neutralize_cell(m.status),
+            _neutralize_cell(score_val),
+            _neutralize_cell(sub_time),
+            _neutralize_cell(last_act),
+        ])
+
+    filename = f"classroom_{classroom.name.replace(' ', '_')}_roster.csv"
+    return PlainTextResponse(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get(
+    "/{classroom_id}/participants/{user_id}/inspect",
+    response_model=ParticipantInspectionResponse,
+    summary="Read-only participant inspection with Monaco diff and event timeline (Part G3)",
+)
+async def inspect_participant(
+    classroom_id: UUID,
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ParticipantInspectionResponse:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Only classroom owners can inspect participant submissions.",
+        )
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == user_id,
+    )
+    member = (await db.execute(stmt_m)).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+    stmt_sub = (
+        select(Submission)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .where(
+            Assignment.classroom_id == classroom_id,
+            Submission.learner_id == user_id,
+        )
+        .order_by(Submission.created_at.desc())
+        .limit(1)
+    )
+    sub = (await db.execute(stmt_sub)).scalar_one_or_none()
+
+    starter_code = CURATED_LAB_EXAMS["lab-exam-01"].get("starter_code", "")
+
+    final_code = sub.code_draft if sub else member.full_name
+    if not final_code:
+        stmt_snap = (
+            select(ClassroomCodeSnapshot)
+            .where(
+                ClassroomCodeSnapshot.classroom_id == classroom_id,
+                ClassroomCodeSnapshot.user_id == user_id,
+            )
+            .order_by(ClassroomCodeSnapshot.created_at.desc())
+            .limit(1)
+        )
+        snap = (await db.execute(stmt_snap)).scalar_one_or_none()
+        final_code = snap.code if snap else starter_code
+
+    timeline: List[Dict[str, Any]] = []
+
+    timeline.append({
+        "event": "Joined Classroom",
+        "timestamp": member.joined_at.isoformat(),
+        "details": f"Role: {member.role.value if hasattr(member.role, 'value') else member.role}",
+    })
+
+    if member.exam_started_at:
+        timeline.append({
+            "event": "Exam Started",
+            "timestamp": member.exam_started_at.isoformat(),
+            "details": "Entered workspace and began coding",
+        })
+
+    stmt_snaps = (
+        select(ClassroomCodeSnapshot)
+        .where(
+            ClassroomCodeSnapshot.classroom_id == classroom_id,
+            ClassroomCodeSnapshot.user_id == user_id,
+        )
+        .order_by(ClassroomCodeSnapshot.created_at.asc())
+    )
+    for s in (await db.execute(stmt_snaps)).scalars().all():
+        timeline.append({
+            "event": f"Code {s.event_type.capitalize()}",
+            "timestamp": s.created_at.isoformat(),
+            "details": f"Snapshot captured ({len(s.code.splitlines())} lines)",
+        })
+
+    if sub and sub.submitted_at:
+        timeline.append({
+            "event": "Exam Submitted",
+            "timestamp": sub.submitted_at.isoformat(),
+            "details": f"Score: {sub.grade_score}/100",
+        })
+
+    timeline.sort(key=lambda x: x["timestamp"])
+
+    feedback_comments = None
+    if sub:
+        stmt_fb = select(Feedback).where(Feedback.submission_id == sub.id).order_by(Feedback.created_at.desc()).limit(1)
+        fb = (await db.execute(stmt_fb)).scalar_one_or_none()
+        feedback_comments = fb.comments if fb else None
+
+    return ParticipantInspectionResponse(
+        user_id=member.user_id,
+        full_name=member.full_name,
+        enrollment_number=member.enrollment_number,
+        division=member.division,
+        batch=member.batch,
+        status=member.status,
+        grade_score=sub.grade_score if sub else None,
+        final_code=final_code,
+        starter_code=starter_code,
+        rubric_breakdown=sub.metrics_summary.get("rubric_breakdown") if sub and sub.metrics_summary else None,
+        metrics_summary=sub.metrics_summary if sub else None,
+        timeline=timeline,
+        reproducibility_verified=sub.reproducibility_verified if sub else False,
+        submission_id=sub.id if sub else None,
+        comments=feedback_comments,
+    )
+
+
+@router.put(
+    "/{classroom_id}/members/{user_id}/details",
+    summary="Owner edits participant registration details (Part E4)",
+)
+async def owner_edit_member_details(
+    classroom_id: UUID,
+    user_id: UUID,
+    payload: SaveMemberDetailsRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only classroom owners can edit participant details.")
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == user_id,
+    )
+    member = (await db.execute(stmt_m)).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+    old = {
+        "full_name": member.full_name,
+        "enrollment_number": member.enrollment_number,
+        "division": member.division,
+        "batch": member.batch,
+    }
+
+    member.full_name = payload.full_name.strip()
+    member.enrollment_number = payload.enrollment_number.strip().upper()
+    member.division = payload.division.strip().upper()
+    member.batch = payload.batch.strip().upper()
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        target_user_id=user_id,
+        action="owner_edit_details",
+        details={"old": old, "new": payload.model_dump()},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"message": "Participant details updated successfully by instructor.", "details": payload.model_dump()}
+
+
+@router.post(
+    "/{classroom_id}/members/{user_id}/approval",
+    summary="Owner approves or declines pending participant (Part D4)",
+)
+async def handle_member_approval(
+    classroom_id: UUID,
+    user_id: UUID,
+    payload: ApprovalActionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can approve or decline members.")
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == user_id,
+    )
+    member = (await db.execute(stmt_m)).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+    new_status = "joined" if payload.action == "approve" else "declined"
+    member.status = new_status
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        target_user_id=user_id,
+        action=f"{payload.action}_participant",
+        details={"action": payload.action, "new_status": new_status},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"message": f"Participant {payload.action}d successfully.", "status": new_status}
+
+
+@router.delete(
+    "/{classroom_id}/members/{user_id}",
+    summary="Owner removes a participant, immediately revoking access (Parts G4, H3)",
+)
+async def remove_participant(
+    classroom_id: UUID,
+    user_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can remove participants.")
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == user_id,
+    )
+    member = (await db.execute(stmt_m)).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+    member.status = "removed"
+
+    for key in list(_STUDENT_LAB_SESSIONS.keys()):
+        if key.startswith(f"{user_id}:"):
+            _STUDENT_LAB_SESSIONS.pop(key, None)
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        target_user_id=user_id,
+        action="remove_participant",
+        details={"status": "removed"},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"message": "Participant removed and locked out immediately. Work history preserved."}
+
+
+@router.post(
+    "/{classroom_id}/members/{user_id}/extension",
+    summary="Grant individual student a time extension (Part F2)",
+)
+async def grant_time_extension(
+    classroom_id: UUID,
+    user_id: UUID,
+    payload: TimeExtensionRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can grant extensions.")
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == user_id,
+    )
+    member = (await db.execute(stmt_m)).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+    old_ext = member.time_extension_minutes
+    member.time_extension_minutes += payload.extension_minutes
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        target_user_id=user_id,
+        action="grant_time_extension",
+        details={"old_extension": old_ext, "added_minutes": payload.extension_minutes, "new_total": member.time_extension_minutes},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {
+        "message": f"Granted {payload.extension_minutes} minute extension to student.",
+        "time_extension_minutes": member.time_extension_minutes,
+    }
+
+
+@router.post(
+    "/{classroom_id}/members/{user_id}/reopen",
+    summary="Reopen student submission for re-work (Part F2)",
+)
+async def reopen_submission(
+    classroom_id: UUID,
+    user_id: UUID,
+    payload: Optional[ReopenSubmissionRequest] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can reopen submissions.")
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == user_id,
+    )
+    member = (await db.execute(stmt_m)).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+    member.is_reopened = True
+    member.status = "in_progress"
+
+    for key in list(_STUDENT_LAB_SESSIONS.keys()):
+        if key.startswith(f"{user_id}:"):
+            _STUDENT_LAB_SESSIONS[key]["status"] = "IN_PROGRESS"
+            _STUDENT_LAB_SESSIONS[key]["is_locked"] = False
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        target_user_id=user_id,
+        action="reopen_submission",
+        details={"reason": payload.reason if payload else "Instructor reopened"},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"message": "Submission reopened successfully. Student may continue working.", "status": "in_progress"}
+
+
+@router.post(
+    "/{classroom_id}/reset-code",
+    summary="Reset join code: old code stops working, existing members unaffected (Part G4)",
+)
+async def reset_join_code(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can reset the join code.")
+
+    old_code = classroom.join_code
+    new_code = None
+    for _ in range(10):
+        cand = generate_join_code(6)
+        ex = (await db.execute(select(Classroom.id).where(Classroom.join_code == cand))).scalar_one_or_none()
+        if not ex:
+            new_code = cand
+            break
+
+    if not new_code:
+        raise HTTPException(status_code=500, detail="Failed to generate new code.")
+
+    classroom.join_code = new_code
+    classroom.code = new_code
+    classroom.join_code_active = True
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        action="reset_join_code",
+        details={"old_code": old_code, "new_code": new_code},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"message": "Join code reset successfully. Old code is deactivated.", "join_code": new_code}
+
+
+@router.post(
+    "/{classroom_id}/toggle-join-code",
+    summary="Pause or resume join code acceptance (Part G4)",
+)
+async def toggle_join_code(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can toggle code status.")
+
+    classroom.join_code_active = not classroom.join_code_active
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        action="toggle_join_code",
+        details={"join_code_active": classroom.join_code_active},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {
+        "message": f"Join code {'activated' if classroom.join_code_active else 'paused'}.",
+        "join_code_active": classroom.join_code_active,
+    }
+
+
+@router.post(
+    "/{classroom_id}/archive",
+    summary="Archive classroom (Part G4)",
+)
+async def archive_classroom(
+    classroom_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can archive the classroom.")
+
+    classroom.is_archived = True
+    classroom.join_code_active = False
+
+    audit = ClassroomAuditLog(
+        classroom_id=classroom_id,
+        actor_id=current_user.id,
+        action="archive_classroom",
+        details={"archived_at": datetime.now(timezone.utc).isoformat()},
+    )
+    db.add(audit)
+    await db.commit()
+
+    return {"message": "Classroom archived successfully."}
+
+
 @router.post(
     "",
     response_model=ClassroomResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a classroom batch (B1)",
+    summary="Create a classroom batch (legacy compatibility)",
 )
 async def create_classroom(
     payload: ClassroomCreate,
@@ -1304,7 +2773,7 @@ async def create_classroom(
 @router.get(
     "",
     response_model=List[ClassroomResponse],
-    summary="List active classrooms (B1)",
+    summary="List active classrooms (legacy compatibility)",
 )
 async def list_classrooms(
     current_user: User = Depends(get_current_user),
@@ -1317,7 +2786,7 @@ async def list_classrooms(
 
 @router.post(
     "/{classroom_id}/invite",
-    summary="Enroll student by invite code or email (B1)",
+    summary="Enroll student by invite code or email (legacy compatibility)",
 )
 async def invite_student(
     classroom_id: UUID,
@@ -1350,7 +2819,7 @@ async def invite_student(
 @router.get(
     "/{classroom_id}/roster",
     response_model=List[ClassroomRosterMember],
-    summary="View classroom student roster (B1)",
+    summary="View classroom student roster (legacy compatibility)",
 )
 async def get_classroom_roster(
     classroom_id: UUID,

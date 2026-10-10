@@ -315,6 +315,146 @@ export interface ReproduceAuditResponse {
   details: string;
 }
 
+export interface ClassroomSummary {
+  id: string;
+  name: string;
+  course_id?: string | null;
+  description?: string | null;
+  role: 'owner' | 'student' | 'member';
+  status: string;
+  join_code?: string | null;
+  join_code_active?: boolean;
+  member_count: number;
+  created_at: string;
+  exam_start_time?: string | null;
+  exam_end_time?: string | null;
+  is_exam_started?: boolean;
+  is_archived?: boolean;
+  user_score?: number | null;
+}
+
+export interface MyClassroomsResponse {
+  owned: ClassroomSummary[];
+  joined: ClassroomSummary[];
+  active_exam_resume?: {
+    classroom_id: string;
+    classroom_name: string;
+    assignment_id: string;
+    status: string;
+  } | null;
+}
+
+export interface ClassroomCreateEnhanced {
+  name: string;
+  course_id?: string;
+  description?: string;
+  assignment_title?: string;
+  instructions?: string;
+  starter_code?: string;
+  rubric_json?: any;
+  allowed_divisions?: string[];
+  allowed_batches?: string[];
+  enrollment_format_hint?: string;
+  enrollment_pattern?: string;
+  require_approval?: boolean;
+  exam_start_time?: string;
+  exam_end_time?: string;
+}
+
+export interface JoinPreviewResponse {
+  id: string;
+  name: string;
+  course_id?: string | null;
+  description?: string | null;
+  owner_name: string;
+  require_approval: boolean;
+}
+
+export interface JoinClassroomResponse {
+  classroom_id: string;
+  classroom_name: string;
+  status: string;
+  require_approval: boolean;
+  message: string;
+}
+
+export interface MemberDetailsResponse {
+  classroom_id: string;
+  classroom_name: string;
+  full_name: string;
+  enrollment_number?: string | null;
+  division?: string | null;
+  batch?: string | null;
+  status: string;
+  allowed_divisions: string[];
+  allowed_batches: string[];
+  enrollment_format_hint?: string | null;
+  is_exam_started: boolean;
+  can_edit: boolean;
+}
+
+export interface SaveMemberDetailsRequest {
+  full_name: string;
+  enrollment_number: string;
+  division?: string;
+  batch?: string;
+}
+
+export interface ExamLobbyResponse {
+  classroom_id: string;
+  classroom_name: string;
+  status: string;
+  is_exam_started: boolean;
+  exam_start_time?: string | null;
+  exam_end_time?: string | null;
+  server_time: string;
+  countdown_seconds: number;
+  can_enter_workspace: boolean;
+  message: string;
+}
+
+export interface RosterMemberItem {
+  user_id: string;
+  full_name: string;
+  enrollment_number?: string | null;
+  division?: string | null;
+  batch?: string | null;
+  status: string;
+  score?: number | null;
+  submission_time?: string | null;
+  last_activity?: string | null;
+  joined_at: string;
+  time_extension_minutes: number;
+  is_reopened: boolean;
+}
+
+export interface RosterPaginationResponse {
+  items: RosterMemberItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface ParticipantInspectionResponse {
+  classroom_id: string;
+  user_id: string;
+  full_name: string;
+  enrollment_number?: string | null;
+  division?: string | null;
+  batch?: string | null;
+  status: string;
+  starter_code: string;
+  final_code: string;
+  rubric_breakdown: Record<string, any>;
+  metrics_and_summary: Record<string, any>;
+  event_timeline: Array<{ event: string; timestamp: string; details?: any }>;
+  reproducibility_verified?: boolean | null;
+  reproduced_score?: number | null;
+  score?: number | null;
+  feedback?: string | null;
+}
+
 export const ClassroomService = {
   // Student Lab Exam Methods
   listExams: () => request<LabExamInfo[]>('/classrooms/exams'),
@@ -363,7 +503,117 @@ export const ClassroomService = {
       body: JSON.stringify({ code, deployment_id: deploymentId }),
     }),
 
-  // Instructor Management Methods (Parts B1-B6)
+  // Enhanced Classroom Entry & Management Methods (Parts B-I)
+  listMyClassrooms: () => request<MyClassroomsResponse>('/classrooms/my'),
+
+  createClassroomEnhanced: (data: ClassroomCreateEnhanced) =>
+    request<any>('/classrooms/enhanced', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  previewJoinCode: (code: string) =>
+    request<JoinPreviewResponse>(`/classrooms/join-preview?code=${encodeURIComponent(code)}`),
+
+  joinClassroom: (code: string) =>
+    request<JoinClassroomResponse>('/classrooms/join', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  getMyDetails: (classroomId: string) =>
+    request<MemberDetailsResponse>(`/classrooms/${classroomId}/my-details`),
+
+  saveMyDetails: (classroomId: string, data: SaveMemberDetailsRequest) =>
+    request<MemberDetailsResponse>(`/classrooms/${classroomId}/my-details`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getExamLobby: (classroomId: string) =>
+    request<ExamLobbyResponse>(`/classrooms/${classroomId}/lobby`),
+
+  startClassroomExam: (classroomId: string) =>
+    request<any>(`/classrooms/${classroomId}/start-exam`, {
+      method: 'POST',
+    }),
+
+  enterExamWorkspace: (classroomId: string) =>
+    request<any>(`/classrooms/${classroomId}/enter-workspace`, {
+      method: 'POST',
+    }),
+
+  getRosterPaginated: (
+    classroomId: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      search?: string;
+      division?: string;
+      batch?: string;
+      status?: string;
+      sort_by?: string;
+      sort_order?: string;
+    } = {}
+  ) => {
+    const q = new URLSearchParams();
+    if (params.page) q.set('page', String(params.page));
+    if (params.page_size) q.set('page_size', String(params.page_size));
+    if (params.search) q.set('search', params.search);
+    if (params.division) q.set('division', params.division);
+    if (params.batch) q.set('batch', params.batch);
+    if (params.status) q.set('status', params.status);
+    if (params.sort_by) q.set('sort_by', params.sort_by);
+    if (params.sort_order) q.set('sort_order', params.sort_order);
+    return request<RosterPaginationResponse>(`/classrooms/${classroomId}/roster-paginated?${q.toString()}`);
+  },
+
+  getRosterExportCsvUrl: (classroomId: string) => `/api/v1/classrooms/${classroomId}/roster/export.csv`,
+
+  inspectParticipant: (classroomId: string, userId: string) =>
+    request<ParticipantInspectionResponse>(`/classrooms/${classroomId}/participants/${userId}/inspect`),
+
+  resetJoinCode: (classroomId: string) =>
+    request<{ join_code: string; message: string }>(`/classrooms/${classroomId}/reset-code`, {
+      method: 'POST',
+    }),
+
+  toggleJoinCode: (classroomId: string, active: boolean) =>
+    request<any>(`/classrooms/${classroomId}/toggle-join-code`, {
+      method: 'POST',
+      body: JSON.stringify({ active }),
+    }),
+
+  setMemberApproval: (classroomId: string, userId: string, approve: boolean) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}/approval`, {
+      method: 'POST',
+      body: JSON.stringify({ approve }),
+    }),
+
+  grantTimeExtension: (classroomId: string, userId: string, minutes: number) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}/extension`, {
+      method: 'POST',
+      body: JSON.stringify({ minutes }),
+    }),
+
+  reopenSubmission: (classroomId: string, userId: string, reopen: boolean) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({ reopen }),
+    }),
+
+  removeMember: (classroomId: string, userId: string) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}`, {
+      method: 'DELETE',
+    }),
+
+  archiveClassroom: (classroomId: string, isArchived: boolean) =>
+    request<any>(`/classrooms/${classroomId}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ is_archived: isArchived }),
+    }),
+
+  // Legacy Instructor Management Methods (Parts B1-B6)
   listClassrooms: () => request<any[]>('/classrooms'),
 
   createClassroom: (data: { course_id: string; name: string; code: string; term?: string }) =>

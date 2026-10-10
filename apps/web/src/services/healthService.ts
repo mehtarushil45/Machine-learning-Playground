@@ -143,8 +143,8 @@ export function computeClientHealth(profile: DatasetProfile): DatasetHealthRepor
   }
 
   return {
-    dataset_id: profile.dataset_id,
-    filename: profile.filename,
+    dataset_id: profile.dataset_id || '',
+    filename: profile.filename || '',
     health_score: finalScore,
     grade,
     summary,

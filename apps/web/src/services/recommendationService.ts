@@ -227,8 +227,8 @@ export function computeClientRecommendations(
   })
 
   return {
-    dataset_id: profile.dataset_id,
-    filename: profile.filename,
+    dataset_id: profile.dataset_id || '',
+    filename: profile.filename || '',
     overall_readiness,
     readiness_reasoning,
     recommended_problem_type,
