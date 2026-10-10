@@ -6,7 +6,7 @@ Defines request payloads and response models for university ML practical lab exa
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -319,7 +319,7 @@ class AssignmentTemplateCreate(BaseModel):
 
 class ClassroomCreateEnhanced(BaseModel):
     name: str = Field(..., min_length=2, max_length=255, description="Classroom name")
-    course_id: Optional[UUID] = Field(None, description="Optional Course UUID")
+    course_id: Optional[Union[UUID, str]] = Field(None, description="Optional Course UUID or Code")
     description: Optional[str] = Field(None, max_length=2000, description="Optional description")
     term: str = Field("Fall 2026", max_length=100)
     require_approval: bool = Field(False, description="Require instructor approval to join")

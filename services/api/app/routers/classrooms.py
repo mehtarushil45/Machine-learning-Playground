@@ -1516,9 +1516,30 @@ async def create_classroom_enhanced(
             detail="Failed to generate a unique join code. Please try again.",
         )
 
+    resolved_course_id: Optional[UUID] = None
+    if payload.course_id:
+        if isinstance(payload.course_id, UUID):
+            resolved_course_id = payload.course_id
+        elif isinstance(payload.course_id, str) and payload.course_id.strip():
+            try:
+                resolved_course_id = UUID(payload.course_id.strip())
+            except (ValueError, AttributeError):
+                c_stmt = select(Course.id).where(
+                    Course.code == payload.course_id.strip(),
+                    Course.organisation_id == current_user.organisation_id,
+                )
+                resolved_course_id = (await db.execute(c_stmt)).scalar_one_or_none()
+
+    if resolved_course_id:
+        c_exists = (
+            await db.execute(select(Course.id).where(Course.id == resolved_course_id))
+        ).scalar_one_or_none()
+        if not c_exists:
+            resolved_course_id = None
+
     classroom = Classroom(
         organisation_id=current_user.organisation_id,
-        course_id=payload.course_id,
+        course_id=resolved_course_id,
         name=payload.name.strip(),
         code=join_code,
         term=payload.term.strip(),
@@ -1973,7 +1994,7 @@ async def get_exam_lobby(
         if now > effective_end:
             is_open = False
 
-    can_enter = bool(is_open and member.status in ("details_saved", "in_progress"))
+    can_enter = is_open and member.status in ("details_saved", "in_progress")
 
     return ExamLobbyResponse(
         classroom_id=classroom.id,
@@ -2075,7 +2096,8 @@ async def enter_exam_workspace(
     db.add(audit)
     await db.commit()
 
-    return {"status": member.status, "exam_started_at": member.exam_started_at.isoformat()}
+    started_iso = member.exam_started_at.isoformat() if member.exam_started_at else now.isoformat()
+    return {"status": member.status, "exam_started_at": started_iso}
 
 
 @router.get(

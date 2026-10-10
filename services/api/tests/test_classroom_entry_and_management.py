@@ -21,6 +21,9 @@ import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
+from starlette.requests import Request
+
+MOCK_REQUEST = Request({"type": "http", "client": ("127.0.0.1", 50000), "headers": []})
 
 import pytest
 from sqlalchemy import select
@@ -229,7 +232,7 @@ async def test_classroom_full_lifecycle_and_security():
         # 2. Student A joins with normalized code (spaces and lowercase)
         join_resp = await join_classroom_by_code(
             payload=JoinClassroomRequest(code=f" {code.lower()} "),
-            request=None,
+            request=MOCK_REQUEST,
             current_user=student_a,
             db=session,
         )
@@ -240,7 +243,7 @@ async def test_classroom_full_lifecycle_and_security():
         with pytest.raises(Exception) as exc_info:
             await join_classroom_by_code(
                 payload=JoinClassroomRequest(code=code),
-                request=None,
+                request=MOCK_REQUEST,
                 current_user=instructor,
                 db=session,
             )
@@ -265,7 +268,7 @@ async def test_classroom_full_lifecycle_and_security():
         # 5. Student B joins
         await join_classroom_by_code(
             payload=JoinClassroomRequest(code=code),
-            request=None,
+            request=MOCK_REQUEST,
             current_user=student_b,
             db=session,
         )
@@ -444,7 +447,7 @@ async def test_classroom_full_lifecycle_and_security():
             current_user=instructor,
             db=session,
         )
-        csv_text = csv_response.body.decode("utf-8")
+        csv_text = bytes(csv_response.body).decode("utf-8")
         assert "'=HYPERLINK" in csv_text, "Dangerous formula must be escaped with single quote"
         assert "'@EVIL-001" in csv_text, "Dangerous @ symbol must be escaped with single quote"
 
@@ -457,9 +460,10 @@ async def test_classroom_full_lifecycle_and_security():
         )
         new_join_code = reset_res["join_code"]
         assert new_join_code != old_join_code
+        assert old_join_code is not None
 
         with pytest.raises(Exception) as exc_info:
-            await preview_join_code(code=old_join_code, request=None, current_user=None, db=session)
+            await preview_join_code(code=old_join_code, request=MOCK_REQUEST, current_user=None, db=session)
         assert UNIFORM_JOIN_ERROR_MESSAGE in str(exc_info.value)
 
         # 15. Remove participant: locks them out at once (Parts G4, H3)

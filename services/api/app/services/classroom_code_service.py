@@ -69,7 +69,7 @@ def normalize_join_code(raw: str) -> str:
         return ""
 
     # NFKC normalizes fullwidth Latin (e.g. Ａ -> A) and compatibility characters
-    normalized = unicodedata.normalize("NFKC", str(raw))
+    normalized = unicodedata.normalize("NFKC", raw)
 
     # Apply look-alike mappings
     for k, v in LOOK_ALIKE_MAP.items():
