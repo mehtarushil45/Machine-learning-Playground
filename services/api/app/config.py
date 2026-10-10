@@ -170,6 +170,15 @@ class Settings(BaseSettings):
     cookie_samesite: str = "lax"         # "lax" | "strict" | "none"
     cookie_domain: str | None = None     # None = browser default (current host)
 
+    # ── AI Copilot Configuration ──────────────────────────────────────────────
+    ai_copilot_provider: str = ""        # "gemini" | "groq" | "openai" | "ollama" | "custom"
+    gemini_api_key: str = ""
+    groq_api_key: str = ""
+    openai_api_key: str = ""
+    ai_copilot_api_key: str = ""
+    ai_copilot_model: str = ""
+    ai_copilot_base_url: str = ""
+
     model_config = {
         "env_file": _ENV_FILE_PATHS,
         "env_file_encoding": "utf-8",

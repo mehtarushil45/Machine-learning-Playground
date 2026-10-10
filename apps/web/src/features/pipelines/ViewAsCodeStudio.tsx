@@ -25,14 +25,14 @@ import {
   Save,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
-import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService } from '../../services/api';
+import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService, CopilotApiService } from '../../services/api';
 import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 import { MonacoCodeStudioEditor } from './MonacoCodeStudioEditor';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
-import { PanelLearningCollapsible, HeadsUpCardsContainer, useLearning } from '../learning';
+import { PanelLearningCollapsible, HeadsUpCardsContainer } from '../learning';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -587,8 +587,6 @@ export function ViewAsCodeStudio({
     setFileJob,
   } = useProject();
 
-  const { learningMode, currentLessonId, lessons, activeCards } = useLearning();
-
   /* ── Local Sizing & Layout States (with persistence) ─────────────── */
   const [explorerWidth, setExplorerWidth] = useState<number>(() => {
     if (typeof localStorage !== 'undefined') {
@@ -656,6 +654,7 @@ export function ViewAsCodeStudio({
   /* ── AI Copilot Chat State ───────────────────────────────────────── */
   const [copilotInput, setCopilotInput] = useState('');
   const [copilotChat, setCopilotChat] = useState<{ id: string; role: 'user' | 'assistant'; text: string }[]>([]);
+  const [isCopilotThinking, setIsCopilotThinking] = useState(false);
 
   /* ── DOM Refs ────────────────────────────────────────────────────── */
   const outputEndRef = useRef<HTMLDivElement>(null);
@@ -1441,42 +1440,53 @@ export function ViewAsCodeStudio({
     return msgs;
   }, [selectedTarget, selectedFeatures, trainingConfig, dataset, canonicalAlgorithm, canonicalScaler, canonicalImputer, testRatio, canonicalCvFolds, inferredTaskType, isValidSyntax]);
 
-  /* ── AI Copilot Ask Question Handler ─────────────────────────────── */
-  const handleSendCopilotMessage = (promptText?: string) => {
+  /* ── AI Copilot Ask Question Handler (Real LLM Backend) ──────────── */
+  const handleSendCopilotMessage = async (promptText?: string) => {
     const textToSend = (promptText || copilotInput).trim();
-    if (!textToSend) return;
+    if (!textToSend || isCopilotThinking) return;
 
     const userMsg = { id: `u-${Date.now()}`, role: 'user' as const, text: textToSend };
     setCopilotChat((prev) => [...prev, userMsg]);
     if (!promptText) setCopilotInput('');
+    setIsCopilotThinking(true);
 
-    // Generate intelligent AI contextual response
-    setTimeout(() => {
-      let reply = '';
-      if (learningMode) {
-        const activeLesson = lessons.find((l) => l.id === currentLessonId);
-        reply += `🎓 **[Learning Mode: Educational Explanation]**\n`;
-        if (activeCards.length > 0) {
-          reply += `*Active Heads-Up Guidance: ${activeCards.map((c) => c.title).join(', ')}*\n`;
-        }
-        if (activeLesson) {
-          reply += `*Current Curriculum Goal:* ${activeLesson.goal}\n\n`;
-        }
-      }
+    try {
+      // Gather runtime error lines if any occurred in terminal
+      const errorLines = outputLines
+        .filter((l) => l.toLowerCase().includes('traceback') || l.toLowerCase().includes('error') || l.toLowerCase().includes('exception'))
+        .slice(-15)
+        .join('\n');
 
-      reply += `Here is insight on "${textToSend}":\n\n`;
-      const lower = textToSend.toLowerCase();
-      if (lower.includes('hyperparameter') || lower.includes('tune')) {
-        reply += `To tune **${canonicalAlgorithm}**, consider GridSearchCV over n_estimators (100, 200), max_depth (4, 8, None), and min_samples_split (2, 5). In machine learning, tuning parameters requires validating on cross-validation folds rather than the test split to prevent data snooping.`;
-      } else if (lower.includes('leakage') || lower.includes('exclude')) {
-        reply += `Data leakage occurs when information outside the training dataset is used to create the model. In scikit-learn, this is prevented by isolating StandardScaler and SimpleImputer inside a Pipeline so they fit ONLY on X_train, and evaluating holdout X_test separately without refitting.`;
-      } else if (lower.includes('explain') || lower.includes('pipeline')) {
-        reply += `This pipeline loads **${activeDatasetName}**, applies **${canonicalImputer}** imputation, **${canonicalScaler}** normalization, splits data (${Math.round(trainRatio * 100)}% train / ${Math.round(testRatio * 100)}% test), and fits a **${canonicalAlgorithm}** estimator with **${canonicalCvFolds}-fold CV**. Pipelines encapsulate all transformers and estimators so evaluation is rigorously unbiased.`;
-      } else {
-        reply += `The scikit-learn pipeline DAG is structured modularly. You can edit any parameter directly in the code editor, run it using the **Run** button, and view live stdout/stderr in the bottom Terminal.`;
-      }
-      setCopilotChat((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: reply }]);
-    }, 450);
+      const chatHistory = copilotChat.slice(-6).map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.text,
+      }));
+
+      const res = await CopilotApiService.chat({
+        prompt: textToSend,
+        code_context: displayedCode,
+        dataset_name: activeDatasetName || undefined,
+        dataset_schema: dataset?.columns ? { columns: dataset.columns } : undefined,
+        error_traceback: errorLines || undefined,
+        chat_history: chatHistory,
+      });
+
+      setCopilotChat((prev) => [
+        ...prev,
+        { id: `a-${Date.now()}`, role: 'assistant', text: res.reply },
+      ]);
+    } catch (err: any) {
+      setCopilotChat((prev) => [
+        ...prev,
+        {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          text: `❌ **[Copilot Request Failed]**\n\n${err?.message || 'Unable to connect to AI Copilot service.'}`,
+        },
+      ]);
+    } finally {
+      setIsCopilotThinking(false);
+    }
   };
 
   /* ── Lines for Code Editor ───────────────────────────────────────── */
@@ -2737,15 +2747,10 @@ export function ViewAsCodeStudio({
         messages={copilotMessages}
         chatMessages={copilotChat}
         onSendMessage={handleSendCopilotMessage}
-        suggestedQuestions={[
-          'Explain this pipeline configuration',
-          'How to prevent data leakage?',
-          'Suggest hyperparameters to tune',
-          'Add cross-validation evaluation',
-        ]}
-        placeholder="Ask about this pipeline configuration..."
+        isLoading={isCopilotThinking}
+        placeholder="Ask AI Copilot about this pipeline, model, or errors..."
         title="AI Copilot"
-        badge="AGENT"
+        badge={isCopilotThinking ? 'THINKING' : 'AGENT'}
       />
     </div>
   );

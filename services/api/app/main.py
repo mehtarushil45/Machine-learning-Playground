@@ -33,6 +33,7 @@ from app.routers import studio, explainability_v7b, workflow  # V7B Part 2
 from app.routers import local_deployments  # Prototype 4: Local Deployments
 from app.routers import code_execution      # Code Studio: sandboxed execution
 from app.routers import learning            # Student Learning Layer (Heads-Up Cards, Lessons, Stories)
+from app.routers import copilot             # Real-time AI Copilot & Code Assistant
 
 
 @asynccontextmanager
@@ -163,6 +164,9 @@ app.include_router(code_execution.router, prefix=API_V1_PREFIX)            # Run
 
 # ── Student Learning Layer ────────────────────────────────────────────────────
 app.include_router(learning.router, prefix=API_V1_PREFIX)                  # Heads-Up Cards, Lessons, Stories
+
+# ── Real-time AI Copilot ──────────────────────────────────────────────────────
+app.include_router(copilot.router, prefix=API_V1_PREFIX)                   # Real-time LLM Inference & Status
 
 
 @app.get(f"{API_V1_PREFIX}/algorithms", tags=["Algorithms"])

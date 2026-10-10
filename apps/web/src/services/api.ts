@@ -875,3 +875,42 @@ export const LearningService = {
     }),
 };
 
+// ---------------------------------------------------------------------------
+// 8. Enterprise AI Copilot Service (LLM Pair-Programmer & Code Assistant)
+// ---------------------------------------------------------------------------
+
+export interface CopilotChatPayload {
+  prompt: string;
+  code_context?: string;
+  dataset_name?: string;
+  dataset_schema?: Record<string, any>;
+  error_traceback?: string;
+  chat_history?: Array<{ role: string; content: string }>;
+  policy?: string;
+}
+
+export interface CopilotChatResult {
+  reply: string;
+  provider: string;
+  model: string;
+  allowed: boolean;
+  configured: boolean;
+  error?: string;
+}
+
+export interface CopilotStatusResult {
+  configured: boolean;
+  provider: string;
+  model: string;
+  requires_key: boolean;
+}
+
+export const CopilotApiService = {
+  chat: (payload: CopilotChatPayload) =>
+    request<CopilotChatResult>('/copilot/chat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getStatus: () => request<CopilotStatusResult>('/copilot/status'),
+};
+

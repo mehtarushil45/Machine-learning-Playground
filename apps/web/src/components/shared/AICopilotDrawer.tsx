@@ -19,7 +19,7 @@ export interface AICopilotDrawerProps {
   messages?: CopilotMsg[];
   chatMessages?: ChatMessage[];
   onSendMessage?: (msg: string) => void;
-  suggestedQuestions?: string[];
+  isLoading?: boolean;
   placeholder?: string;
   initialWidth?: number;
   minWidth?: number;
@@ -56,7 +56,7 @@ export function AICopilotDrawer({
   messages = [],
   chatMessages = [],
   onSendMessage,
-  suggestedQuestions = [],
+  isLoading = false,
   placeholder = 'Ask AI Copilot…',
   initialWidth = 340,
   minWidth = 280,
@@ -275,39 +275,24 @@ export function AICopilotDrawer({
           </div>
         ))}
 
-        {/* Suggested Quick Questions */}
-        {suggestedQuestions.length > 0 && onSendMessage && (
-          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 10, color: BB.muted, fontWeight: 700, letterSpacing: '0.05em' }}>
-              SUGGESTED QUESTIONS
-            </span>
-            {suggestedQuestions.map((sug) => (
-              <button
-                key={sug}
-                onClick={() => handleSend(sug)}
-                style={{
-                  textAlign: 'left',
-                  padding: '5px 8px',
-                  borderRadius: 5,
-                  background: 'rgba(107,92,166,0.1)',
-                  border: `1px solid ${BB.border}`,
-                  color: BB.muted,
-                  fontSize: 11,
-                  cursor: 'pointer',
-                  transition: 'all 120ms ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'rgba(107,92,166,0.22)';
-                  e.currentTarget.style.color = BB.text;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'rgba(107,92,166,0.1)';
-                  e.currentTarget.style.color = BB.muted;
-                }}
-              >
-                • {sug}
-              </button>
-            ))}
+        {/* AI Reasoning Loading Indicator */}
+        {isLoading && (
+          <div
+            style={{
+              alignSelf: 'flex-start',
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: BB.elevated,
+              border: `1px solid ${BB.border}`,
+              color: BB.muted,
+              fontSize: 11,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+            }}
+          >
+            <Sparkles style={{ width: 13, height: 13, color: BB.gold }} />
+            <span>AI Copilot is reasoning...</span>
           </div>
         )}
       </div>
@@ -328,10 +313,10 @@ export function AICopilotDrawer({
           value={inputVal}
           onChange={(e) => setInputVal(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSend();
+            if (e.key === 'Enter' && !isLoading) handleSend();
           }}
-          disabled={!onSendMessage}
-          placeholder={placeholder}
+          disabled={!onSendMessage || isLoading}
+          placeholder={isLoading ? 'AI Copilot is responding...' : placeholder}
           style={{
             flex: 1,
             padding: '6px 10px',
@@ -342,25 +327,25 @@ export function AICopilotDrawer({
             fontSize: 11.5,
             outline: 'none',
             boxSizing: 'border-box',
-            cursor: onSendMessage ? 'text' : 'not-allowed',
+            cursor: onSendMessage && !isLoading ? 'text' : 'not-allowed',
           }}
         />
         {onSendMessage && (
           <button
             onClick={() => handleSend()}
-            disabled={!inputVal.trim()}
+            disabled={!inputVal.trim() || isLoading}
             title="Send to Copilot"
             style={{
               width: 28,
               height: 28,
               borderRadius: 6,
               border: 'none',
-              background: inputVal.trim() ? BB.gold : BB.disabled,
+              background: inputVal.trim() && !isLoading ? BB.gold : BB.disabled,
               color: BB.base,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: inputVal.trim() ? 'pointer' : 'default',
+              cursor: inputVal.trim() && !isLoading ? 'pointer' : 'default',
               transition: 'background 120ms ease',
             }}
           >

@@ -614,41 +614,17 @@ async def copilot_proxy(
             detail="AI Copilot is disabled for this exam by instructor policy.",
         )
 
-    prompt_lower = payload.prompt.lower()
+    from app.services.copilot_service import CopilotService
 
-    if policy == "explain-only":
-        forbidden_keywords = ("write code", "give code", "give me code", "code for", "write a", "solution", "generate code", "complete this function", "implement", "do my exam")
-        if any(kw in prompt_lower for kw in forbidden_keywords):
-            return CopilotProxyResponse(
-                reply=(
-                    "⚠️ [Instructor Policy: Explain-Only Mode]\n\n"
-                    "I cannot write or complete pipeline code for you during this exam. "
-                    "However, I can explain ML algorithms, preprocessing concepts (e.g. why median imputation is preferred for skewed features), "
-                    "or interpret traceback errors."
-                ),
-                policy="explain-only",
-                allowed=True,
-            )
-
-        return CopilotProxyResponse(
-            reply=(
-                f"💡 [Conceptual Explanation]\n\n"
-                f"Regarding your query on '{payload.prompt[:60]}...': "
-                f"In scikit-learn pipelines, always fit transformers on the training split only to prevent data leakage. "
-                f"Categorical features should be encoded using OneHotEncoder(handle_unknown='ignore') to safely handle test-set levels."
-            ),
-            policy="explain-only",
-            allowed=True,
-        )
+    res = await CopilotService.generate_response(
+        prompt=payload.prompt,
+        code_context=payload.code_context,
+        policy=policy,
+    )
 
     return CopilotProxyResponse(
-        reply=(
-            f"🤖 [AI Assistant]\n\n"
-            f"To handle this requirement, ensure your ColumnTransformer applies SimpleImputer and StandardScaler "
-            f"to numeric columns, and OneHotEncoder to categorical features. Remember to save the fitted pipeline with "
-            f"`joblib.dump(pipeline, 'trained_model_pipeline.joblib')`."
-        ),
-        policy="full",
+        reply=res.get("reply", ""),
+        policy=policy,
         allowed=True,
     )
 
