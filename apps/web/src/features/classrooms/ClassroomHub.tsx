@@ -1329,11 +1329,11 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
           {/* Student Learning Layer: Educational Guidance (when aids allowed) */}
           {activeExam && (activeExam.learning_aids_enabled ?? true) && (
             <PanelLearningCollapsible
-              title="University Practical Lab Exam Environment"
+              title="Practical Lab Exam Environment"
               concept="In lab exams, you demonstrate machine learning mastery by structuring clean pipelines, training estimators, and deploying to an isolated serving slot."
               details="Heads-Up mistake cards and diagnostic hints are active to assist your learning journey. Follow rubric guidelines for minimum accuracy and latency."
               practicalTip="Ensure all data transformers fit on train splits only, and verify deployment responses using sample record test queries."
-              citation="University Lab Exam Curriculum & scikit-learn standard evaluation"
+              citation="Lab Exam Curriculum & scikit-learn standard evaluation"
             />
           )}
 
@@ -1397,26 +1397,6 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* Copilot Drawer Toggle Button */}
-                    <button
-                      onClick={() => setIsCopilotOpen(!isCopilotOpen)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
-                        activeExam?.copilot_policy === 'off'
-                          ? 'text-[#645B80] bg-[#140E24]'
-                          : isCopilotOpen
-                          ? 'bg-[#00D4FF]/20 text-[#00D4FF] border border-[#00D4FF]/40'
-                          : 'text-[#9E93B8] hover:text-white hover:bg-[#241B42]'
-                      }`}
-                      title={
-                        activeExam?.copilot_policy === 'off'
-                          ? 'AI Copilot disabled for this exam by instructor policy'
-                          : `AI Copilot: ${activeExam?.copilot_policy || 'full'}`
-                      }
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Copilot ({activeExam?.copilot_policy || 'full'})</span>
-                    </button>
-
                     <button
                       onClick={() => {
                         if (activeExam) setCode(activeExam.starter_code);

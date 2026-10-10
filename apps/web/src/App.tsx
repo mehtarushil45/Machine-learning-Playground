@@ -370,29 +370,9 @@ function AppContent() {
             gap: 16,
           }}
         >
-          {/* Header left: dataset + experiment context pill (shown when project initialized or classroom) */}
+          {/* Header left: dataset + experiment context pill (shown when project initialized) */}
           <div style={{ width: 220, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {activeTab === 'classroom' ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  background: 'rgba(0, 212, 255, 0.1)',
-                  border: '1px solid rgba(0, 212, 255, 0.3)',
-                  maxWidth: 200,
-                  overflow: 'hidden',
-                }}
-                title="Active Page: University Lab Exam Environment"
-              >
-                <GraduationCap style={{ width: 14, height: 14, color: '#00D4FF', flexShrink: 0 }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#00D4FF', whiteSpace: 'nowrap' }}>
-                  University Lab Exam
-                </span>
-              </div>
-            ) : isProjectInitialized && dataset ? (
+            {isProjectInitialized && dataset ? (
               <>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,
