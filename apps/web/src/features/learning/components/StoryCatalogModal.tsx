@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useLearning } from '../context/LearningContext'
 import { PitfallStory } from '../rules/types'
 
@@ -69,7 +69,8 @@ export function StoryCatalogModal({
               <div
                 key={s.id}
                 data-testid={`story-card-${s.id}`}
-                className={`p-4 rounded-xl border transition-all flex flex-col justify-between ${
+                onClick={() => setSelectedStory(s)}
+                className={`p-4 rounded-xl border transition-all flex flex-col justify-between cursor-pointer ${
                   isSelected
                     ? 'border-amber-500/60 bg-amber-950/20 shadow-md'
                     : 'border-white/10 bg-black/20 hover:border-white/20'

@@ -398,6 +398,9 @@ class DuckDBProfilerEngine:
             # Categorical association scan (Cramér's V) to catch derived categorical leakage
             if candidate_target:
                 escaped_target = escape_sql_identifier(candidate_target)
+                categorical_columns = [
+                    cp.name for cp in column_profiles if cp.type in ("categorical", "boolean")
+                ]
                 for cat_col in categorical_columns:
                     if cat_col == candidate_target:
                         continue

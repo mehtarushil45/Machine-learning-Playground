@@ -1,4 +1,3 @@
-import React from 'react'
 import { useLearning } from '../context/LearningContext'
 import { HeadsUpCard } from '../rules/types'
 

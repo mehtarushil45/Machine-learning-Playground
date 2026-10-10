@@ -11,7 +11,9 @@ Validates:
 - Pitfall datasets catalog and loading
 """
 
+from typing import Any, cast
 import pytest
+from fastapi import Request
 from app.services.learning_rules import (
     compute_baseline_metric,
     compute_cramers_v_from_contingency,
@@ -215,7 +217,7 @@ async def test_lesson_check_enforcement():
     class DummyRequest:
         headers = {"x-student-id": "test-student-42"}
 
-    req = DummyRequest()
+    req = cast(Request, cast(Any, DummyRequest()))
 
     # 1. Knowledge check: wrong option must be rejected
     with pytest.raises(HTTPException) as exc_info:
@@ -303,7 +305,7 @@ async def test_pilot_signals_logging():
     class DummyRequest:
         headers = {"x-student-id": "pilot-user-99"}
 
-    req = DummyRequest()
+    req = cast(Request, cast(Any, DummyRequest()))
     sig_res = await log_pilot_signal(
         payload=PilotSignalRequest(
             event_type="card_shown",

@@ -1,11 +1,8 @@
-import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import {
   HEADS_UP_RULES,
   evaluateHeadsUpRules,
-  calculateWilsonInterval,
-  calculateMajorityBaseline,
 } from '../features/learning/rules/registry'
 import { LearningProjectState } from '../features/learning/rules/types'
 import { HeadsUpCardsContainer } from '../features/learning/components/HeadsUpCardsContainer'
@@ -33,6 +30,8 @@ describe('Part B: Heads-Up Rules Registry (Positive & Negative Fixtures)', () =>
           rows: [],
           rowCount: 500,
           profile: {
+            dataset_id: 'ds-1',
+            filename: 'users.csv',
             row_count: 500,
             column_count: 3,
             memory_usage_bytes: 1000,
@@ -69,6 +68,8 @@ describe('Part B: Heads-Up Rules Registry (Positive & Negative Fixtures)', () =>
           rows: [],
           rowCount: 500,
           profile: {
+            dataset_id: 'ds-1',
+            filename: 'users.csv',
             row_count: 500,
             column_count: 2,
             memory_usage_bytes: 1000,
@@ -120,6 +121,8 @@ describe('Part B: Heads-Up Rules Registry (Positive & Negative Fixtures)', () =>
           rows: [],
           rowCount: 1000,
           profile: {
+            dataset_id: 'ds-2',
+            filename: 'churn.csv',
             row_count: 1000,
             column_count: 2,
             memory_usage_bytes: 2000,
@@ -164,6 +167,8 @@ describe('Part B: Heads-Up Rules Registry (Positive & Negative Fixtures)', () =>
           rows: [],
           rowCount: 1000,
           profile: {
+            dataset_id: 'ds-3',
+            filename: 'clean.csv',
             row_count: 1000,
             column_count: 2,
             memory_usage_bytes: 2000,
@@ -426,6 +431,8 @@ pipeline.fit(X_train, y_train);
           rows: [],
           rowCount: 1000,
           profile: {
+            dataset_id: 'ds-clean',
+            filename: 'clean.csv',
             row_count: 1000,
             column_count: 3,
             memory_usage_bytes: 5000,

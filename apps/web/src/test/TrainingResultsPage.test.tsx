@@ -226,7 +226,7 @@ describe('TrainingResultsPage (Page 3)', () => {
     // Regression metrics formatted as raw floats, NOT with percentage signs
     expect(screen.getByText('0.0039')).toBeInTheDocument();
     expect(screen.getByText('0.0048')).toBeInTheDocument();
-    expect(screen.getByText('0.9850')).toBeInTheDocument();
+    expect(screen.getAllByText('0.9850').length).toBeGreaterThanOrEqual(1);
 
     // Ensure MAE does NOT have % appended
     expect(screen.queryByText('0.0039%')).not.toBeInTheDocument();

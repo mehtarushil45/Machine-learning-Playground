@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useLearning } from '../context/LearningContext'
 import { LessonItem } from '../rules/types'
 
@@ -22,7 +22,7 @@ export function LessonGuideDrawer({
   } = useLearning()
 
   const [selectedLesson, setSelectedLesson] = useState<LessonItem | null>(() => {
-    return lessons[0] || null
+    return lessons.find((l) => l.id === currentLessonId) || lessons[0] || null
   })
 
   // Knowledge check state

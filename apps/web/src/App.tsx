@@ -72,7 +72,7 @@ function AppContent() {
     activeJob: project.activeJob,
     jobHistory: Object.values(project.fileJobs || {}),
     code: project.activeExperimentFile ? project.experimentFiles?.[project.activeExperimentFile] : undefined,
-    splitRatio: project.trainingConfig?.split_ratio,
+    splitRatio: project.trainingConfig?.train_test_split,
   }), [project]);
 
   const [activeTab, setActiveTab] = useState<PlatformTab>(() => {

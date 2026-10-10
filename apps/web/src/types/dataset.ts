@@ -25,6 +25,10 @@ export interface Dataset {
   contentHash?: string
   /** Format of dataset file */
   fileFormat?: 'csv' | 'parquet' | string
+  /** Profile summary for dataset */
+  profile?: Partial<DatasetProfile> | null
+  /** Alternate snake_case row count */
+  row_count?: number
 }
 
 export interface ColumnProfile {
@@ -75,8 +79,8 @@ export interface DataGovernanceReport {
 }
 
 export interface DatasetProfile {
-  dataset_id: string
-  filename: string
+  dataset_id?: string
+  filename?: string
   row_count: number
   column_count: number
   file_format?: 'csv' | 'parquet' | string

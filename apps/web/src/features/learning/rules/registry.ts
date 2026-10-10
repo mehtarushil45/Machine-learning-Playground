@@ -12,7 +12,7 @@
  * - B8: Test-set reuse across multiple runs
  */
 
-import { HeadsUpRule, LearningProjectState, HeadsUpTriggerResult } from './types'
+import { HeadsUpRule, HeadsUpCard, LearningProjectState, HeadsUpTriggerResult } from './types'
 
 export function calculateWilsonInterval(
   accuracy: number,
@@ -107,13 +107,13 @@ export const HEADS_UP_RULES: HeadsUpRule[] = [
       }
 
       // 2. Profiler governance leakage findings
-      const leakedFindings = state.dataset?.profile?.governance?.leaked_features || []
+      const leakedFindings: any[] = state.dataset?.profile?.governance?.leaked_features || []
       const selectedLeaked = leakedFindings.filter(
-        (item) => state.selectedFeatures.includes(item.feature) && (item.correlation >= 0.90 || item.severity === 'critical'),
+        (item: any) => state.selectedFeatures.includes(item.feature) && (item.correlation >= 0.90 || item.severity === 'critical'),
       )
 
       if (selectedLeaked.length > 0) {
-        const names = selectedLeaked.map((item) => `${item.feature} (score=${item.correlation})`).join(', ')
+        const names = selectedLeaked.map((item: any) => `${item.feature} (score=${item.correlation})`).join(', ')
         return {
           triggered: true,
           message: `Features with extreme target correlation/association selected: ${names}.`,
@@ -202,8 +202,9 @@ export const HEADS_UP_RULES: HeadsUpRule[] = [
       const acc = state.activeJob?.metrics?.accuracy ?? state.activeJob?.metrics?.test_accuracy
       if (acc === undefined) return null
 
+      const totalRows = state.dataset?.rowCount ?? state.dataset?.row_count
       const testN = state.testSampleCount ||
-        (state.dataset?.row_count && state.splitRatio ? Math.round(state.dataset.row_count * (1 - state.splitRatio)) : null)
+        (totalRows && state.splitRatio ? Math.round(totalRows * (1 - state.splitRatio)) : null)
 
       if (testN !== null && testN > 0 && testN < 100) {
         const [low, high] = calculateWilsonInterval(acc, testN)

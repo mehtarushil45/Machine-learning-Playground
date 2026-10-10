@@ -133,6 +133,8 @@ export interface JobEntity {
     selection_source?: string
     [key: string]: unknown
   }
+  metrics?: Record<string, any>
+  results?: Record<string, any>
 }
 
 export interface JobListData {

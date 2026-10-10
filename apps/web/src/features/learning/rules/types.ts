@@ -3,7 +3,7 @@
  */
 
 import { Dataset } from '../../../types/dataset'
-import { JobEntity } from '../../../types/training'
+import { JobEntity } from '../../../types/job'
 
 export type CardSeverity = 'info' | 'warning'
 
@@ -83,6 +83,7 @@ export interface PitfallStory {
   problem_type: string
   pitfall_type: string
   pitfall_name: string
+  pitfall?: string
   hint: string
   reveal: string
   row_count: number

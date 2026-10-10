@@ -52,31 +52,38 @@ const METRIC_DEFINITIONS: Record<string, { summary: string; formula?: string; wh
     summary: 'Kolmogorov-Smirnov test p-value comparing cumulative distributions.',
     whenToUse: 'p < 0.01 suggests production inputs diverge from training baseline.',
   },
+  ks_test: {
+    summary: 'Kolmogorov-Smirnov test comparing production feature distribution against training baseline.',
+    whenToUse: 'p-value < 0.05 indicates significant distribution drift between training and inference.',
+  },
 }
 
 interface MetricLearningTooltipProps {
-  metricKey: string
+  metricKey?: string
+  metricName?: string
   label?: string
-  children: React.ReactElement
+  children: React.ReactNode
 }
 
 export function MetricLearningTooltip({
   metricKey,
+  metricName,
   label,
   children,
 }: MetricLearningTooltipProps) {
   const { learningMode } = useLearning()
-  const def = METRIC_DEFINITIONS[metricKey.toLowerCase()]
+  const key = (metricKey || metricName || '').toLowerCase()
+  const def = METRIC_DEFINITIONS[key]
 
   // If learning mode is off or metric has no custom educational def, render children as-is
   if (!learningMode || !def) {
-    return children
+    return <>{children}</>
   }
 
   const tooltipContent = (
     <div className="max-w-xs p-1 text-[11px] leading-tight space-y-1">
       <div className="font-semibold text-amber-300">
-        💡 {label || metricKey.toUpperCase()}
+        💡 {label || (metricKey || metricName || key).toUpperCase()}
       </div>
       <div className="text-foreground/90">{def.summary}</div>
       {def.formula && (

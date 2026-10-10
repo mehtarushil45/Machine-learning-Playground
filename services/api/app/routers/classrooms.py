@@ -512,17 +512,25 @@ async def get_lab_session(
         }
         _STUDENT_LAB_SESSIONS[session_key] = state
 
+    active_dep_str = str(state["active_deployment_id"]) if state.get("active_deployment_id") is not None else None
+    code_draft_str = str(state["code_draft"]) if state.get("code_draft") is not None else None
+    version_int = int(cast(Any, state.get("version_count", 1) or 1))
+    status_str = str(state.get("status") or "IN_PROGRESS")
+    grade_val = float(cast(Any, state["grade_score"])) if state.get("grade_score") is not None else None
+    sub_at_str = str(state["submitted_at"]) if state.get("submitted_at") is not None else None
+    receipt_dict = cast(Optional[Dict[str, Any]], state.get("submission_receipt")) if isinstance(state.get("submission_receipt"), dict) else None
+
     return LabExamSessionResponse(
         exam_id=str(state.get("exam_id") or exam_id),
         student_id=str(state.get("student_id") or student_id),
-        active_deployment_id=state.get("active_deployment_id"),
-        code_draft=state.get("code_draft"),
-        version_count=int(state.get("version_count", 1)),
-        status=str(state.get("status", "IN_PROGRESS")),
-        grade_score=float(state["grade_score"]) if state.get("grade_score") is not None else None,
-        submitted_at=state.get("submitted_at"),
+        active_deployment_id=active_dep_str,
+        code_draft=code_draft_str,
+        version_count=version_int,
+        status=status_str,
+        grade_score=grade_val,
+        submitted_at=sub_at_str,
         is_locked=bool(state.get("is_locked", False)),
-        submission_receipt=state.get("submission_receipt"),
+        submission_receipt=receipt_dict,
     )
 
 

@@ -959,7 +959,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast }) => {
                     <option value="story_ecommerce_identifier.csv">Story: E-Commerce (Identifier Leaking Order)</option>
                     <option value="story_medical_mnar.csv">Story: Medical (MNAR Missingness Pattern)</option>
                     {stories && stories.map((s) => (
-                      <option key={s.id} value={s.filename}>{s.title} ({s.pitfall})</option>
+                      <option key={s.id} value={s.filename}>{s.title} ({s.pitfall_name || s.pitfall_type || s.pitfall || 'Pitfall'})</option>
                     ))}
                   </select>
                 </div>
