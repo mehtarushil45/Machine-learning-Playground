@@ -662,6 +662,26 @@ export const ClassroomService = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  getCurriculumInstructorSummary: async () => {
+    const summary = await request<{ total_students_active: number; lesson_completion_counts: Record<string, number> }>(
+      '/learning/progress/instructor-summary'
+    ).catch(() => ({ total_students_active: 0, lesson_completion_counts: {} as Record<string, number> }));
+
+    const lessons = await request<any[]>('/learning/lessons').catch(() => []);
+
+    return {
+      total_students_active: summary?.total_students_active || 0,
+      lessons: (lessons || []).map((l: any) => ({
+        lesson_id: l.id,
+        lesson_number: l.number,
+        lesson_title: l.title,
+        completed_count: summary?.lesson_completion_counts?.[l.id] || 0,
+        page_route: l.page_route,
+        goal: l.goal,
+      })),
+    };
+  },
 };
 
 // ---------------------------------------------------------------------------

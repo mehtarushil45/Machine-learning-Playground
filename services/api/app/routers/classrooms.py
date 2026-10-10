@@ -1055,21 +1055,37 @@ async def evaluate_lab_model(
                 except Exception as exc:
                     logger.warning("Benchmark inference call failed: %s", exc)
 
-            max_lat = float(exam.get("rubric", {}).get("max_latency_ms", 100.0))
+            rubric_conf = exam.get("rubric") or {}
+            eval_max_lat = rubric_conf.get("evaluate_max_latency", True)
+            max_lat = float(rubric_conf.get("max_latency_ms", 100.0))
             median_lat = float(np.median(latencies)) if latencies else 999.0
-            lat_ok = median_lat <= max_lat
-            pts3 = (20.0 if inference_passed else 0.0) + (10.0 if (inference_passed and lat_ok) else 0.0)
+
+            if eval_max_lat:
+                lat_ok = median_lat <= max_lat
+                pts3 = (20.0 if inference_passed else 0.0) + (10.0 if (inference_passed and lat_ok) else 0.0)
+                criteria.append(RubricCriterionResult(
+                    criterion="Live Inference & Controlled Latency",
+                    description=f"Controlled serving latency measured via warm-up followed by median of 5 serving calls <= {max_lat}ms.",
+                    target=f"Valid prediction, median latency <= {max_lat}ms",
+                    actual=f"Median Latency: {median_lat:.2f}ms (Pass={inference_passed})",
+                    passed=inference_passed and lat_ok,
+                    points_awarded=pts3,
+                    max_points=30.0,
+                    hint="Optimize pipeline preprocessing and avoid heavy custom Python loops in transformers to reduce latency." if not lat_ok else None,
+                ))
+            else:
+                pts3 = 30.0 if inference_passed else 0.0
+                criteria.append(RubricCriterionResult(
+                    criterion="Live Inference & Real-time Serving",
+                    description="Live prediction pipeline deployed and serving valid outputs (latency scoring disabled).",
+                    target="Valid live inference (Latency advisory only)",
+                    actual=f"Inference Pass={inference_passed} (Median Latency: {median_lat:.2f}ms)",
+                    passed=inference_passed,
+                    points_awarded=pts3,
+                    max_points=30.0,
+                    hint="Ensure local model deployment starts and responds to predict requests." if not inference_passed else None,
+                ))
             total_score += pts3
-            criteria.append(RubricCriterionResult(
-                criterion="Live Inference & Controlled Latency",
-                description=f"Controlled serving latency measured via warm-up followed by median of 5 serving calls <= {max_lat}ms.",
-                target=f"Valid prediction, median latency <= {max_lat}ms",
-                actual=f"Median Latency: {median_lat:.2f}ms (Pass={inference_passed})",
-                passed=inference_passed and lat_ok,
-                points_awarded=pts3,
-                max_points=30.0,
-                hint="Optimize pipeline preprocessing and avoid heavy custom Python loops in transformers to reduce latency." if not lat_ok else None,
-            ))
 
             # Criterion 4: Benchmark Accuracy / F1 on Hidden Ground Truth (35 pts) (A2, D1)
             hidden_cases = _get_hidden_test_cases(exam_id)
@@ -1093,40 +1109,56 @@ async def evaluate_lab_model(
                         pass
 
             benchmark_acc = float(correct_preds / total_cases) if total_cases > 0 else 0.0
-            target_acc = float(exam.get("rubric", {}).get("min_accuracy", 0.80))
-            acc_passed = benchmark_acc >= target_acc
+            eval_min_metric = rubric_conf.get("evaluate_min_metric", True)
+            target_acc = float(rubric_conf.get("min_accuracy", 0.80))
 
-            if acc_passed:
-                pts4 = 35.0
-            elif benchmark_acc >= target_acc * 0.80:
-                pts4 = 25.0
-            elif benchmark_acc >= 0.50:
-                pts4 = 15.0
+            if eval_min_metric:
+                acc_passed = benchmark_acc >= target_acc
+                if acc_passed:
+                    pts4 = 35.0
+                elif benchmark_acc >= target_acc * 0.80:
+                    pts4 = 25.0
+                elif benchmark_acc >= 0.50:
+                    pts4 = 15.0
+                else:
+                    pts4 = 5.0
+                criteria.append(RubricCriterionResult(
+                    criterion="Model Performance on Hidden Benchmark",
+                    description=f"Achieve validation metric >= {target_acc:.2f} on 30 held-out benchmark test cases.",
+                    target=f">= {target_acc:.2f} (Accuracy)",
+                    actual=f"{benchmark_acc:.4f} ({correct_preds}/{total_cases} test cases correct)",
+                    passed=acc_passed,
+                    points_awarded=pts4,
+                    max_points=35.0,
+                    hint="Tune model hyperparameters (e.g. n_estimators, max_depth) or address class imbalance to boost score." if not acc_passed else None,
+                ))
             else:
-                pts4 = 5.0
+                acc_passed = (inference_passed and total_cases > 0 and correct_preds > 0)
+                pts4 = 35.0 if acc_passed else (20.0 if (inference_passed and total_cases > 0) else 0.0)
+                criteria.append(RubricCriterionResult(
+                    criterion="Model Execution on Hidden Benchmark",
+                    description="Execution of trained model across held-out benchmark test cases (accuracy scoring disabled).",
+                    target="Valid predictions across test cases (Accuracy advisory only)",
+                    actual=f"{benchmark_acc:.4f} accuracy ({correct_preds}/{total_cases} test cases correct)",
+                    passed=acc_passed,
+                    points_awarded=pts4,
+                    max_points=35.0,
+                    hint=None,
+                ))
             total_score += pts4
 
-            criteria.append(RubricCriterionResult(
-                criterion="Model Performance on Hidden Benchmark",
-                description=f"Achieve validation metric >= {target_acc:.2f} on 30 held-out benchmark test cases.",
-                target=f">= {target_acc:.2f} (Accuracy)",
-                actual=f"{benchmark_acc:.4f} ({correct_preds}/{total_cases} test cases correct)",
-                passed=acc_passed,
-                points_awarded=pts4,
-                max_points=35.0,
-                hint="Tune model hyperparameters (e.g. n_estimators, max_depth) or address class imbalance to boost score." if not acc_passed else None,
-            ))
-
             # Data Quality Guardrail Checks (C4)
+            eval_guardrails = rubric_conf.get("evaluate_guardrails", True)
             code_draft = session_data.get("code_draft") or ""
             target_col = exam.get("target_column", "churn")
             guardrail_warnings = _run_data_quality_guardrails(code_draft, list(schema.keys()), target_col)
-            if guardrail_warnings:
+            if guardrail_warnings and eval_guardrails:
                 deduction = min(15.0, len(guardrail_warnings) * 5.0)
                 total_score = max(0.0, total_score - deduction)
 
+            passing_pct = float(rubric_conf.get("passing_score_percentage", 60.0))
             percentage = round((total_score / max_score) * 100.0, 1)
-            passed_exam = percentage >= 60.0
+            passed_exam = percentage >= passing_pct
 
             if session_key in _STUDENT_LAB_SESSIONS:
                 _STUDENT_LAB_SESSIONS[session_key]["grade_score"] = percentage
@@ -2879,7 +2911,24 @@ async def create_assignment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> AssignmentResponse:
-    check_user_permission(current_user, Permission.ASSIGNMENT_CREATE)
+    # 1. Fetch classroom
+    stmt = select(Classroom).where(Classroom.id == payload.classroom_id)
+    res = await db.execute(stmt)
+    classroom = res.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Classroom with ID '{payload.classroom_id}' not found.",
+        )
+
+    # 2. Authorization: Allow if user is classroom creator/faculty OR has ASSIGNMENT_CREATE
+    is_owner = (classroom.faculty_id == current_user.id)
+    if not is_owner and not has_permission(current_user.role, Permission.ASSIGNMENT_CREATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Role '{current_user.role.value}' does not possess required permission 'assignment:create'.",
+        )
+
     assignment = Assignment(
         organisation_id=current_user.organisation_id,
         classroom_id=payload.classroom_id,
@@ -2894,6 +2943,28 @@ async def create_assignment(
     db.add(assignment)
     await db.commit()
     await db.refresh(assignment)
+
+    # Register exam in CURATED_LAB_EXAMS for live runtime evaluation
+    exam_id = f"exam-{assignment.id}"
+    rubric_dict = payload.rubric or {}
+    CURATED_LAB_EXAMS[exam_id] = {
+        "id": exam_id,
+        "title": assignment.title,
+        "course_code": "CS401",
+        "duration_minutes": int(rubric_dict.get("duration_minutes", 90)),
+        "problem_type": rubric_dict.get("problem_type", "classification"),
+        "dataset_name": payload.dataset_id or "churn_lab_dataset.csv",
+        "dataset_id": payload.dataset_id or "churn_lab_dataset.csv",
+        "target_column": rubric_dict.get("target_column", "churn"),
+        "feature_columns": ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"],
+        "description": assignment.description,
+        "rubric": rubric_dict,
+        "starter_code": "",
+        "copilot_policy": "off",
+        "learning_aids_enabled": False,
+        "protected_regions": [],
+    }
+
     return AssignmentResponse.model_validate(assignment)
 
 

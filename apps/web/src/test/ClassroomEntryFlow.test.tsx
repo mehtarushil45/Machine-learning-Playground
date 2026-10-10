@@ -286,9 +286,9 @@ describe('Classroom Entry & Management Flow (Parts B - G)', () => {
       expect(screen.getByText('CS2026001')).toBeInTheDocument();
       expect(screen.getByText('SUBMITTED')).toBeInTheDocument();
       expect(screen.getByText('92.5 / 100')).toBeInTheDocument();
-      expect(screen.getByText('Export CSV (G2)')).toBeInTheDocument();
-      expect(screen.getByText('Projector View (C3)')).toBeInTheDocument();
-      expect(screen.getByText('Reset Code (G4)')).toBeInTheDocument();
+      expect(screen.getByText('Export CSV')).toBeInTheDocument();
+      expect(screen.getByText('Projector View')).toBeInTheDocument();
+      expect(screen.queryByText(/Reset Code/i)).not.toBeInTheDocument();
     });
   });
 });

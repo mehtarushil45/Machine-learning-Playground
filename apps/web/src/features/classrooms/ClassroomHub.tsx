@@ -17,14 +17,13 @@ import {
   Users,
   PlusCircle,
   Download,
-  ShieldCheck,
-  ShieldAlert,
-  BookOpen,
+  RefreshCw,
   Lock,
   FileCheck,
   Check,
   GraduationCap,
   Settings,
+  Sliders,
   HelpCircle,
 } from 'lucide-react';
 import {
@@ -70,6 +69,26 @@ const BB = {
   cyan: '#00D4FF',
 } as const;
 
+const formatISTDateTime = (dateStr?: string | null) => {
+  if (!dateStr) return '—';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).replace(/am|pm/i, (m) => m.toUpperCase()) + ' IST';
+  } catch {
+    return dateStr;
+  }
+};
+
 export interface ClassroomHubProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
   initialView?: 'entry' | 'instructor' | 'student' | 'lobby';
@@ -93,9 +112,10 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [activeClassroom, setActiveClassroom] = useState<ClassroomSummary | null>(null);
   const [detailsClassroomId, setDetailsClassroomId] = useState<string | null>(null);
 
-  // Instructor Tabs: 'submissions' | 'create-assignment' | 'roster' | 'templates' | 'curriculum'
-  const [instructorTab, setInstructorTab] = useState<'submissions' | 'create-assignment' | 'roster' | 'templates' | 'curriculum'>('submissions');
-  const [curriculumSummary, setCurriculumSummary] = useState<any[]>([]);
+  // Instructor Tabs: 'submissions' | 'create-assignment' | 'roster' | 'curriculum'
+  const [instructorTab, setInstructorTab] = useState<'submissions' | 'create-assignment' | 'roster' | 'curriculum'>('submissions');
+  const [curriculumData, setCurriculumData] = useState<{ total_students_active: number; lessons: any[] } | null>(null);
+  const [isLoadingCurriculum, setIsLoadingCurriculum] = useState(false);
 
   // Student Workspace State
   const [exams, setExams] = useState<LabExamInfo[]>([]);
@@ -133,11 +153,10 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [copilotChat, setCopilotChat] = useState<ChatMessage[]>([]);
   const [isCopilotThinking, setIsCopilotThinking] = useState(false);
 
-  // Instructor State: Classrooms, Submissions, Templates
+  // Instructor State: Classrooms, Submissions
   const [classrooms, setClassrooms] = useState<any[]>([]);
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>('');
   const [submissions, setSubmissions] = useState<SubmissionDashboardItem[]>([]);
-  const [templates, setTemplates] = useState<any[]>([]);
   const [isLoadingInstructor, setIsLoadingInstructor] = useState(false);
 
   // Manual Grading Modal State
@@ -146,20 +165,20 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [gradingComments, setGradingComments] = useState<string>('');
   const [isSavingGrade, setIsSavingGrade] = useState(false);
 
-  // Reproducibility Audit in Progress state
-  const [auditingSubId, setAuditingSubId] = useState<string | null>(null);
-
   // Create Assignment Form State
   const [newAssignmentTitle, setNewAssignmentTitle] = useState('');
   const [newAssignmentDesc, setNewAssignmentDesc] = useState('');
   const [newAssignmentType, setNewAssignmentType] = useState('classification');
   const [newAssignmentDataset, setNewAssignmentDataset] = useState('churn_lab_dataset.csv');
+  // Advanced Evaluation & Rubric Options State
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [evalMinMetric, setEvalMinMetric] = useState(true);
   const [newAssignmentMinAcc, setNewAssignmentMinAcc] = useState('0.80');
+  const [evalMaxLat, setEvalMaxLat] = useState(true);
   const [newAssignmentMaxLat, setNewAssignmentMaxLat] = useState('100.0');
-  const [newAssignmentCopilotPolicy, setNewAssignmentCopilotPolicy] = useState('explain-only');
-  const [newAssignmentLearningAids, setNewAssignmentLearningAids] = useState(true);
-  const [newAssignmentStarterCode, setNewAssignmentStarterCode] = useState('');
-  const [saveAsTemplateChecked, setSaveAsTemplateChecked] = useState(false);
+  const [evalGuardrails, setEvalGuardrails] = useState(true);
+  const [newAssignmentDuration, setNewAssignmentDuration] = useState('90');
+  const [newAssignmentPassingScore, setNewAssignmentPassingScore] = useState('60');
 
   const { setLearningAidsAllowed, stories } = useLearning();
 
@@ -180,7 +199,6 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             setActiveExam(initial);
             setSelectedExamId(initial.id);
             setCode(initial.starter_code);
-            setNewAssignmentStarterCode(initial.starter_code);
             setLearningAidsAllowed(initial.learning_aids_enabled ?? true);
 
             // Fetch active session state for this exam
@@ -223,12 +241,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const loadInstructorData = useCallback(async () => {
     setIsLoadingInstructor(true);
     try {
-      const [clsList, tplList] = await Promise.all([
-        ClassroomService.listClassrooms().catch(() => []),
-        ClassroomService.listTemplates().catch(() => []),
-      ]);
+      const clsList = await ClassroomService.listClassrooms().catch(() => []);
       setClassrooms(clsList);
-      setTemplates(tplList);
 
       if (clsList.length > 0) {
         const activeCls = clsList[0];
@@ -244,6 +258,18 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       console.debug('Instructor data fetch notice:', err);
     } finally {
       setIsLoadingInstructor(false);
+    }
+  }, []);
+
+  const loadCurriculumProgress = useCallback(async () => {
+    setIsLoadingCurriculum(true);
+    try {
+      const data = await ClassroomService.getCurriculumInstructorSummary();
+      setCurriculumData(data);
+    } catch (err: any) {
+      console.error('Failed to load curriculum progress:', err);
+    } finally {
+      setIsLoadingCurriculum(false);
     }
   }, []);
 
@@ -532,31 +558,6 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     }
   };
 
-  // 11. Instructor: Reproducibility Audit Runner (B6)
-  const handleAuditReproducibility = async (sub: SubmissionDashboardItem) => {
-    setAuditingSubId(sub.submission_id);
-    onShowToast?.('Reproducibility Audit Started', `Re-running pipeline in sandbox with seed=42 for ${sub.learner_name}...`, 'info');
-    try {
-      const auditRes = await ClassroomService.auditReproducibility(sub.submission_id);
-      if (auditRes.verified) {
-        onShowToast?.('Reproducibility Verified!', `Metrics match reported score within ${auditRes.tolerance} tolerance.`, 'success');
-      } else {
-        onShowToast?.('Audit Divergence Detected', 'Reproduced metric diverged from reported submission.', 'error');
-      }
-      // Refresh submissions
-      if (selectedClassroomId) {
-        const asgns = await ClassroomService.listAssignments(selectedClassroomId);
-        if (asgns.length > 0) {
-          const updatedSubs = await ClassroomService.getSubmissions(asgns[0].id);
-          setSubmissions(updatedSubs);
-        }
-      }
-    } catch (err: any) {
-      onShowToast?.('Audit Failed', err.message, 'error');
-    } finally {
-      setAuditingSubId(null);
-    }
-  };
 
   // 12. Instructor: Manual Grade Submit (B6)
   const handleSaveManualGrade = async () => {
@@ -584,44 +585,36 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     }
   };
 
-  // 13. Instructor: Create Assignment Submit (B2)
+  // 13. Instructor: Create Assignment Submit
   const handleCreateAssignment = async () => {
-    if (!selectedClassroomId || !newAssignmentTitle.trim()) {
+    const targetClassroomId = selectedClassroomId || activeClassroom?.id || classrooms[0]?.id;
+    if (!targetClassroomId || !newAssignmentTitle.trim()) {
       onShowToast?.('Missing Fields', 'Please select a classroom and enter an assignment title.', 'info');
       return;
     }
     try {
       await ClassroomService.createAssignment({
-        classroom_id: selectedClassroomId,
+        classroom_id: targetClassroomId,
         title: newAssignmentTitle,
         description: newAssignmentDesc || 'Practical ML Lab Exam',
         dataset_id: newAssignmentDataset,
         rubric: {
-          min_accuracy: parseFloat(newAssignmentMinAcc) || 0.8,
-          max_latency_ms: parseFloat(newAssignmentMaxLat) || 100.0,
-          copilot_policy: newAssignmentCopilotPolicy,
-          starter_code: newAssignmentStarterCode,
+          problem_type: newAssignmentType,
+          evaluate_min_metric: evalMinMetric,
+          min_accuracy: evalMinMetric ? (parseFloat(newAssignmentMinAcc) || 0.8) : 0.0,
+          evaluate_max_latency: evalMaxLat,
+          max_latency_ms: evalMaxLat ? (parseFloat(newAssignmentMaxLat) || 100.0) : 9999.0,
+          evaluate_guardrails: evalGuardrails,
+          duration_minutes: parseInt(newAssignmentDuration, 10) || 90,
+          passing_score_percentage: parseFloat(newAssignmentPassingScore) || 60.0,
         },
         max_score: 100.0,
-        learning_aids_enabled: newAssignmentLearningAids,
+        learning_aids_enabled: false,
       });
-
-      if (saveAsTemplateChecked) {
-        await ClassroomService.saveTemplate({
-          title: newAssignmentTitle,
-          description: newAssignmentDesc || 'Template',
-          problem_type: newAssignmentType,
-          dataset_name: newAssignmentDataset,
-          dataset_id: newAssignmentDataset,
-          target_column: 'churn',
-          starter_code: newAssignmentStarterCode,
-          rubric: { min_accuracy: parseFloat(newAssignmentMinAcc) || 0.8 },
-          copilot_policy: newAssignmentCopilotPolicy,
-        });
-      }
 
       onShowToast?.('Assignment Published!', 'Students enrolled in this classroom can now access the lab exam.', 'success');
       setNewAssignmentTitle('');
+      setNewAssignmentDesc('');
       setInstructorTab('submissions');
       loadInstructorData();
     } catch (err: any) {
@@ -738,7 +731,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
               }`}
             >
               <Award className="w-3.5 h-3.5" />
-              <span>Submissions & Grading (B5, B6)</span>
+              <span>Submissions & Grading</span>
             </button>
             <button
               onClick={() => setInstructorTab('create-assignment')}
@@ -749,7 +742,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
               }`}
             >
               <PlusCircle className="w-3.5 h-3.5" />
-              <span>Create Assignment & Rubric (B2, B4)</span>
+              <span>Create Assignment & Rubric</span>
             </button>
             <button
               onClick={() => setInstructorTab('roster')}
@@ -760,26 +753,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>Classrooms & Roster (B1)</span>
-            </button>
-            <button
-              onClick={() => setInstructorTab('templates')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                instructorTab === 'templates'
-                  ? 'bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/40'
-                  : 'text-[#9E93B8] hover:text-white hover:bg-[#1C1534]'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Assignment Templates (B3)</span>
+              <span>Classrooms & Roster</span>
             </button>
             <button
               onClick={() => {
                 setInstructorTab('curriculum');
-                fetch('/api/v1/learning/progress/instructor-summary')
-                  .then((res) => (res.ok ? res.json() : []))
-                  .then((data) => setCurriculumSummary(data))
-                  .catch(() => {});
+                loadCurriculumProgress();
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
                 instructorTab === 'curriculum'
@@ -788,7 +767,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
               }`}
             >
               <GraduationCap className="w-3.5 h-3.5" />
-              <span>Curriculum Progress (C4)</span>
+              <span>Curriculum Progress</span>
             </button>
             {isLoadingInstructor && (
               <span className="text-[11px] text-[#00D4FF] font-mono animate-pulse ml-auto">
@@ -834,7 +813,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#00F5A0] border border-[#00F5A0]/40 transition-colors flex items-center gap-1.5 shadow"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Export Grades CSV (B5)</span>
+                  <span>Export Grades CSV</span>
                 </a>
               </div>
 
@@ -844,7 +823,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 style={{ background: BB.surface, borderColor: BB.border }}
               >
                 <div className="px-5 py-3 border-b border-[rgba(107,92,166,0.18)] flex items-center justify-between bg-[#110D20]">
-                  <span className="text-xs font-bold text-[#F5F1EC]">Student Exam Submissions & Reproducibility Audit</span>
+                  <span className="text-xs font-bold text-[#F5F1EC]">Student Exam Submissions</span>
                   <span className="text-[11px] text-[#9E93B8]">Showing enrolled candidates</span>
                 </div>
 
@@ -855,9 +834,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         <th className="p-3 font-semibold">Student Name / Email</th>
                         <th className="p-3 font-semibold">Status</th>
                         <th className="p-3 font-semibold">Automated Score</th>
-                        <th className="p-3 font-semibold">Code SHA-256</th>
-                        <th className="p-3 font-semibold">Guardrail Flags (C4)</th>
-                        <th className="p-3 font-semibold">Reproducibility Audit (B6)</th>
+                        <th className="p-3 font-semibold">Submission Date & Time (IST)</th>
                         <th className="p-3 font-semibold text-right">Actions</th>
                       </tr>
                     </thead>
@@ -909,56 +886,18 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                               {sub.grade_score?.toFixed(1) || '0.0'} / 100
                             </span>
                           </td>
-                          <td className="p-3 font-mono text-[10px] text-[#00D4FF]">
-                            {sub.code_sha256?.slice(0, 16)}...
-                          </td>
-                          <td className="p-3">
-                            {sub.guardrail_flags && sub.guardrail_flags.length > 0 ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/40 flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3" />
-                                <span>{sub.guardrail_flags[0]}</span>
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-[#00F5A0] flex items-center gap-1 font-mono">
-                                <CheckCircle2 className="w-3 h-3" /> Clean
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3">
-                            {sub.reproducibility_verified ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#00F5A0]/15 text-[#00F5A0] border border-[#00F5A0]/40 flex items-center gap-1 w-fit">
-                                <ShieldCheck className="w-3.5 h-3.5" />
-                                <span>Verified (±0.05)</span>
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F59E0B]/15 text-[#F59E0B] border border-[#F59E0B]/40 flex items-center gap-1 w-fit">
-                                <ShieldAlert className="w-3.5 h-3.5" />
-                                <span>Pending Audit</span>
-                              </span>
-                            )}
+                          <td className="p-3 font-mono text-xs text-[#00D4FF]">
+                            {formatISTDateTime(sub.submitted_at)}
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => handleAuditReproducibility(sub)}
-                                disabled={auditingSubId === sub.submission_id}
-                                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[#241B42] text-[#00D4FF] hover:bg-[#2E2254] transition-colors border border-[rgba(107,92,166,0.3)] flex items-center gap-1"
-                                title="Run one-click reproducibility audit in isolated worker sandbox"
-                              >
-                                {auditingSubId === sub.submission_id ? (
-                                  <Cpu className="w-3 h-3 animate-spin" />
-                                ) : (
-                                  <ShieldCheck className="w-3 h-3" />
-                                )}
-                                <span>Audit</span>
-                              </button>
                               <button
                                 onClick={() => {
                                   setGradingSubmission(sub);
                                   setManualScore(sub.grade_score || 80);
                                   setGradingComments('');
                                 }}
-                                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[#C9A24B]/20 text-[#C9A24B] hover:bg-[#C9A24B]/30 transition-colors border border-[#C9A24B]/40"
+                                className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-[#C9A24B]/20 text-[#C9A24B] hover:bg-[#C9A24B]/30 transition-colors border border-[#C9A24B]/40"
                               >
                                 Grade
                               </button>
@@ -982,7 +921,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
               <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-3">
                 <div className="flex items-center gap-2">
                   <PlusCircle className="w-5 h-5 text-[#00D4FF]" />
-                  <h3 className="text-sm font-bold text-[#F5F1EC]">Create Practical ML Lab Exam Assignment (B2)</h3>
+                  <h3 className="text-sm font-bold text-[#F5F1EC]">Create Practical ML Lab Exam Assignment</h3>
                 </div>
                 <span className="text-xs text-[#9E93B8]">Scoped to University Organization</span>
               </div>
@@ -1011,21 +950,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Server Copilot Policy (B2)</label>
-                  <select
-                    value={newAssignmentCopilotPolicy}
-                    onChange={(e) => setNewAssignmentCopilotPolicy(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                  >
-                    <option value="off">Off (AI Copilot disabled on server for exam)</option>
-                    <option value="explain-only">Explain-Only (Conceptual explanations; code generation blocked)</option>
-                    <option value="full">Full (Assistance permitted)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Dataset / Pitfall Story (Part D2)</label>
+                <div className="md:col-span-2">
+                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Dataset / Pitfall Story</label>
                   <select
                     value={newAssignmentDataset}
                     onChange={(e) => setNewAssignmentDataset(e.target.value)}
@@ -1043,82 +969,160 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     ))}
                   </select>
                 </div>
-
-                <div className="md:col-span-2 flex items-center gap-2 pt-1 pb-1">
-                  <label className="flex items-center gap-2 text-xs text-[#9E93B8] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newAssignmentLearningAids}
-                      onChange={(e) => setNewAssignmentLearningAids(e.target.checked)}
-                      className="rounded bg-[#1C1534]"
-                    />
-                    <span className="text-[#F5F1EC] font-semibold">Enable Student Learning Aids (Heads-Up mistake cards & guidance during this lab)</span>
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Min Metric (Acc/F1)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      value={newAssignmentMinAcc}
-                      onChange={(e) => setNewAssignmentMinAcc(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Max Latency (ms)</label>
-                    <input
-                      type="number"
-                      step="5"
-                      value={newAssignmentMaxLat}
-                      onChange={(e) => setNewAssignmentMaxLat(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                    />
-                  </div>
-                </div>
               </div>
 
               <div>
                 <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Instructions & Problem Statement</label>
                 <textarea
-                  rows={2}
+                  rows={3}
                   value={newAssignmentDesc}
                   onChange={(e) => setNewAssignmentDesc(e.target.value)}
-                  placeholder="Outline the dataset requirements, model constraints, and hidden evaluation details..."
+                  placeholder="Outline the dataset requirements, model constraints, and evaluation details..."
                   className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] text-xs focus:outline-none focus:border-[#00D4FF]"
                 />
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-semibold text-[#9E93B8]">
-                    Starter Code & Protected Regions (B4)
-                  </label>
-                  <span className="text-[10px] text-[#00D4FF] font-mono">
-                    Wrap fixed sections with # [PROTECTED: START] and # [PROTECTED: END]
-                  </span>
-                </div>
-                <textarea
-                  rows={8}
-                  value={newAssignmentStarterCode}
-                  onChange={(e) => setNewAssignmentStarterCode(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[#090614] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] font-mono text-xs focus:outline-none focus:border-[#00D4FF]"
-                />
+              {/* Advanced Evaluation & Rubric Options Accordion */}
+              <div className="rounded-xl border border-[rgba(107,92,166,0.3)] bg-[#0C0819] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+                  className="w-full flex items-center justify-between p-3.5 hover:bg-[#151026] transition-colors cursor-pointer text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-[#00D4FF]" />
+                    <span className="text-xs font-bold text-[#F5F1EC]">Advanced Evaluation & Rubric Settings</span>
+                    <span className="text-[10px] text-[#9E93B8] font-mono">
+                      ({evalMinMetric ? 'Min Metric: Active' : 'Min Metric: Off'} • {evalMaxLat ? 'Latency: Active' : 'Latency: Off'})
+                    </span>
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-[#9E93B8] transition-transform duration-200 ${showAdvancedOptions ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showAdvancedOptions && (
+                  <div className="p-4 border-t border-[rgba(107,92,166,0.2)] bg-[#0F0B1E] space-y-4 text-xs">
+                    {/* Option 1: Min Metric Benchmark */}
+                    <div className="p-3 rounded-lg bg-[#140E2A] border border-[rgba(107,92,166,0.25)] space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={evalMinMetric}
+                          onChange={(e) => setEvalMinMetric(e.target.checked)}
+                          className="rounded bg-[#1C1534]"
+                        />
+                        <span className="font-semibold text-[#F5F1EC]">
+                          Enable Minimum Metric Benchmark Scoring
+                        </span>
+                      </label>
+                      <p className="text-[11px] text-[#9E93B8]">
+                        {evalMinMetric
+                          ? 'Active: Model accuracy/F1 must meet or exceed this cut-off on held-out benchmark test cases (worth 35 points in rubric).'
+                          : 'Disabled: Accuracy threshold has no role in scoring (full points awarded for completing benchmark prediction generation).'}
+                      </p>
+                      {evalMinMetric && (
+                        <div className="pt-1 flex items-center gap-3">
+                          <label className="text-[11px] text-[#9E93B8] font-medium">Target Metric Cutoff (Acc/F1):</label>
+                          <input
+                            type="number"
+                            step="0.05"
+                            min="0.1"
+                            max="1.0"
+                            value={newAssignmentMinAcc}
+                            onChange={(e) => setNewAssignmentMinAcc(e.target.value)}
+                            className="w-28 px-2.5 py-1.5 rounded-lg bg-[#090614] border border-[rgba(107,92,166,0.4)] text-[#00F5A0] font-mono text-xs focus:outline-none focus:border-[#00D4FF]"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Option 2: Max Latency Benchmark */}
+                    <div className="p-3 rounded-lg bg-[#140E2A] border border-[rgba(107,92,166,0.25)] space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={evalMaxLat}
+                          onChange={(e) => setEvalMaxLat(e.target.checked)}
+                          className="rounded bg-[#1C1534]"
+                        />
+                        <span className="font-semibold text-[#F5F1EC]">
+                          Enable Serving Latency Benchmark Scoring
+                        </span>
+                      </label>
+                      <p className="text-[11px] text-[#9E93B8]">
+                        {evalMaxLat
+                          ? 'Active: Median inference latency across live requests must be within this threshold to earn latency bonus.'
+                          : 'Disabled: Latency ceiling has no role in scoring (full points awarded for verified live deployment serving).'}
+                      </p>
+                      {evalMaxLat && (
+                        <div className="pt-1 flex items-center gap-3">
+                          <label className="text-[11px] text-[#9E93B8] font-medium">Max Serving Latency (ms):</label>
+                          <input
+                            type="number"
+                            step="5"
+                            min="5"
+                            value={newAssignmentMaxLat}
+                            onChange={(e) => setNewAssignmentMaxLat(e.target.value)}
+                            className="w-28 px-2.5 py-1.5 rounded-lg bg-[#090614] border border-[rgba(107,92,166,0.4)] text-[#00D4FF] font-mono text-xs focus:outline-none focus:border-[#00D4FF]"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Option 3: Data Quality & Leakage Guardrails */}
+                    <div className="p-3 rounded-lg bg-[#140E2A] border border-[rgba(107,92,166,0.25)] space-y-1">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={evalGuardrails}
+                          onChange={(e) => setEvalGuardrails(e.target.checked)}
+                          className="rounded bg-[#1C1534]"
+                        />
+                        <span className="font-semibold text-[#F5F1EC]">
+                          Enforce Data Leakage & Identifier Guardrail Deductions
+                        </span>
+                      </label>
+                      <p className="text-[11px] text-[#9E93B8]">
+                        {evalGuardrails
+                          ? 'Active: Pipelines leaking target labels or using unique identifier columns will receive up to 15 points in deductions.'
+                          : 'Disabled: Data quality warnings are flagged for learning without score deductions.'}
+                      </p>
+                    </div>
+
+                    {/* Option 4: Exam Duration & Passing Score Target */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">
+                          Allotted Exam Duration (Minutes)
+                        </label>
+                        <input
+                          type="number"
+                          step="5"
+                          min="15"
+                          value={newAssignmentDuration}
+                          onChange={(e) => setNewAssignmentDuration(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#090614] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] font-mono text-xs focus:outline-none focus:border-[#00D4FF]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">
+                          Passing Grade Benchmark (%)
+                        </label>
+                        <input
+                          type="number"
+                          step="5"
+                          min="10"
+                          max="100"
+                          value={newAssignmentPassingScore}
+                          onChange={(e) => setNewAssignmentPassingScore(e.target.value)}
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#090614] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] font-mono text-xs focus:outline-none focus:border-[#00D4FF]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center justify-between pt-3 border-t border-[rgba(107,92,166,0.2)]">
-                <label className="flex items-center gap-2 text-xs text-[#9E93B8] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={saveAsTemplateChecked}
-                    onChange={(e) => setSaveAsTemplateChecked(e.target.checked)}
-                    className="rounded bg-[#1C1534]"
-                  />
-                  <span>Save as Reusable Template for other sections (B3)</span>
-                </label>
-
+              <div className="flex items-center justify-end pt-3 border-t border-[rgba(107,92,166,0.2)]">
                 <button
                   onClick={handleCreateAssignment}
                   className="px-5 py-2 rounded-xl text-xs font-bold text-[#0B0912] shadow"
@@ -1146,77 +1150,94 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             />
           )}
 
-          {/* TAB 4: Assignment Templates (B3) */}
-          {instructorTab === 'templates' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {templates.map((tpl, i) => (
-                <div
-                  key={tpl.template_id || i}
-                  className="rounded-2xl p-5 border space-y-3"
-                  style={{ background: BB.surface, borderColor: BB.border }}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#F5F1EC]">{tpl.title}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#00D4FF]/20 text-[#00D4FF] font-mono font-bold">
-                      {tpl.problem_type}
-                    </span>
-                  </div>
-                  <p className="text-xs text-[#9E93B8] line-clamp-2">{tpl.description}</p>
-                  <div className="text-[10px] font-mono text-slate-400">
-                    Dataset: {tpl.dataset_name} | Copilot: {tpl.copilot_policy}
-                  </div>
-                  <button
-                    onClick={() => {
-                      setNewAssignmentTitle(tpl.title);
-                      setNewAssignmentDesc(tpl.description);
-                      setNewAssignmentStarterCode(tpl.starter_code);
-                      setNewAssignmentCopilotPolicy(tpl.copilot_policy);
-                      setInstructorTab('create-assignment');
-                      onShowToast?.('Template Loaded', `Populated assignment form with "${tpl.title}".`, 'info');
-                    }}
-                    className="w-full py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/30 transition-colors"
-                  >
-                    Use Template in Assignment Creator (B3)
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* TAB 5: Curriculum Progress (Part C4) */}
+          {/* TAB 4: Curriculum Progress */}
           {instructorTab === 'curriculum' && (
             <div
-              className="rounded-2xl p-6 border space-y-4"
+              className="rounded-2xl p-6 border space-y-6"
               style={{ background: BB.surface, borderColor: BB.border }}
             >
-              <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-3">
-                <div className="flex items-center gap-2">
-                  <GraduationCap className="w-5 h-5 text-[#00F5A0]" />
-                  <h3 className="text-sm font-bold text-[#F5F1EC]">Curriculum Lesson Progress (Minimal, Read-Only)</h3>
-                </div>
-                <span className="text-xs text-[#9E93B8]">Cohort Student Metrics</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {curriculumSummary.length === 0 ? (
-                  <div className="text-xs text-[#9E93B8] italic py-4 col-span-3 text-center">
-                    No student curriculum progress recorded yet. Student activity in Guided Lessons will appear here.
+              <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-4 flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/30 text-[#00F5A0]">
+                    <GraduationCap className="w-5 h-5" />
                   </div>
-                ) : (
-                  curriculumSummary.map((item: any) => (
-                    <div
-                      key={item.lesson_id}
-                      className="p-3.5 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] space-y-1.5"
-                    >
-                      <div className="text-xs font-bold text-[#F5F1EC] truncate">{item.lesson_title}</div>
-                      <div className="text-[11px] text-[#9E93B8] font-mono">ID: {item.lesson_id}</div>
-                      <div className="flex justify-between items-center pt-2 border-t border-[rgba(107,92,166,0.15)] text-xs">
-                        <span className="text-[#9E93B8]">Completed Students:</span>
-                        <span className="font-bold text-[#00F5A0] font-mono">{item.completed_count}</span>
-                      </div>
-                    </div>
-                  ))
-                )}
+                  <div>
+                    <h3 className="text-sm font-bold text-[#F5F1EC]">Curriculum Lesson Progress</h3>
+                    <p className="text-xs text-[#9E93B8]">Cohort Student Mastery & Lesson Completion Rates</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="px-3.5 py-1.5 rounded-xl bg-[#1C1534] border border-[rgba(107,92,166,0.3)] flex items-center gap-2">
+                    <span className="text-xs text-[#9E93B8]">Active Cohort Learners:</span>
+                    <span className="text-xs font-bold text-[#00D4FF] font-mono">
+                      {curriculumData?.total_students_active ?? 0}
+                    </span>
+                  </div>
+                  <button
+                    onClick={loadCurriculumProgress}
+                    disabled={isLoadingCurriculum}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCurriculum ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
               </div>
+
+              {isLoadingCurriculum && !curriculumData ? (
+                <div className="py-12 text-center text-xs text-[#9E93B8] font-mono animate-pulse">
+                  Loading cohort curriculum metrics...
+                </div>
+              ) : !curriculumData || curriculumData.lessons.length === 0 ? (
+                <div className="text-xs text-[#9E93B8] italic py-8 text-center">
+                  No curriculum lessons registered.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {curriculumData.lessons.map((item: any) => {
+                    const isCompletedByAny = item.completed_count > 0;
+                    return (
+                      <div
+                        key={item.lesson_id}
+                        className="p-4 rounded-2xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] flex flex-col justify-between space-y-3 hover:border-[rgba(107,92,166,0.45)] transition-all"
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/30">
+                              Module {item.lesson_number || item.lesson_id}
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-mono ${
+                                isCompletedByAny
+                                  ? 'bg-[#00F5A0]/15 text-[#00F5A0] border border-[#00F5A0]/40'
+                                  : 'bg-[#9E93B8]/10 text-[#9E93B8] border border-[#9E93B8]/20'
+                              }`}
+                            >
+                              {item.completed_count} Completed
+                            </span>
+                          </div>
+                          <h4 className="text-xs font-bold text-[#F5F1EC] line-clamp-1">{item.lesson_title}</h4>
+                          {item.goal && (
+                            <p className="text-[11px] text-[#9E93B8] line-clamp-2 leading-relaxed">
+                              {item.goal}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="pt-2 border-t border-[rgba(107,92,166,0.18)] flex items-center justify-between text-[11px]">
+                          <span className="text-[#9E93B8] font-mono text-[10px]">{item.page_route}</span>
+                          <span className="text-xs font-bold text-[#00F5A0] font-mono">
+                            {curriculumData.total_students_active > 0
+                              ? `${Math.round((item.completed_count / curriculumData.total_students_active) * 100)}% cohort`
+                              : `${item.completed_count} students`}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1768,7 +1789,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   <div className="p-3 rounded-xl bg-[#EF4444]/15 border border-[#EF4444]/40 text-xs text-[#EF4444] space-y-1">
                     <div className="font-bold flex items-center gap-1.5">
                       <AlertTriangle className="w-4 h-4 shrink-0" />
-                      <span>Data-Quality Guardrail Flags (C4)</span>
+                      <span>Data-Quality Guardrail Flags</span>
                     </div>
                     {evaluationResult.guardrail_warnings.map((w, idx) => (
                       <p key={idx} className="text-[11px] text-red-200">

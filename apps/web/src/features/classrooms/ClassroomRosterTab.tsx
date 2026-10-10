@@ -3,7 +3,6 @@ import {
   Search,
   Download,
   KeyRound,
-  RefreshCw,
   Eye,
   Check,
   X,
@@ -12,6 +11,7 @@ import {
   Presentation,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import {
   ClassroomService,
@@ -56,9 +56,8 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
   const [status, setStatus] = useState('');
 
   // Code state
-  const [currentCode, setCurrentCode] = useState(classroom.join_code || '');
+  const currentCode = classroom.join_code || '';
   const [codeActive, setCodeActive] = useState(classroom.join_code_active ?? true);
-  const [isResettingCode, setIsResettingCode] = useState(false);
   const [isTogglingCode, setIsTogglingCode] = useState(false);
 
   // Modals
@@ -96,24 +95,6 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
     }, 350);
     return () => clearTimeout(handler);
   }, [search]);
-
-  // Code Reset (Part G4)
-  const handleResetCode = async () => {
-    if (!window.confirm('Resetting the join code will invalidate the current code for new students. Existing members stay enrolled. Proceed?')) {
-      return;
-    }
-    setIsResettingCode(true);
-    try {
-      const res = await ClassroomService.resetJoinCode(classroom.id);
-      setCurrentCode(res.join_code);
-      onShowToast?.('Code Reset', `New Join Code generated: ${res.join_code}`, 'success');
-      onRefreshClassroom?.();
-    } catch (err: any) {
-      onShowToast?.('Reset Failed', err.message || 'Could not reset code.', 'error');
-    } finally {
-      setIsResettingCode(false);
-    }
-  };
 
   // Toggle Join Code (Pause / Open)
   const handleToggleCode = async () => {
@@ -247,7 +228,7 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-bold text-[#0B0912] shadow transition-all hover:opacity-90"
           >
             <Presentation className="w-4 h-4" />
-            <span>Projector View (C3)</span>
+            <span>Projector View</span>
           </button>
 
           <button
@@ -258,22 +239,13 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
             <span>{codeActive ? 'Pause Code' : 'Resume Code'}</span>
           </button>
 
-          <button
-            onClick={handleResetCode}
-            disabled={isResettingCode}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1C1534] hover:bg-[#241B42] text-xs font-bold text-[#F59E0B] border border-[#F59E0B]/30 transition-all"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isResettingCode ? 'animate-spin' : ''}`} />
-            <span>Reset Code (G4)</span>
-          </button>
-
           <a
             href={ClassroomService.getRosterExportCsvUrl(classroom.id)}
             download
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#1C1534] hover:bg-[#241B42] text-xs font-bold text-[#00F5A0] border border-[#00F5A0]/40 transition-all shadow"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export CSV (G2)</span>
+            <span>Export CSV</span>
           </a>
         </div>
       </div>
