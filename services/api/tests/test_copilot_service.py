@@ -67,7 +67,7 @@ async def test_copilot_generate_response_gemini_success(monkeypatch):
     mock_resp.status_code = 200
     mock_resp.json = lambda: mock_json_reply
 
-    with patch("httpx.AsyncClient.post", return_value=mock_resp) as mock_post:
+    with patch("app.services.copilot_service._sync_http_post", return_value=(200, mock_json_reply, "")) as mock_post:
         res = await CopilotService.generate_response(
             prompt="Optimize my random forest",
             code_context="pipeline.fit(X, y)",
@@ -81,8 +81,7 @@ async def test_copilot_generate_response_gemini_success(monkeypatch):
         assert mock_post.called
 
         # Verify that context was injected into prompt payload
-        call_kwargs = mock_post.call_args[1]
-        req_json = call_kwargs["json"]
+        req_json = mock_post.call_args[0][1]
         sys_obj = req_json.get("systemInstruction") or req_json.get("system_instruction") or {}
         sys_instruction = sys_obj.get("parts", [{}])[0].get("text", "")
         assert "churn.csv" in sys_instruction

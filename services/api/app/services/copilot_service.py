@@ -1,20 +1,61 @@
 """Enterprise AI Copilot Service.
 
 Provides real-time, context-aware LLM assistance for the ML Playground.
-Supports Google Gemini, Groq, OpenAI, and Local Ollama via standard asynchronous HTTP.
+Supports Google Gemini, Groq, OpenAI, and Local Ollama via asynchronous HTTP.
 Dynamically injects active Python code, dataset schema, and terminal error tracebacks.
+Zero-dependency fallback ensures resilient operation without crashing on missing packages.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from typing import Any, Dict, List, Optional
-import httpx
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_http_post(
+    url: str,
+    payload: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None,
+    timeout: float = 40.0,
+) -> tuple[int, Dict[str, Any], str]:
+    """Execute synchronous JSON HTTP POST using Python's standard library.
+    
+    Returns (status_code, json_dict, error_string).
+    """
+    body = json.dumps(payload).encode("utf-8")
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
+
+    req = urllib.request.Request(url, data=body, headers=req_headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = resp.status
+            content = resp.read().decode("utf-8")
+            try:
+                data = json.loads(content)
+            except Exception:
+                data = {}
+            return status, data, ""
+    except urllib.error.HTTPError as exc:
+        raw_body = exc.read().decode("utf-8") if exc.fp else str(exc)
+        try:
+            err_json = json.loads(raw_body)
+            err_msg = err_json.get("error", {}).get("message", raw_body)
+        except Exception:
+            err_msg = raw_body
+        return exc.code, {}, err_msg
+    except Exception as exc:
+        return 500, {}, str(exc)
 
 
 class CopilotService:
@@ -51,7 +92,7 @@ class CopilotService:
         api_key = custom_key
         if provider == "gemini":
             api_key = api_key or gemini_key
-            model = model or "gemini-1.5-flash"
+            model = model or "gemini-flash-latest"
         elif provider == "groq":
             api_key = api_key or groq_key
             model = model or "llama-3.3-70b-versatile"
@@ -173,7 +214,7 @@ class CopilotService:
         prompt: str,
         chat_history: Optional[List[Dict[str, str]]],
     ) -> Dict[str, Any]:
-        """Invoke Google Gemini REST API using httpx."""
+        """Invoke Google Gemini REST API."""
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
         contents: List[Dict[str, Any]] = []
@@ -182,7 +223,7 @@ class CopilotService:
         if chat_history:
             for msg in chat_history[-6:]:
                 role = "user" if msg.get("role") == "user" else "model"
-                text = msg.get("text", "")
+                text = msg.get("text", "") or msg.get("content", "")
                 if text:
                     contents.append({"role": role, "parts": [{"text": text}]})
 
@@ -198,37 +239,29 @@ class CopilotService:
             },
         }
 
-        async with httpx.AsyncClient(timeout=35.0) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code != 200:
-                err_detail = resp.text
-                try:
-                    err_json = resp.json()
-                    err_detail = err_json.get("error", {}).get("message", err_detail)
-                except Exception:
-                    pass
-                raise RuntimeError(f"Gemini API returned HTTP {resp.status_code}: {err_detail}")
+        status, data, err_msg = await asyncio.to_thread(_sync_http_post, url, payload)
+        if status != 200:
+            raise RuntimeError(f"Gemini API returned HTTP {status}: {err_msg}")
 
-            data = resp.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                return {
-                    "reply": "No response returned from Gemini.",
-                    "provider": "gemini",
-                    "model": model,
-                    "allowed": True,
-                    "configured": True,
-                }
-
-            text_parts = candidates[0].get("content", {}).get("parts", [])
-            reply = "".join(p.get("text", "") for p in text_parts)
+        candidates = data.get("candidates", [])
+        if not candidates:
             return {
-                "reply": reply or "Received empty response from Gemini.",
+                "reply": "No response returned from Gemini.",
                 "provider": "gemini",
                 "model": model,
                 "allowed": True,
                 "configured": True,
             }
+
+        text_parts = candidates[0].get("content", {}).get("parts", [])
+        reply = "".join(p.get("text", "") for p in text_parts)
+        return {
+            "reply": reply or "Received empty response from Gemini.",
+            "provider": "gemini",
+            "model": model,
+            "allowed": True,
+            "configured": True,
+        }
 
     @classmethod
     async def _call_openai_compatible(
@@ -252,7 +285,7 @@ class CopilotService:
         if chat_history:
             for msg in chat_history[-6:]:
                 role = "user" if msg.get("role") == "user" else "assistant"
-                text = msg.get("text", "")
+                text = msg.get("text", "") or msg.get("content", "")
                 if text:
                     messages.append({"role": role, "content": text})
 
@@ -265,33 +298,25 @@ class CopilotService:
             "max_tokens": 2048,
         }
 
-        async with httpx.AsyncClient(timeout=35.0) as client:
-            resp = await client.post(endpoint, json=payload, headers=headers)
-            if resp.status_code != 200:
-                err_detail = resp.text
-                try:
-                    err_json = resp.json()
-                    err_detail = err_json.get("error", {}).get("message", err_detail)
-                except Exception:
-                    pass
-                raise RuntimeError(f"{provider.capitalize()} API returned HTTP {resp.status_code}: {err_detail}")
+        status, data, err_msg = await asyncio.to_thread(_sync_http_post, endpoint, payload, headers)
+        if status != 200:
+            raise RuntimeError(f"{provider.capitalize()} API returned HTTP {status}: {err_msg}")
 
-            data = resp.json()
-            choices = data.get("choices", [])
-            if not choices:
-                return {
-                    "reply": f"No response choices returned from {provider}.",
-                    "provider": provider,
-                    "model": model,
-                    "allowed": True,
-                    "configured": True,
-                }
-
-            reply = choices[0].get("message", {}).get("content", "")
+        choices = data.get("choices", [])
+        if not choices:
             return {
-                "reply": reply or "Received empty response.",
+                "reply": f"No response choices returned from {provider}.",
                 "provider": provider,
                 "model": model,
                 "allowed": True,
                 "configured": True,
             }
+
+        reply = choices[0].get("message", {}).get("content", "")
+        return {
+            "reply": reply or f"Received empty response from {provider}.",
+            "provider": provider,
+            "model": model,
+            "allowed": True,
+            "configured": True,
+        }
