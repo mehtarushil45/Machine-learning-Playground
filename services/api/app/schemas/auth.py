@@ -57,3 +57,13 @@ class VerifyEmailRequest(BaseModel):
     """Body or query parameter for email verification."""
 
     token: str = Field(..., description="Email verification token")
+
+
+class OAuthLoginRequest(BaseModel):
+    """Payload for POST /auth/oauth/google and /auth/oauth/microsoft."""
+
+    email: EmailStr = Field(..., description="User email from OAuth provider")
+    full_name: Optional[str] = Field(None, description="Display name from OAuth provider")
+    id_token: Optional[str] = Field(None, description="Optional raw ID token or authorization token")
+    provider: str = Field("google", description="OAuth provider: google or microsoft")
+    avatar_url: Optional[str] = Field(None, description="Profile picture URL from provider")

@@ -5,6 +5,7 @@ import { AuthContext, type AuthContextValue } from '../providers/AuthContext';
 
 describe('LoginPage Component', () => {
   const mockLogin = vi.fn();
+  const mockLoginWithOAuth = vi.fn();
   const mockLogout = vi.fn();
   const mockLogoutAll = vi.fn();
   const mockRefreshUser = vi.fn();
@@ -14,6 +15,7 @@ describe('LoginPage Component', () => {
     isLoading: false,
     isAuthenticated: false,
     login: mockLogin,
+    loginWithOAuth: mockLoginWithOAuth,
     logout: mockLogout,
     logoutAll: mockLogoutAll,
     refreshUser: mockRefreshUser,
@@ -36,7 +38,7 @@ describe('LoginPage Component', () => {
     vi.clearAllMocks();
   });
 
-  it('renders branding, title, inputs, social sign-in buttons, and footer', () => {
+  it('renders branding, title, inputs, social sign-in buttons (Google & Microsoft only), and footer', () => {
     renderWithAuth(<LoginPage />);
 
     // Branding
@@ -54,10 +56,10 @@ describe('LoginPage Component', () => {
     // Sign in button
     expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
 
-    // Social providers
-    expect(screen.getByTitle(/sign in with google/i)).toBeInTheDocument();
-    expect(screen.getByTitle(/sign in with microsoft/i)).toBeInTheDocument();
-    expect(screen.getByTitle(/sign in with github/i)).toBeInTheDocument();
+    // Social providers: Google and Microsoft exist, GitHub is omitted
+    expect(screen.getByRole('button', { name: /google/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /microsoft/i })).toBeInTheDocument();
+    expect(screen.queryByTitle(/sign in with github/i)).not.toBeInTheDocument();
 
     // Mode switch & Demo fill
     expect(screen.getByRole('button', { name: /^sign up$/i })).toBeInTheDocument();
@@ -126,21 +128,73 @@ describe('LoginPage Component', () => {
     renderWithAuth(<LoginPage onSuccess={handleSuccess} />);
 
     fireEvent.change(screen.getByLabelText(/email address/i), {
-      target: { value: 'engineer@mlplatform.ai' },
+      target: { value: 'faculty_test@university.edu' },
     });
     fireEvent.change(screen.getByLabelText(/^password/i), {
-      target: { value: 'SecretPassword123' },
+      target: { value: 'DemoPassword123!' },
     });
 
     fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith({
-        username: 'engineer@mlplatform.ai',
-        password: 'SecretPassword123',
+        username: 'faculty_test@university.edu',
+        password: 'DemoPassword123!',
       });
       expect(handleSuccess).toHaveBeenCalled();
     });
+  });
+
+  it('opens Google Account Chooser modal, selects account, and submits password', async () => {
+    const handleSuccess = vi.fn();
+    mockLoginWithOAuth.mockResolvedValueOnce(undefined);
+
+    renderWithAuth(<LoginPage onSuccess={handleSuccess} />);
+
+    // Click Google OAuth button
+    const googleBtn = screen.getByRole('button', { name: /google/i });
+    fireEvent.click(googleBtn);
+
+    // Assert Google modal opened
+    expect(screen.getByRole('dialog', { name: /sign in with google/i })).toBeInTheDocument();
+    expect(screen.getByText('Rushil Mehta')).toBeInTheDocument();
+    expect(screen.getByText('mehtarushil45@gmail.com')).toBeInTheDocument();
+
+    // Select account
+    fireEvent.click(screen.getByText('mehtarushil45@gmail.com'));
+
+    // Assert Step 2 (Password entry)
+    expect(screen.getByLabelText(/enter your password/i)).toBeInTheDocument();
+
+    // Enter password and submit
+    fireEvent.change(screen.getByLabelText(/enter your password/i), {
+      target: { value: 'MySecretGooglePassword123' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^next$/i }));
+
+    await waitFor(() => {
+      expect(mockLoginWithOAuth).toHaveBeenCalledWith('google', {
+        email: 'mehtarushil45@gmail.com',
+        full_name: 'Rushil Mehta',
+      });
+      expect(handleSuccess).toHaveBeenCalled();
+    });
+  });
+
+  it('opens Microsoft Account Chooser modal and renders Microsoft accounts', () => {
+    renderWithAuth(<LoginPage />);
+
+    const msftBtn = screen.getByRole('button', { name: /microsoft/i });
+    fireEvent.click(msftBtn);
+
+    expect(screen.getByRole('dialog', { name: /sign in with microsoft/i })).toBeInTheDocument();
+    expect(screen.getByText('Pick an account')).toBeInTheDocument();
+    expect(screen.getByText('mehtarushil45@outlook.com')).toBeInTheDocument();
+    expect(screen.getByText('faculty_test@university.edu')).toBeInTheDocument();
+
+    // Close modal
+    fireEvent.click(screen.getByTitle(/close dialog/i));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('displays error message banner when login fails', async () => {

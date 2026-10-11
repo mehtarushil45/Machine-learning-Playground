@@ -60,6 +60,11 @@ export interface AuthContextValue {
   isAuthenticated: boolean
   /** Login with email + password. Throws on failure. */
   login: (credentials: LoginCredentials) => Promise<void>
+  /** Login or register with OAuth provider (Google or Microsoft). Throws on failure. */
+  loginWithOAuth: (
+    provider: 'google' | 'microsoft',
+    data: { email: string; full_name?: string; id_token?: string }
+  ) => Promise<void>
   /** Logout — clears cookies server-side and resets state. */
   logout: () => Promise<void>
   /** Logout from ALL devices — bulk session revocation. */
@@ -115,60 +120,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(profile)
         return
       }
-
-      // Auto-authenticate demo session if unauthenticated
-      try {
-        const loginRes = await fetch(`${API_BASE}/auth/login`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            username: 'demo@ml-playground.internal',
-            password: 'DemoPassword123!',
-          }).toString(),
-        })
-
-        let loginData = await loginRes.json().catch(() => ({}))
-
-        if (!loginRes.ok) {
-          // Register demo user if doesn't exist yet
-          await fetch(`${API_BASE}/auth/register`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: 'demo@ml-playground.internal',
-              password: 'DemoPassword123!',
-              full_name: 'Demo User',
-            }),
-          })
-          const retryLogin = await fetch(`${API_BASE}/auth/login`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-              username: 'demo@ml-playground.internal',
-              password: 'DemoPassword123!',
-            }).toString(),
-          })
-          loginData = await retryLogin.json().catch(() => ({}))
-        }
-
-        if (loginData.access_token) {
-          localStorage.setItem('access_token', loginData.access_token)
-        }
-        if (loginData.refresh_token) {
-          localStorage.setItem('refresh_token', loginData.refresh_token)
-        }
-
-        const profileRes = await authFetch('/auth/me')
-        if (profileRes.ok) {
-          setUser(await profileRes.json())
-          return
-        }
-      } catch {
-        // Backend server offline — fallback gracefully
-      }
       setUser(null)
     } catch {
       setUser(null)
@@ -217,6 +168,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // ── OAuth Login (Google & Microsoft) ────────────────────────────────────
+  const loginWithOAuth = useCallback(
+    async (
+      provider: 'google' | 'microsoft',
+      data: { email: string; full_name?: string; id_token?: string }
+    ) => {
+      const res = await fetch(`${API_BASE}/auth/oauth/${provider}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: data.email,
+          full_name: data.full_name,
+          id_token: data.id_token,
+          provider,
+        }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? `Authentication with ${provider} failed (${res.status})`)
+      }
+
+      const resData = await res.json().catch(() => ({}))
+      if (resData.access_token) {
+        localStorage.setItem('access_token', resData.access_token)
+      }
+      if (resData.refresh_token) {
+        localStorage.setItem('refresh_token', resData.refresh_token)
+      }
+
+      // Fetch updated profile
+      const profileRes = await authFetch('/auth/me')
+      if (profileRes.ok) {
+        setUser(await profileRes.json())
+      }
+    },
+    []
+  )
+
   // ── Logout ──────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
@@ -260,6 +251,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isLoading,
         isAuthenticated: user !== null,
         login,
+        loginWithOAuth,
         logout,
         logoutAll,
         refreshUser,
