@@ -52,7 +52,7 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
     }
   }, [isAuthenticated, onSuccess, onNavigate]);
 
-  /* ── Interactive Neural Constellation Background Canvas ──────────── */
+  /* ── Interactive Plexus + Low-Poly + Energy Ring Background Canvas ──── */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -67,84 +67,204 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
       if (!canvas) return;
       width = canvas.width = window.innerWidth;
       height = canvas.height = window.innerHeight;
+      buildGeometry();
     };
     window.addEventListener('resize', handleResize);
 
-    // Particle nodes
-    const particleCount = Math.min(65, Math.floor((width * height) / 18000));
-    const particles = Array.from({ length: particleCount }, () => ({
-      x: Math.random() * width,
-      y: Math.random() * height,
-      vx: (Math.random() - 0.5) * 0.45,
-      vy: (Math.random() - 0.5) * 0.45,
-      radius: Math.random() * 2 + 1.2,
-      opacity: Math.random() * 0.6 + 0.3,
-    }));
+    // ── Low-poly triangular mesh vertices ──
+    interface Tri { ax: number; ay: number; bx: number; by: number; cx: number; cy: number; shade: number; }
+    let tris: Tri[] = [];
+    const buildGeometry = () => {
+      tris = [];
+      const cols = 14;
+      const rows = 9;
+      const cw = width / cols;
+      const rh = height / rows;
+      const jitter = () => (Math.random() - 0.5) * 0.55;
+      const pts: { x: number; y: number }[][] = Array.from({ length: rows + 1 }, (_, r) =>
+        Array.from({ length: cols + 1 }, (_, c) => ({
+          x: c * cw + (c > 0 && c < cols ? cw * jitter() : 0),
+          y: r * rh + (r > 0 && r < rows ? rh * jitter() : 0),
+        }))
+      );
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const p0 = pts[r][c];
+          const p1 = pts[r][c + 1];
+          const p2 = pts[r + 1][c];
+          const p3 = pts[r + 1][c + 1];
+          tris.push({ ax: p0.x, ay: p0.y, bx: p1.x, by: p1.y, cx: p2.x, cy: p2.y, shade: Math.random() });
+          tris.push({ ax: p1.x, ay: p1.y, bx: p3.x, by: p3.y, cx: p2.x, cy: p2.y, shade: Math.random() });
+        }
+      }
+    };
+    buildGeometry();
+
+    // ── Plexus nodes ──
+    const particleCount = Math.min(90, Math.floor((width * height) / 12000));
+    const particles = Array.from({ length: particleCount }, (_, i) => {
+      const isGold = i % 4 === 0;
+      const edgeFactor = Math.random(); // 0 = center, 1 = edge
+      return {
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.32,
+        vy: (Math.random() - 0.5) * 0.32,
+        radius: isGold ? Math.random() * 2.5 + 2.0 : Math.random() * 1.6 + 0.9,
+        opacity: Math.random() * 0.55 + 0.45,
+        isGold,
+        edgeFactor,
+      };
+    });
+
+    // ── Concentric energy rings state ──
+    let ringPhase = 0;
 
     let mouseX = width / 2;
     let mouseY = height / 2;
-    const handleMouseMove = (e: MouseEvent) => {
-      mouseX = e.clientX;
-      mouseY = e.clientY;
-    };
+    const handleMouseMove = (e: MouseEvent) => { mouseX = e.clientX; mouseY = e.clientY; };
     window.addEventListener('mousemove', handleMouseMove);
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
+      const cx = width / 2;
+      const cy = height / 2;
 
-      // Deep radial background gradient
-      const bgGrad = ctx.createRadialGradient(
-        width / 2, height / 2, 50,
-        width / 2, height / 2, Math.max(width, height) * 0.8
-      );
-      bgGrad.addColorStop(0, '#10142A');
-      bgGrad.addColorStop(0.5, '#0C0F22');
-      bgGrad.addColorStop(1, '#070914');
+      // ── 1. Base background: deep blue-to-desaturated-purple gradient ──
+      const bgGrad = ctx.createRadialGradient(cx * 0.9, cy * 0.85, 0, cx, cy, Math.max(width, height) * 0.75);
+      bgGrad.addColorStop(0,   '#0D1F42');
+      bgGrad.addColorStop(0.45,'#0A1535');
+      bgGrad.addColorStop(0.75,'#0D1228');
+      bgGrad.addColorStop(1,   '#13102A');
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
-      // Draw and update particles
+      // Purple-tinted vignette at corners
+      const cornerVig = ctx.createRadialGradient(cx, cy, height * 0.25, cx, cy, Math.max(width, height) * 0.9);
+      cornerVig.addColorStop(0,   'rgba(13,19,42,0)');
+      cornerVig.addColorStop(0.7, 'rgba(18,10,35,0.45)');
+      cornerVig.addColorStop(1,   'rgba(10,5,25,0.78)');
+      ctx.fillStyle = cornerVig;
+      ctx.fillRect(0, 0, width, height);
+
+      // ── 2. Low-poly geometric facets ──
+      for (const t of tris) {
+        const faceCx = (t.ax + t.bx + t.cx) / 3;
+        const faceCy = (t.ay + t.by + t.cy) / 3;
+        const distC = Math.hypot(faceCx - cx, faceCy - cy) / Math.max(width, height);
+        // Faces near center: slightly brighter blue; edges: darker purple
+        const baseAlpha = Math.max(0, 0.055 - distC * 0.07) + t.shade * 0.022;
+        const r = Math.round(18 + t.shade * 12);
+        const g = Math.round(28 + t.shade * 18);
+        const b = Math.round(60 + t.shade * 40);
+        ctx.beginPath();
+        ctx.moveTo(t.ax, t.ay);
+        ctx.lineTo(t.bx, t.by);
+        ctx.lineTo(t.cx, t.cy);
+        ctx.closePath();
+        ctx.fillStyle = `rgba(${r},${g},${b},${baseAlpha.toFixed(3)})`;
+        ctx.fill();
+        // Facet edge lines
+        ctx.strokeStyle = `rgba(80,120,200,${(baseAlpha * 0.9).toFixed(3)})`;
+        ctx.lineWidth = 0.4;
+        ctx.stroke();
+      }
+
+      // ── 3. Concentric warm-gold energy rings behind card ──
+      ringPhase += 0.007;
+      const numRings = 5;
+      for (let r = 0; r < numRings; r++) {
+        const phase = ringPhase + (r / numRings) * Math.PI * 2;
+        const baseRadius = 160 + r * 68;
+        const pulse = Math.sin(phase) * 18;
+        const ringR = baseRadius + pulse;
+        const ringAlpha = (0.18 - r * 0.028) * (0.7 + Math.sin(phase) * 0.3);
+        const grd = ctx.createRadialGradient(cx, cy, ringR - 22, cx, cy, ringR + 22);
+        grd.addColorStop(0,   `rgba(255,185,30,0)`);
+        grd.addColorStop(0.4, `rgba(255,185,30,${ringAlpha.toFixed(3)})`);
+        grd.addColorStop(0.55,`rgba(255,210,80,${(ringAlpha * 1.4).toFixed(3)})`);
+        grd.addColorStop(0.7, `rgba(255,185,30,${ringAlpha.toFixed(3)})`);
+        grd.addColorStop(1,   `rgba(255,185,30,0)`);
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+        ctx.strokeStyle = grd;
+        ctx.lineWidth = r === 0 ? 3.5 : r === 1 ? 2.5 : 1.8;
+        ctx.shadowColor = 'rgba(255, 170, 20, 0.5)';
+        ctx.shadowBlur = 18;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      // ── 4. Plexus nodes and connecting lines ──
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-
         if (p.x < 0 || p.x > width) p.vx *= -1;
         if (p.y < 0 || p.y > height) p.vy *= -1;
 
-        // Subtle gentle drift toward mouse
-        const dxMouse = mouseX - p.x;
-        const dyMouse = mouseY - p.y;
-        const distMouse = Math.sqrt(dxMouse * dxMouse + dyMouse * dyMouse);
-        if (distMouse < 180) {
-          p.x += (dxMouse / distMouse) * 0.2;
-          p.y += (dyMouse / distMouse) * 0.2;
+        // Gentle drift toward mouse
+        const dmx = mouseX - p.x;
+        const dmy = mouseY - p.y;
+        const dm = Math.sqrt(dmx * dmx + dmy * dmy);
+        if (dm < 200 && dm > 0) { p.x += (dmx / dm) * 0.15; p.y += (dmy / dm) * 0.15; }
+
+        // Distance from center affects blur/size (depth of field)
+        const distFromC = Math.hypot(p.x - cx, p.y - cy);
+        const depthScale = 0.6 + 0.4 * Math.min(1, distFromC / (Math.max(width, height) * 0.4));
+        const displayRadius = p.radius * (p.isGold ? 1 : depthScale);
+        const displayOpacity = p.opacity * (1.1 - depthScale * 0.25);
+
+        // Ambient glow halo around each node
+        const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, displayRadius * 6);
+        if (p.isGold) {
+          glow.addColorStop(0,   `rgba(255,195,60,${displayOpacity * 0.9})`);
+          glow.addColorStop(0.3, `rgba(255,160,20,${displayOpacity * 0.35})`);
+          glow.addColorStop(1,   'rgba(255,140,0,0)');
+        } else {
+          glow.addColorStop(0,   `rgba(110,185,255,${displayOpacity * 0.8})`);
+          glow.addColorStop(0.3, `rgba(60,140,255,${displayOpacity * 0.25})`);
+          glow.addColorStop(1,   'rgba(30,100,255,0)');
         }
-
-        // Draw particle dot
         ctx.beginPath();
-        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(100, 180, 255, ${p.opacity})`;
-        ctx.shadowColor = '#00D4FF';
-        ctx.shadowBlur = 8;
+        ctx.arc(p.x, p.y, displayRadius * 6, 0, Math.PI * 2);
+        ctx.fillStyle = glow;
         ctx.fill();
-        ctx.shadowBlur = 0;
 
-        // Connect nearby particles
+        // Core dot
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, displayRadius, 0, Math.PI * 2);
+        ctx.fillStyle = p.isGold
+          ? `rgba(255, 210, 80, ${displayOpacity})`
+          : `rgba(140, 200, 255, ${displayOpacity})`;
+        ctx.fill();
+
+        // Connecting lines
         for (let j = i + 1; j < particles.length; j++) {
           const p2 = particles[j];
           const dist = Math.hypot(p.x - p2.x, p.y - p2.y);
-          if (dist < 130) {
-            const alpha = (1 - dist / 130) * 0.22;
+          if (dist < 170) {
+            const alpha = (1 - dist / 170) * 0.32 * (1.1 - depthScale * 0.2);
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(p2.x, p2.y);
-            ctx.strokeStyle = `rgba(75, 140, 240, ${alpha})`;
-            ctx.lineWidth = 1;
+            if (p.isGold || p2.isGold) {
+              ctx.strokeStyle = `rgba(210, 165, 60, ${alpha * 0.85})`;
+            } else {
+              ctx.strokeStyle = `rgba(80, 150, 240, ${alpha})`;
+            }
+            ctx.lineWidth = 0.75;
             ctx.stroke();
           }
         }
       }
+
+      // ── 5. Depth-of-field fog at extreme edges ──
+      const edgeFog = ctx.createRadialGradient(cx, cy, Math.min(width, height) * 0.28, cx, cy, Math.max(width, height) * 0.78);
+      edgeFog.addColorStop(0, 'rgba(8,15,35,0)');
+      edgeFog.addColorStop(1, 'rgba(8,12,28,0.55)');
+      ctx.fillStyle = edgeFog;
+      ctx.fillRect(0, 0, width, height);
 
       animationFrameId = requestAnimationFrame(render);
     };
@@ -385,22 +505,50 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
         </div>
       </div>
 
-      {/* ── Warm Golden Radial Halo Backlight Behind Center Card ── */}
+      {/* ── Warm Golden Central Glow ── */}
       <div
         style={{
           position: 'absolute',
           top: '50%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          width: 520,
-          height: 520,
+          width: 700,
+          height: 620,
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(234, 179, 8, 0.24) 0%, rgba(201, 162, 75, 0.12) 40%, rgba(11, 9, 18, 0) 70%)',
-          filter: 'blur(35px)',
+          background: 'radial-gradient(ellipse at center, rgba(230, 165, 20, 0.22) 0%, rgba(200, 130, 10, 0.12) 30%, rgba(140, 90, 5, 0.04) 58%, transparent 72%)',
+          filter: 'blur(48px)',
           pointerEvents: 'none',
           zIndex: 2,
         }}
       />
+
+      {/* ── 4-Pointed Star Sparkle — Bottom Right ── */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 64,
+          right: 90,
+          zIndex: 3,
+          pointerEvents: 'none',
+          opacity: 0.62,
+        }}
+      >
+        <svg width="68" height="68" viewBox="0 0 68 68" fill="none">
+          <defs>
+            <radialGradient id="sg1" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="#FFFBE8" stopOpacity="1" />
+              <stop offset="100%" stopColor="#F0C040" stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          {/* Vertical petal */}
+          <ellipse cx="34" cy="34" rx="3.5" ry="30" fill="url(#sg1)" />
+          {/* Horizontal petal */}
+          <ellipse cx="34" cy="34" rx="30" ry="3.5" fill="url(#sg1)" />
+          {/* Diagonal petals (smaller) */}
+          <ellipse cx="34" cy="34" rx="2" ry="18" transform="rotate(45 34 34)" fill="url(#sg1)" opacity="0.45" />
+          <ellipse cx="34" cy="34" rx="2" ry="18" transform="rotate(-45 34 34)" fill="url(#sg1)" opacity="0.45" />
+        </svg>
+      </div>
 
       {/* ── Top Navigation Bar: Back to Platform ── */}
       <div
