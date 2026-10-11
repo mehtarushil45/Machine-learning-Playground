@@ -10,9 +10,11 @@ import {
   Search,
   FolderOpen,
   GraduationCap,
+  User,
+  LogIn,
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
-import { AuthProvider } from './providers/AuthContext';
+import { AuthProvider, useAuthContext } from './providers/AuthContext';
 import { ProjectProvider, useProject, type LifecycleStage } from './providers/ProjectContext';
 import { Toast } from './components/ui/Toast';
 import { DatasetProfilerPage } from './features/datasets/DatasetProfilerPage';
@@ -21,6 +23,7 @@ import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { DeploymentsHub } from './features/deployments/DeploymentsHub';
 import { ClassroomHub } from './features/classrooms/ClassroomHub';
+import { LoginPage } from './features/auth';
 import {
   LearningProvider,
   LearningModeToggle,
@@ -33,7 +36,8 @@ export type PlatformTab =
   | 'code-studio'
   | 'training-results'
   | 'deployments'
-  | 'classroom';
+  | 'classroom'
+  | 'login';
 
 export interface ToastMessage {
   id: string;
@@ -61,6 +65,7 @@ const BB = {
 function AppContent() {
   const project = useProject();
   const { setLifecycleStage, isProjectInitialized, dataset, activeExperimentFile, resetProject } = project;
+  const { user, isAuthenticated, logout } = useAuthContext();
   const [isLessonDrawerOpen, setIsLessonDrawerOpen] = useState(false);
 
   // Map ProjectContext to reactive LearningProjectState for Heads-Up Rules (Part B)
@@ -81,9 +86,13 @@ function AppContent() {
       if (hash === 'classroom' || window.location.pathname.includes('classroom')) {
         return 'classroom';
       }
+      if (hash === 'login' || window.location.pathname.includes('login')) {
+        return 'login';
+      }
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam === 'classroom') return 'classroom';
+      if (tabParam === 'login') return 'login';
     }
     return 'workspace';
   });
@@ -99,6 +108,8 @@ function AppContent() {
       const hash = window.location.hash.replace('#', '').toLowerCase();
       if (hash === 'classroom') {
         setActiveTab('classroom');
+      } else if (hash === 'login') {
+        setActiveTab('login');
       } else if (hash === 'workspace' || hash === 'code-studio' || hash === 'training-results' || hash === 'deployments') {
         setActiveTab(hash as PlatformTab);
       }
@@ -133,6 +144,7 @@ function AppContent() {
     else if (tab === '/results' || tab === '/explainability' || tab === 'training-results') resolvedTab = 'training-results';
     else if (tab === '/deployments' || tab === 'deployments') resolvedTab = 'deployments';
     else if (tab === '/classroom' || tab === 'classroom') resolvedTab = 'classroom';
+    else if (tab === '/login' || tab === 'login') resolvedTab = 'login';
     else if (tab.startsWith('/')) resolvedTab = 'workspace';
     else resolvedTab = tab as PlatformTab;
 
@@ -160,6 +172,41 @@ function AppContent() {
     { id: 'deployments',      label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />    },
     { id: 'classroom',        label: 'Classroom (Lab Exam)',      icon: <GraduationCap className="w-5 h-5" /> },
   ];
+
+  if (activeTab === 'login') {
+    return (
+      <LearningProvider projectState={learningState}>
+        <LoginPage
+          onSuccess={() => handleNavigate('workspace')}
+          onNavigate={(tab) => handleNavigate(tab)}
+        />
+        {/* Global Toast notifications container */}
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            zIndex: 99999,
+            maxWidth: 360,
+            pointerEvents: 'none',
+          }}
+        >
+          {toasts.map((toast) => (
+            <Toast
+              key={toast.id}
+              variant={toast.type === 'error' ? 'error' : toast.type === 'success' ? 'success' : 'info'}
+              title={toast.title}
+              description={toast.description}
+              onClose={() => removeToast(toast.id)}
+            />
+          ))}
+        </div>
+      </LearningProvider>
+    );
+  }
 
   return (
     <LearningProvider projectState={learningState}>
@@ -341,7 +388,35 @@ function AppContent() {
           })}
         </nav>
 
-        {/* A5: Account button removed from bottom left for temporary purpose */}
+        {/* User Account / Sign In button at bottom of sidebar */}
+        <div style={{ paddingBottom: 14, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => handleNavigate(isAuthenticated ? 'workspace' : 'login')}
+            title={isAuthenticated ? (user?.email || 'Account') : 'Sign In'}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: isAuthenticated ? 'linear-gradient(135deg, #3B82F6, #8B5CF6)' : 'rgba(107,92,166,0.18)',
+              border: `1px solid ${isAuthenticated ? '#60A5FA' : BB.border}`,
+              color: '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 700,
+              transition: 'all 150ms ease',
+            }}
+          >
+            {isAuthenticated ? (
+              (user?.full_name || user?.email || 'U')[0].toUpperCase()
+            ) : (
+              <User className="w-4 h-4" style={{ color: BB.muted }} />
+            )}
+          </button>
+        </div>
       </aside>
 
       {/* ── 2. MAIN CANVAS ─────────────────────────────────────────── */}
@@ -535,6 +610,110 @@ function AppContent() {
             >
               <Sparkles className="w-4 h-4" style={{ color: isCopilotOpen ? BB.gold : 'inherit' }} />
             </button>
+
+            {/* Auth status: User Profile Pill or Sign In Button */}
+            {isAuthenticated && user ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '3px 10px',
+                  borderRadius: 7,
+                  border: `1px solid ${BB.border}`,
+                  background: 'rgba(27,21,48,0.85)',
+                  fontSize: 11,
+                }}
+              >
+                <div
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)',
+                    color: '#FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 700,
+                    fontSize: 11,
+                  }}
+                >
+                  {(user.full_name || user.email || 'U')[0].toUpperCase()}
+                </div>
+                <span
+                  style={{
+                    color: BB.text,
+                    fontWeight: 600,
+                    maxWidth: 110,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={user.email}
+                >
+                  {user.full_name || user.email.split('@')[0]}
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await logout();
+                      showToast('Signed Out', 'You have been signed out successfully.', 'info');
+                    } catch {
+                      showToast('Sign Out Error', 'Failed to clear session', 'error');
+                    }
+                  }}
+                  title="Sign Out"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: BB.muted,
+                    cursor: 'pointer',
+                    fontSize: 10,
+                    padding: '2px 4px',
+                    borderRadius: 4,
+                    transition: 'color 150ms',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#F87171'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleNavigate('login')}
+                style={{
+                  height: 32,
+                  padding: '0 12px',
+                  borderRadius: 7,
+                  background: 'linear-gradient(135deg, #2563EB, #1D4ED8)',
+                  color: '#FFFFFF',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(37,99,235,0.3)',
+                  transition: 'all 150ms',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(37,99,235,0.45)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(37,99,235,0.3)';
+                }}
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In</span>
+              </button>
+            )}
           </div>
         </header>
 
