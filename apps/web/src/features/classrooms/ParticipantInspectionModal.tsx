@@ -342,6 +342,20 @@ export const ParticipantInspectionModal: React.FC<ParticipantInspectionModalProp
             </div>
           </div>
         ) : null}
+
+        {/* Sticky footer close button — always accessible */}
+        <div className="pt-4 border-t border-[rgba(107,92,166,0.25)] flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-[11px] text-[#7C6BAE] font-mono">
+            Participant inspection is read-only. Code diffs and telemetry are finalized on submission.
+          </p>
+          <button
+            onClick={onClose}
+            className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#9E93B8] hover:text-white border border-[rgba(107,92,166,0.35)] transition-all"
+          >
+            <X className="w-4 h-4" />
+            <span>Close Inspector</span>
+          </button>
+        </div>
       </div>
     </div>
   );

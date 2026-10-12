@@ -587,19 +587,28 @@ export const ClassroomService = {
   setMemberApproval: (classroomId: string, userId: string, approve: boolean) =>
     request<any>(`/classrooms/${classroomId}/members/${userId}/approval`, {
       method: 'POST',
-      body: JSON.stringify({ approve }),
+      body: JSON.stringify({
+        action: approve ? 'approve' : 'decline',
+        approve,
+      }),
     }),
 
   grantTimeExtension: (classroomId: string, userId: string, minutes: number) =>
     request<any>(`/classrooms/${classroomId}/members/${userId}/extension`, {
       method: 'POST',
-      body: JSON.stringify({ minutes }),
+      body: JSON.stringify({
+        extension_minutes: minutes,
+        minutes,
+      }),
     }),
 
   reopenSubmission: (classroomId: string, userId: string, reopen: boolean) =>
     request<any>(`/classrooms/${classroomId}/members/${userId}/reopen`, {
       method: 'POST',
-      body: JSON.stringify({ reopen }),
+      body: JSON.stringify({
+        reason: 'Instructor reopened submission',
+        reopen,
+      }),
     }),
 
   removeMember: (classroomId: string, userId: string) =>

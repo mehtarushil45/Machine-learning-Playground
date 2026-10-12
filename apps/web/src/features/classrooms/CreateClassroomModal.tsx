@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Plus, Copy, Check, Presentation, Clock, BookOpen } from 'lucide-react';
+import { X, Plus, Copy, Check, Presentation, ShieldCheck } from 'lucide-react';
 import { ClassroomService, type ClassroomCreateEnhanced } from '../../services/api';
 
 interface CreateClassroomModalProps {
@@ -18,22 +18,11 @@ export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
   const [name, setName] = useState('');
   const [courseId, setCourseId] = useState('');
   const [description, setDescription] = useState('');
-  const [assignmentTitle, setAssignmentTitle] = useState('End-Semester ML Lab Practical Examination');
-  const [instructions, setInstructions] = useState(
-    'Train a classification estimator on the provided dataset. Ensure accuracy >= 0.80 and deploy model slot.'
-  );
-  const [starterCode, setStarterCode] = useState(
-    `# Python starter code\nimport pandas as pd\nimport numpy as np\nfrom sklearn.ensemble import RandomForestClassifier\n\n# Your code here\n`
-  );
-  const [minAccuracy, setMinAccuracy] = useState('0.80');
-  const [maxLatency, setMaxLatency] = useState('100');
   const [allowedDivisions, setAllowedDivisions] = useState('A, B, C');
   const [allowedBatches, setAllowedBatches] = useState('B1, B2, B3');
   const [enrollmentHint, setEnrollmentHint] = useState('Format: e.g. CS2026101');
   const [enrollmentPattern, setEnrollmentPattern] = useState('');
   const [requireApproval, setRequireApproval] = useState(false);
-  const [examStartTime, setExamStartTime] = useState('');
-  const [examEndTime, setExamEndTime] = useState('');
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdResult, setCreatedResult] = useState<{
@@ -59,14 +48,6 @@ export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
         name: name.trim(),
         course_id: courseId.trim() || undefined,
         description: description.trim() || undefined,
-        assignment_title: assignmentTitle.trim() || undefined,
-        instructions: instructions.trim() || undefined,
-        starter_code: starterCode || undefined,
-        rubric_json: {
-          min_accuracy: parseFloat(minAccuracy) || 0.8,
-          max_latency_ms: parseFloat(maxLatency) || 100,
-          max_score: 100.0,
-        },
         allowed_divisions: allowedDivisions
           ? allowedDivisions.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
           : undefined,
@@ -76,8 +57,6 @@ export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
         enrollment_format_hint: enrollmentHint.trim() || undefined,
         enrollment_pattern: enrollmentPattern.trim() || undefined,
         require_approval: requireApproval,
-        exam_start_time: examStartTime ? new Date(examStartTime).toISOString() : undefined,
-        exam_end_time: examEndTime ? new Date(examEndTime).toISOString() : undefined,
       };
 
       const res = await ClassroomService.createClassroomEnhanced(payload);
@@ -135,9 +114,9 @@ export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
               <Plus className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-[#F5F1EC]">Create Classroom & Exam</h2>
+              <h2 className="text-lg font-bold text-[#F5F1EC]">Create Classroom</h2>
               <p className="text-xs text-[#9E93B8]">
-                Setup a lab section, configure student join policies, and define assignment rubric.
+                Setup a classroom section, configure student join policies, and generate an invite code.
               </p>
             </div>
           </div>
@@ -305,107 +284,25 @@ export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
               </div>
             </div>
 
-            {/* Schedule Window & Approval Gate */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
-              <div>
-                <label className="font-semibold text-[#9E93B8] block mb-1 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-[#00D4FF]" />
-                  <span>Exam Start Time</span>
-                </label>
+            {/* Approval Gate */}
+            <div className="p-3.5 rounded-xl bg-[#1C1534]/50 border border-[rgba(107,92,166,0.2)]">
+              <label className="flex items-center gap-3 cursor-pointer">
                 <input
-                  type="datetime-local"
-                  value={examStartTime}
-                  onChange={(e) => setExamStartTime(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
+                  type="checkbox"
+                  checked={requireApproval}
+                  onChange={(e) => setRequireApproval(e.target.checked)}
+                  className="w-4 h-4 rounded bg-[#0F0B1E] border-[rgba(107,92,166,0.3)] text-[#00D4FF]"
                 />
-              </div>
-
-              <div>
-                <label className="font-semibold text-[#9E93B8] block mb-1 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-[#F59E0B]" />
-                  <span>Exam End Time</span>
-                </label>
-                <input
-                  type="datetime-local"
-                  value={examEndTime}
-                  onChange={(e) => setExamEndTime(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                />
-              </div>
-
-              <div className="pt-4">
-                <label className="flex items-center gap-2 cursor-pointer p-2 rounded-lg bg-[#1C1534] border border-[rgba(107,92,166,0.3)]">
-                  <input
-                    type="checkbox"
-                    checked={requireApproval}
-                    onChange={(e) => setRequireApproval(e.target.checked)}
-                    className="rounded bg-[#0F0B1E] border-[rgba(107,92,166,0.3)] text-[#00D4FF]"
-                  />
-                  <span className="font-medium text-[#F5F1EC]">Require Approval to Join</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Assignment & Rubric Section */}
-            <div className="p-3.5 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] space-y-3">
-              <div className="flex items-center gap-2 font-bold text-[#F5F1EC]">
-                <BookOpen className="w-4 h-4 text-[#00D4FF]" />
-                <span>Assignment & Automated Rubric (Part C1)</span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="md:col-span-2">
-                  <label className="font-semibold text-[#9E93B8] block mb-1">Assignment Title</label>
-                  <input
-                    type="text"
-                    value={assignmentTitle}
-                    onChange={(e) => setAssignmentTitle(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-[#151026] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                  />
+                <div>
+                  <span className="font-semibold text-[#F5F1EC] flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-[#00D4FF]" />
+                    Require Instructor Approval to Join
+                  </span>
+                  <span className="text-[11px] text-[#9E93B8] block mt-0.5">
+                    If enabled, student enrollments remain pending until approved by the instructor.
+                  </span>
                 </div>
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <label className="font-semibold text-[#9E93B8] block mb-1">Min Acc/F1</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      value={minAccuracy}
-                      onChange={(e) => setMinAccuracy(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#151026] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC]"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <label className="font-semibold text-[#9E93B8] block mb-1">Max Lat (ms)</label>
-                    <input
-                      type="number"
-                      step="5"
-                      value={maxLatency}
-                      onChange={(e) => setMaxLatency(e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-[#151026] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC]"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="font-semibold text-[#9E93B8] block mb-1">Instructions</label>
-                <textarea
-                  rows={2}
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#151026] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-[#9E93B8] block mb-1">Starter Code (Python)</label>
-                <textarea
-                  rows={3}
-                  value={starterCode}
-                  onChange={(e) => setStarterCode(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-lg bg-[#090614] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] font-mono text-[11px] focus:outline-none focus:border-[#00D4FF]"
-                />
-              </div>
+              </label>
             </div>
 
             {/* Form Actions */}

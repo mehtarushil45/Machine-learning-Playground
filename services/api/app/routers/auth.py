@@ -349,7 +349,7 @@ async def _authenticate_oauth_user(
     db: AsyncSession,
 ) -> TokenResponse:
     """Find or create an active user from an OAuth provider and return tokens + httpOnly cookies."""
-    email_clean = str(body.email).strip().lower()
+    email_clean = body.email.strip().lower()
     if not email_clean:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

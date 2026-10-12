@@ -184,7 +184,18 @@ export class ApiClient {
         let errData: unknown
         try {
           errData = await response.json()
-          errorDetail = (errData as { detail?: string })?.detail || JSON.stringify(errData)
+          const rawDetail = (errData as { detail?: unknown })?.detail
+          if (typeof rawDetail === 'string') {
+            errorDetail = rawDetail
+          } else if (Array.isArray(rawDetail)) {
+            errorDetail = rawDetail
+              .map((d: any) => (typeof d === 'string' ? d : d.msg || JSON.stringify(d)))
+              .join('; ')
+          } else if (rawDetail && typeof rawDetail === 'object') {
+            errorDetail = JSON.stringify(rawDetail)
+          } else if (errData && typeof errData === 'object') {
+            errorDetail = JSON.stringify(errData)
+          }
         } catch {
           // ignore body parsing error on non-JSON error responses
         }

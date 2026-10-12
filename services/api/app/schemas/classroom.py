@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.classroom import ClassroomRole, SubmissionStatus
 
@@ -64,6 +64,8 @@ class AssignmentCreate(BaseModel):
     title: str = Field(..., examples=["Lab 3: Binary Classification"], description="Assignment title")
     description: str = Field(..., description="Assignment instructions & criteria")
     dataset_id: Optional[str] = Field(None, description="Attached dataset ID")
+    start_date: Optional[datetime] = Field(None, description="Assignment start date/time")
+    end_date: Optional[datetime] = Field(None, description="Assignment end date/time")
     due_date: Optional[datetime] = Field(None, description="Submission deadline")
     rubric: Optional[Dict[str, Any]] = Field(None, description="Evaluation rubric criteria")
     max_score: float = Field(100.0, ge=0.0, description="Maximum assignment score")
@@ -79,12 +81,48 @@ class AssignmentResponse(BaseModel):
     title: str
     description: str
     dataset_id: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
     rubric: Optional[Dict[str, Any]] = None
     max_score: float
     learning_aids_enabled: bool = True
     created_by_id: UUID
     created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_dates(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            rubric = data.get("rubric") or {}
+            if "start_date" in rubric and not data.get("start_date"):
+                data["start_date"] = rubric.get("start_date")
+            if "end_date" in rubric and not data.get("end_date"):
+                data["end_date"] = rubric.get("end_date")
+            elif data.get("due_date") and not data.get("end_date"):
+                data["end_date"] = data.get("due_date")
+            return data
+
+        # When data is an ORM model
+        rubric = getattr(data, "rubric", None) or {}
+        st_date = rubric.get("start_date")
+        end_d = rubric.get("end_date") or getattr(data, "due_date", None)
+        return {
+            "id": getattr(data, "id", None),
+            "organisation_id": getattr(data, "organisation_id", None),
+            "classroom_id": getattr(data, "classroom_id", None),
+            "title": getattr(data, "title", None),
+            "description": getattr(data, "description", None),
+            "dataset_id": getattr(data, "dataset_id", None),
+            "start_date": st_date,
+            "end_date": end_d,
+            "due_date": getattr(data, "due_date", None) or end_d,
+            "rubric": rubric,
+            "max_score": getattr(data, "max_score", 100.0),
+            "learning_aids_enabled": getattr(data, "learning_aids_enabled", True),
+            "created_by_id": getattr(data, "created_by_id", None),
+            "created_at": getattr(data, "created_at", None),
+        }
 
 
 class SubmissionCreate(BaseModel):
@@ -455,14 +493,35 @@ class ParticipantInspectionResponse(BaseModel):
 
 
 class TimeExtensionRequest(BaseModel):
-    extension_minutes: int = Field(..., ge=1, le=240, description="Minutes to extend exam")
+    extension_minutes: Optional[int] = Field(None, ge=1, le=240, description="Minutes to extend exam")
+    minutes: Optional[int] = Field(None, ge=1, le=240, description="Alternative field for minutes")
+
+    @model_validator(mode="after")
+    def resolve_minutes(self) -> "TimeExtensionRequest":
+        if self.extension_minutes is None:
+            if self.minutes is not None:
+                self.extension_minutes = self.minutes
+            else:
+                self.extension_minutes = 15
+        return self
 
 
 class ReopenSubmissionRequest(BaseModel):
     reason: Optional[str] = Field(None, max_length=500)
+    reopen: Optional[bool] = None
 
 
 class ApprovalActionRequest(BaseModel):
-    action: str = Field(..., pattern="^(approve|decline)$")
+    action: Optional[str] = Field(None, pattern="^(approve|decline)$")
+    approve: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def resolve_action(self) -> "ApprovalActionRequest":
+        if self.action is None:
+            if self.approve is not None:
+                self.action = "approve" if self.approve else "decline"
+            else:
+                self.action = "approve"
+        return self
 
 

@@ -16,7 +16,6 @@ import {
   Zap,
   Users,
   PlusCircle,
-  Download,
   RefreshCw,
   Lock,
   FileCheck,
@@ -25,6 +24,11 @@ import {
   Settings,
   Sliders,
   HelpCircle,
+  Clock,
+  Calendar,
+  ArrowLeft,
+  ChevronRight,
+  FileText,
 } from 'lucide-react';
 import {
   ClassroomService,
@@ -91,7 +95,7 @@ const formatISTDateTime = (dateStr?: string | null) => {
 
 export interface ClassroomHubProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
-  initialView?: 'entry' | 'instructor' | 'student' | 'lobby';
+  initialView?: 'entry' | 'instructor' | 'student' | 'lobby' | 'classroom';
 }
 
 export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initialView }) => {
@@ -105,12 +109,17 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     return ['faculty', 'org_admin', 'admin', 'platform_admin', 'platform_owner', 'lab_coordinator', 'reviewer'].includes(r);
   }, [user]);
 
-  // Primary View Mode: 'entry' | 'instructor' | 'student' | 'lobby'
-  const [viewMode, setViewMode] = useState<'entry' | 'instructor' | 'student' | 'lobby'>(
+  // Primary View Mode: 'entry' | 'instructor' | 'student' | 'lobby' | 'classroom'
+  const [viewMode, setViewMode] = useState<'entry' | 'instructor' | 'student' | 'lobby' | 'classroom'>(
     initialView || (typeof ClassroomService.listMyClassrooms === 'function' ? 'entry' : 'student')
   );
   const [activeClassroom, setActiveClassroom] = useState<ClassroomSummary | null>(null);
   const [detailsClassroomId, setDetailsClassroomId] = useState<string | null>(null);
+
+  // Classroom Dashboard (student view): assignments list
+  const [classroomAssignments, setClassroomAssignments] = useState<any[]>([]);
+  const [isLoadingClassroomAssignments, setIsLoadingClassroomAssignments] = useState(false);
+  const [selectedClassroomAssignment, setSelectedClassroomAssignment] = useState<any | null>(null);
 
   // Instructor Tabs: 'submissions' | 'create-assignment' | 'roster' | 'curriculum'
   const [instructorTab, setInstructorTab] = useState<'submissions' | 'create-assignment' | 'roster' | 'curriculum'>('submissions');
@@ -168,8 +177,28 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   // Create Assignment Form State
   const [newAssignmentTitle, setNewAssignmentTitle] = useState('');
   const [newAssignmentDesc, setNewAssignmentDesc] = useState('');
+  const [newAssignmentStartDate, setNewAssignmentStartDate] = useState('');
+  const [newAssignmentEndDate, setNewAssignmentEndDate] = useState('');
   const [newAssignmentType, setNewAssignmentType] = useState('classification');
   const [newAssignmentDataset, setNewAssignmentDataset] = useState('churn_lab_dataset.csv');
+
+  // Helper: Format ISO date string for display
+  const formatExamDate = useCallback((dateStr?: string | null): string => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return dateStr;
+    }
+  }, []);
   // Advanced Evaluation & Rubric Options State
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [evalMinMetric, setEvalMinMetric] = useState(true);
@@ -244,14 +273,20 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       const clsList = await ClassroomService.listClassrooms().catch(() => []);
       setClassrooms(clsList);
 
-      if (clsList.length > 0) {
-        const activeCls = clsList[0];
+      // Prefer activeClassroom (the one the instructor clicked into), otherwise fall back to first
+      const activeCls =
+        (activeClassroom && clsList.find((c: any) => c.id === activeClassroom.id)) ||
+        clsList[0];
+
+      if (activeCls) {
         setSelectedClassroomId(activeCls.id);
         const asgnList = await ClassroomService.listAssignments(activeCls.id).catch(() => []);
 
         if (asgnList.length > 0) {
           const subData = await ClassroomService.getSubmissions(asgnList[0].id).catch(() => []);
           setSubmissions(subData);
+        } else {
+          setSubmissions([]);
         }
       }
     } catch (err: any) {
@@ -259,7 +294,29 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     } finally {
       setIsLoadingInstructor(false);
     }
-  }, []);
+  }, [activeClassroom]);
+
+  // Load assignments when in classroom view mode
+  useEffect(() => {
+    let mounted = true;
+    if (viewMode === 'classroom') {
+      const cid = activeClassroom?.id || selectedClassroomId;
+      setIsLoadingClassroomAssignments(true);
+      ClassroomService.listAssignments(cid || undefined)
+        .then((asgns) => {
+          if (mounted) setClassroomAssignments(asgns || []);
+        })
+        .catch(() => {
+          if (mounted) setClassroomAssignments([]);
+        })
+        .finally(() => {
+          if (mounted) setIsLoadingClassroomAssignments(false);
+        });
+    }
+    return () => {
+      mounted = false;
+    };
+  }, [viewMode, activeClassroom?.id, selectedClassroomId]);
 
   const loadCurriculumProgress = useCallback(async () => {
     setIsLoadingCurriculum(true);
@@ -595,9 +652,11 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     try {
       await ClassroomService.createAssignment({
         classroom_id: targetClassroomId,
-        title: newAssignmentTitle,
-        description: newAssignmentDesc || 'Practical ML Lab Exam',
+        title: newAssignmentTitle.trim(),
+        description: newAssignmentDesc.trim() || 'Practical ML Lab Exam',
         dataset_id: newAssignmentDataset,
+        start_date: newAssignmentStartDate ? new Date(newAssignmentStartDate).toISOString() : undefined,
+        end_date: newAssignmentEndDate ? new Date(newAssignmentEndDate).toISOString() : undefined,
         rubric: {
           problem_type: newAssignmentType,
           evaluate_min_metric: evalMinMetric,
@@ -607,6 +666,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
           evaluate_guardrails: evalGuardrails,
           duration_minutes: parseInt(newAssignmentDuration, 10) || 90,
           passing_score_percentage: parseFloat(newAssignmentPassingScore) || 60.0,
+          start_date: newAssignmentStartDate ? new Date(newAssignmentStartDate).toISOString() : undefined,
+          end_date: newAssignmentEndDate ? new Date(newAssignmentEndDate).toISOString() : undefined,
         },
         max_score: 100.0,
         learning_aids_enabled: false,
@@ -615,6 +676,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       onShowToast?.('Assignment Published!', 'Students enrolled in this classroom can now access the lab exam.', 'success');
       setNewAssignmentTitle('');
       setNewAssignmentDesc('');
+      setNewAssignmentStartDate('');
+      setNewAssignmentEndDate('');
       setInstructorTab('submissions');
       loadInstructorData();
     } catch (err: any) {
@@ -633,20 +696,28 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
               setViewMode('instructor');
               setInstructorTab('roster');
             } else {
+              // For students: check details, then show the classroom dashboard
               try {
                 const details = await ClassroomService.getMyDetails(cls.id);
                 if (!details.enrollment_number) {
                   setDetailsClassroomId(cls.id);
                   return;
                 }
-                const lobby = await ClassroomService.getExamLobby(cls.id);
-                if (!lobby.can_enter_workspace) {
-                  setViewMode('lobby');
-                } else {
-                  setViewMode('student');
-                }
               } catch {
-                setViewMode('student');
+                // Ignore — allow entry even if details fetch fails
+              }
+              // Load assignments for this classroom
+              setIsLoadingClassroomAssignments(true);
+              setClassroomAssignments([]);
+              setSelectedClassroomAssignment(null);
+              setViewMode('classroom');
+              try {
+                const asgns = await ClassroomService.listAssignments(cls.id);
+                setClassroomAssignments(asgns || []);
+              } catch {
+                setClassroomAssignments([]);
+              } finally {
+                setIsLoadingClassroomAssignments(false);
               }
             }
           }}
@@ -660,15 +731,22 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
           <StudentDetailsModal
             classroomId={detailsClassroomId}
             onClose={() => setDetailsClassroomId(null)}
-            onSaved={() => {
+            onSaved={async () => {
               const cid = detailsClassroomId;
               setDetailsClassroomId(null);
-              ClassroomService.getExamLobby(cid)
-                .then((lob) => {
-                  if (lob.can_enter_workspace) setViewMode('student');
-                  else setViewMode('lobby');
-                })
-                .catch(() => setViewMode('student'));
+              // After saving details, go to the classroom dashboard
+              setIsLoadingClassroomAssignments(true);
+              setClassroomAssignments([]);
+              setSelectedClassroomAssignment(null);
+              setViewMode('classroom');
+              try {
+                const asgns = await ClassroomService.listAssignments(cid!);
+                setClassroomAssignments(asgns || []);
+              } catch {
+                setClassroomAssignments([]);
+              } finally {
+                setIsLoadingClassroomAssignments(false);
+              }
             }}
             onShowToast={onShowToast}
           />
@@ -693,6 +771,403 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
           onEnterWorkspace={() => setViewMode('student')}
           onShowToast={onShowToast}
         />
+      </div>
+    );
+  }
+
+  // ── Classroom Dashboard: Student sees their assignments or assignment details ──
+  if (viewMode === 'classroom') {
+    return (
+      <div className="space-y-4 pt-0">
+        {/* Nav Bar */}
+        <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-2 flex-wrap gap-2">
+          <button
+            onClick={() => {
+              if (selectedClassroomAssignment) {
+                setSelectedClassroomAssignment(null);
+              } else {
+                setViewMode('entry');
+              }
+            }}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#9E93B8] hover:text-white transition-colors border border-[rgba(107,92,166,0.3)] flex items-center gap-1.5"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>{selectedClassroomAssignment ? 'Back to Assignments' : 'Back to All Classrooms'}</span>
+          </button>
+          {activeClassroom && (
+            <div className="text-xs font-mono text-[#00D4FF]">
+              Classroom: <strong className="text-[#F5F1EC]">{activeClassroom.name}</strong>
+            </div>
+          )}
+          {isFacultyRole && (
+            <button
+              onClick={() => { setViewMode('instructor'); setInstructorTab('submissions'); }}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/30 hover:bg-[#2E2254] transition-colors"
+            >
+              Instructor Hub
+            </button>
+          )}
+        </div>
+
+        {selectedClassroomAssignment ? (
+          /* Assignment Details View */
+          <div className="rounded-2xl p-6 border space-y-6" style={{ background: BB.surface, borderColor: BB.border }}>
+            {/* Header with Title and badges */}
+            <div className="flex items-start justify-between border-b border-[rgba(107,92,166,0.2)] pb-4 flex-wrap gap-4">
+              <div className="space-y-2 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-[#00D4FF]/15 text-[#00D4FF] font-bold uppercase border border-[#00D4FF]/30">
+                    {selectedClassroomAssignment.rubric?.problem_type || 'CLASSIFICATION'}
+                  </span>
+                  {selectedClassroomAssignment.rubric?.duration_minutes && (
+                    <span className="text-xs text-[#9E93B8] font-mono flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#1C1534] border border-[rgba(107,92,166,0.3)]">
+                      <Clock className="w-3.5 h-3.5 text-[#00D4FF]" />
+                      <span>{selectedClassroomAssignment.rubric.duration_minutes} min duration</span>
+                    </span>
+                  )}
+                </div>
+                <h1 className="text-xl md:text-2xl font-bold text-[#F5F1EC] tracking-tight">
+                  {selectedClassroomAssignment.title}
+                </h1>
+                <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-[#9E93B8] pt-1">
+                  {(selectedClassroomAssignment.start_date || selectedClassroomAssignment.rubric?.start_date) && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)]">
+                      <Calendar className="w-3.5 h-3.5 text-[#00F5A0]" />
+                      <span>Start: <strong className="text-[#F5F1EC]">{formatExamDate(selectedClassroomAssignment.start_date || selectedClassroomAssignment.rubric?.start_date)}</strong></span>
+                    </div>
+                  )}
+                  {(selectedClassroomAssignment.end_date || selectedClassroomAssignment.due_date || selectedClassroomAssignment.rubric?.end_date) && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)]">
+                      <Clock className="w-3.5 h-3.5 text-[#F59E0B]" />
+                      <span>End / Due: <strong className="text-[#F5F1EC]">{formatExamDate(selectedClassroomAssignment.end_date || selectedClassroomAssignment.due_date || selectedClassroomAssignment.rubric?.end_date)}</strong></span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)]">
+                    <Award className="w-3.5 h-3.5 text-[#00D4FF]" />
+                    <span>Max Score: <strong className="text-[#00D4FF]">{selectedClassroomAssignment.max_score || 100} pts</strong></span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Start Button at Top Right */}
+              <button
+                onClick={async () => {
+                  const examId = `exam-${selectedClassroomAssignment.id}`;
+                  let latestExams = exams;
+                  try {
+                    latestExams = await ClassroomService.listExams();
+                    setExams(latestExams);
+                  } catch {}
+                  let targetExam = latestExams.find((e) => e.id === examId || e.id.includes(selectedClassroomAssignment.id));
+                  if (!targetExam) {
+                    try {
+                      const fetched = await ClassroomService.getExam(examId);
+                      if (fetched) {
+                        targetExam = fetched;
+                        latestExams = [...latestExams, fetched];
+                        setExams(latestExams);
+                      }
+                    } catch {}
+                  }
+                  const finalExam = targetExam || (latestExams.length > 0 ? latestExams[0] : null);
+                  if (finalExam) {
+                    setActiveExam(finalExam);
+                    setSelectedExamId(finalExam.id);
+                    setCode(finalExam.starter_code);
+                    setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
+                    setDeployment(null);
+                    setEvaluationResult(null);
+                    setPredictionResult(null);
+                    setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
+                    try {
+                      const sess = await ClassroomService.getSession(finalExam.id);
+                      if (sess?.code_draft) setCode(sess.code_draft);
+                      if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
+                        setSubmissionReceipt({
+                          submission_id: sess.submission_receipt.submission_id || 'sub-locked',
+                          status: 'SUBMITTED',
+                          grade_score: sess.grade_score || 85.0,
+                          percentage: sess.grade_score || 85.0,
+                          passed: (sess.grade_score || 0) >= 60.0,
+                          submitted_at: sess.submitted_at || new Date().toISOString(),
+                          code_sha256: sess.submission_receipt.code_sha256,
+                          model_sha256: sess.submission_receipt.model_sha256,
+                          rubric_snapshot: sess.submission_receipt.rubric_snapshot,
+                          guardrail_flags: sess.submission_receipt.guardrail_flags || [],
+                          message: 'Exam submission locked.',
+                        });
+                      }
+                    } catch {}
+                  }
+                  const targetCid = selectedClassroomId || activeClassroom?.id || '';
+                  if (targetCid) {
+                    ClassroomService.enterExamWorkspace(targetCid).catch(() => {});
+                  }
+                  setViewMode('student');
+                }}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs text-[#0B0912] shadow transition-all hover:opacity-90 shrink-0"
+                style={{ background: 'linear-gradient(135deg, #00D4FF 0%, #00F5A0 100%)' }}
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>Start Assignment</span>
+              </button>
+            </div>
+
+            {/* Grid Layout: Instructions & Benchmark Criteria */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+              {/* Instructions and Details (2 Cols) */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="p-4 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] space-y-2">
+                  <div className="text-xs font-bold text-[#00D4FF] uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Problem Statement & Instructions</span>
+                  </div>
+                  <p className="text-xs text-[#F5F1EC] leading-relaxed whitespace-pre-wrap">
+                    {selectedClassroomAssignment.description || 'No detailed instructions provided.'}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] space-y-2">
+                  <div className="text-xs font-bold text-[#00F5A0] uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Assigned Dataset</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="font-mono text-[#F5F1EC]">{selectedClassroomAssignment.dataset_id || 'churn_lab_dataset.csv'}</span>
+                    <span className="text-[11px] text-[#9E93B8]">Pre-loaded in workspace</span>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#140E2A] border border-[rgba(107,92,166,0.3)] space-y-2">
+                  <div className="text-xs font-bold text-[#F5F1EC] flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-[#00D4FF]" />
+                    <span>What to Expect in the Workspace</span>
+                  </div>
+                  <ul className="text-xs text-[#9E93B8] space-y-1 list-disc list-inside">
+                    <li>Interactive cloud code editor with scikit-learn, pandas, and numpy support</li>
+                    <li>Train, test, and tune your ML model against hidden test cases</li>
+                    <li>In-place model deployment slot to verify live serving latency</li>
+                    <li>Instant rubric evaluations and automated grading feedback</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Rubric Criteria & CTA (1 Col) */}
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] space-y-3">
+                  <div className="text-xs font-bold text-[#F5F1EC] border-b border-[rgba(107,92,166,0.2)] pb-2 flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5 text-[#00D4FF]" />
+                    <span>Evaluation Benchmark</span>
+                  </div>
+
+                  <div className="space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#9E93B8]">Target Metric Cutoff:</span>
+                      <strong className="text-[#00F5A0] font-mono">
+                        {selectedClassroomAssignment.rubric?.min_accuracy
+                          ? `${(selectedClassroomAssignment.rubric.min_accuracy * 100).toFixed(0)}% Acc/F1`
+                          : 'Completed Pipeline'}
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#9E93B8]">Serving Latency Ceiling:</span>
+                      <strong className="text-[#F59E0B] font-mono">
+                        {selectedClassroomAssignment.rubric?.max_latency_ms
+                          ? `< ${selectedClassroomAssignment.rubric.max_latency_ms} ms`
+                          : 'No Ceiling'}
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#9E93B8]">Passing Grade Benchmark:</span>
+                      <strong className="text-[#00D4FF] font-mono">
+                        {selectedClassroomAssignment.rubric?.passing_score_percentage || 60}%
+                      </strong>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#9E93B8]">Data Leakage Guardrails:</span>
+                      <strong className="text-[#F5F1EC] font-mono text-[11px]">
+                        {selectedClassroomAssignment.rubric?.evaluate_guardrails !== false ? 'Strict Deductions' : 'Advisory Only'}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Big Action Box */}
+                <div className="p-4 rounded-xl bg-gradient-to-b from-[#1C1534] to-[#140E2A] border border-[#00D4FF]/30 space-y-3 text-center">
+                  <p className="text-xs text-[#9E93B8]">
+                    Ready to begin? Click below to open your coding environment and start solving.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      const examId = `exam-${selectedClassroomAssignment.id}`;
+                      let latestExams = exams;
+                      try {
+                        latestExams = await ClassroomService.listExams();
+                        setExams(latestExams);
+                      } catch {}
+                      let targetExam = latestExams.find((e) => e.id === examId || e.id.includes(selectedClassroomAssignment.id));
+                      if (!targetExam) {
+                        try {
+                          const fetched = await ClassroomService.getExam(examId);
+                          if (fetched) {
+                            targetExam = fetched;
+                            latestExams = [...latestExams, fetched];
+                            setExams(latestExams);
+                          }
+                        } catch {}
+                      }
+                      const finalExam = targetExam || (latestExams.length > 0 ? latestExams[0] : null);
+                      if (finalExam) {
+                        setActiveExam(finalExam);
+                        setSelectedExamId(finalExam.id);
+                        setCode(finalExam.starter_code);
+                        setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
+                        setDeployment(null);
+                        setEvaluationResult(null);
+                        setPredictionResult(null);
+                        setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
+                        try {
+                          const sess = await ClassroomService.getSession(finalExam.id);
+                          if (sess?.code_draft) setCode(sess.code_draft);
+                          if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
+                            setSubmissionReceipt({
+                              submission_id: sess.submission_receipt.submission_id || 'sub-locked',
+                              status: 'SUBMITTED',
+                              grade_score: sess.grade_score || 85.0,
+                              percentage: sess.grade_score || 85.0,
+                              passed: (sess.grade_score || 0) >= 60.0,
+                              submitted_at: sess.submitted_at || new Date().toISOString(),
+                              code_sha256: sess.submission_receipt.code_sha256,
+                              model_sha256: sess.submission_receipt.model_sha256,
+                              rubric_snapshot: sess.submission_receipt.rubric_snapshot,
+                              guardrail_flags: sess.submission_receipt.guardrail_flags || [],
+                              message: 'Exam submission locked.',
+                            });
+                          }
+                        } catch {}
+                      }
+                      const targetCid = selectedClassroomId || activeClassroom?.id || '';
+                      if (targetCid) {
+                        ClassroomService.enterExamWorkspace(targetCid).catch(() => {});
+                      }
+                      setViewMode('student');
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-xs text-[#0B0912] shadow-lg transition-all hover:opacity-90 active:scale-[0.98]"
+                    style={{ background: 'linear-gradient(135deg, #00D4FF 0%, #00F5A0 100%)' }}
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    <span>Start Exam</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Classroom assignments list */
+          <div className="rounded-2xl p-6 border space-y-5" style={{ background: BB.surface, borderColor: BB.border }}>
+            <div className="flex items-center gap-3 border-b border-[rgba(107,92,166,0.2)] pb-4">
+              <div className="p-2.5 rounded-xl bg-[#00D4FF]/10 text-[#00D4FF] border border-[#00D4FF]/30">
+                <GraduationCap className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-[#F5F1EC]">
+                  {activeClassroom?.name || 'Classroom'} — Your Assignments
+                </h2>
+                <p className="text-xs text-[#9E93B8]">
+                  Select an assignment below to view detailed requirements and begin the exam.
+                </p>
+              </div>
+            </div>
+
+            {isLoadingClassroomAssignments ? (
+              <div className="py-12 text-center text-xs font-mono text-[#00D4FF] animate-pulse">
+                Fetching assignments from the instructor...
+              </div>
+            ) : classroomAssignments.length === 0 ? (
+              <div className="py-12 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-[#241B42] text-[#9E93B8] mx-auto flex items-center justify-center">
+                  <FileCode className="w-6 h-6" />
+                </div>
+                <div className="text-sm font-semibold text-[#F5F1EC]">No Assignments Published Yet</div>
+                <p className="text-xs text-[#9E93B8] max-w-sm mx-auto">
+                  Your instructor hasn&apos;t published any lab exam assignments for this classroom yet.
+                  Please check back later or contact your instructor.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {classroomAssignments.map((asgn: any) => {
+                  const rubric = asgn.rubric || {};
+                  return (
+                    <div
+                      key={asgn.id}
+                      onClick={() => setSelectedClassroomAssignment(asgn)}
+                      className="p-5 rounded-2xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] hover:border-[#00D4FF]/40 transition-all space-y-3 group cursor-pointer"
+                    >
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="space-y-1 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#00D4FF]/15 text-[#00D4FF] font-bold uppercase">
+                              {rubric.problem_type || 'LAB EXAM'}
+                            </span>
+                            {rubric.duration_minutes && (
+                              <span className="text-[10px] text-[#9E93B8] font-mono flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {rubric.duration_minutes} min
+                              </span>
+                            )}
+                            {(asgn.start_date || rubric.start_date) && (
+                              <span className="text-[10px] text-[#00F5A0] font-mono flex items-center gap-1">
+                                <Calendar className="w-3 h-3" />
+                                Starts: {formatExamDate(asgn.start_date || rubric.start_date)}
+                              </span>
+                            )}
+                            {(asgn.end_date || asgn.due_date || rubric.end_date) && (
+                              <span className="text-[10px] text-[#F59E0B] font-mono flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                Due: {formatExamDate(asgn.end_date || asgn.due_date || rubric.end_date)}
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="text-sm font-bold text-[#F5F1EC] group-hover:text-[#00D4FF] transition-colors">
+                            {asgn.title}
+                          </h3>
+                          {asgn.description && (
+                            <p className="text-xs text-[#9E93B8] line-clamp-2">{asgn.description}</p>
+                          )}
+                          <div className="flex items-center gap-4 text-[11px] text-[#9E93B8] font-mono pt-1 flex-wrap">
+                            {rubric.min_accuracy && (
+                              <span>Min Accuracy: <strong className="text-[#00F5A0]">{(rubric.min_accuracy * 100).toFixed(0)}%</strong></span>
+                            )}
+                            {rubric.max_latency_ms && (
+                              <span>Max Latency: <strong className="text-[#F59E0B]">{rubric.max_latency_ms}ms</strong></span>
+                            )}
+                            {rubric.passing_score_percentage && (
+                              <span>Pass Mark: <strong className="text-[#00D4FF]">{rubric.passing_score_percentage}%</strong></span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedClassroomAssignment(asgn);
+                          }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-xs bg-[#241B42] hover:bg-[#2E2254] text-[#00D4FF] border border-[#00D4FF]/30 transition-all shrink-0"
+                        >
+                          <span>View Details</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -793,28 +1268,24 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-[#9E93B8]">Active Exam Batch:</span>
-                  <select
-                    value={selectedExamId}
-                    onChange={(e) => handleSelectExam(e.target.value)}
-                    className="px-3 py-1.5 rounded-xl bg-[#1C1534] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] font-semibold"
-                  >
-                    {exams.map((ex) => (
-                      <option key={ex.id} value={ex.id}>
-                        {ex.title}
-                      </option>
-                    ))}
-                  </select>
+                  {activeClassroom && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[#9E93B8]">Classroom:</span>
+                      <span className="text-xs font-bold text-[#F5F1EC] font-mono">{activeClassroom.name}</span>
+                    </div>
+                  )}
                 </div>
 
-                <a
-                  href={`/api/v1/classrooms/assignments/default/grades.csv`}
-                  download
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#00F5A0] border border-[#00F5A0]/40 transition-colors flex items-center gap-1.5 shadow"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Export Grades CSV</span>
-                </a>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadInstructorData}
+                    disabled={isLoadingInstructor}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] transition-colors flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingInstructor ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
               </div>
 
               {/* Submissions Table */}
@@ -824,7 +1295,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
               >
                 <div className="px-5 py-3 border-b border-[rgba(107,92,166,0.18)] flex items-center justify-between bg-[#110D20]">
                   <span className="text-xs font-bold text-[#F5F1EC]">Student Exam Submissions</span>
-                  <span className="text-[11px] text-[#9E93B8]">Showing enrolled candidates</span>
+                  <span className="text-[11px] text-[#9E93B8]">{submissions.length} submission{submissions.length !== 1 ? 's' : ''}</span>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -839,72 +1310,55 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[rgba(107,92,166,0.15)] text-[#F5F1EC]">
-                      {/* Seeded demonstration submission rows when none enrolled yet */}
-                      {[
-                        {
-                          submission_id: 'sub-lab-student01',
-                          learner_id: 'stu-01',
-                          learner_name: 'Aarav Sharma',
-                          learner_email: 'aarav.sharma@university.edu',
-                          status: 'SUBMITTED',
-                          grade_score: 85.0,
-                          submitted_at: '2026-10-09T13:45:00Z',
-                          reproducibility_verified: true,
-                          code_sha256: 'a9f24e1239c8ef7...',
-                          model_sha256: '342e1aab7d45ea5...',
-                          guardrail_flags: [],
-                          code_snippet: 'from sklearn.ensemble import RandomForestClassifier...',
-                        },
-                        {
-                          submission_id: 'sub-lab-student02',
-                          learner_id: 'stu-02',
-                          learner_name: 'Priya Patel',
-                          learner_email: 'priya.patel@university.edu',
-                          status: 'SUBMITTED',
-                          grade_score: 45.0,
-                          submitted_at: '2026-10-09T13:50:00Z',
-                          reproducibility_verified: false,
-                          code_sha256: '5d81be0a187b419...',
-                          model_sha256: '8b724ccdf8201a1...',
-                          guardrail_flags: ["Identifier Column 'customer_id' used as feature"],
-                          code_snippet: 'from sklearn.dummy import DummyClassifier...',
-                        },
-                        ...submissions,
-                      ].map((sub, idx) => (
-                        <tr key={sub.submission_id + idx} className="hover:bg-[#1A1432] transition-colors">
-                          <td className="p-3 font-medium">
-                            <div>{sub.learner_name}</div>
-                            <div className="text-[10px] text-[#9E93B8] font-mono">{sub.learner_email}</div>
-                          </td>
-                          <td className="p-3">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-[#00F5A0]/10 text-[#00F5A0] border border-[#00F5A0]/30">
-                              {sub.status}
-                            </span>
-                          </td>
-                          <td className="p-3 font-mono font-bold">
-                            <span className={sub.grade_score && sub.grade_score >= 60 ? 'text-[#00F5A0]' : 'text-[#EF4444]'}>
-                              {sub.grade_score?.toFixed(1) || '0.0'} / 100
-                            </span>
-                          </td>
-                          <td className="p-3 font-mono text-xs text-[#00D4FF]">
-                            {formatISTDateTime(sub.submitted_at)}
-                          </td>
-                          <td className="p-3 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => {
-                                  setGradingSubmission(sub);
-                                  setManualScore(sub.grade_score || 80);
-                                  setGradingComments('');
-                                }}
-                                className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-[#C9A24B]/20 text-[#C9A24B] hover:bg-[#C9A24B]/30 transition-colors border border-[#C9A24B]/40"
-                              >
-                                Grade
-                              </button>
-                            </div>
+                      {submissions.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-8 text-center text-xs text-[#9E93B8] italic">
+                            No submissions yet. Students will appear here once they submit their lab exams.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        submissions.map((sub, idx) => (
+                          <tr key={sub.submission_id + idx} className="hover:bg-[#1A1432] transition-colors">
+                            <td className="p-3 font-medium">
+                              <div>{sub.learner_name}</div>
+                              <div className="text-[10px] text-[#9E93B8] font-mono">{sub.learner_email}</div>
+                            </td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
+                                sub.status === 'SUBMITTED' || sub.status === 'GRADED'
+                                  ? 'bg-[#00F5A0]/10 text-[#00F5A0] border-[#00F5A0]/30'
+                                  : sub.status === 'IN_PROGRESS'
+                                  ? 'bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30'
+                                  : 'bg-[#9E93B8]/10 text-[#9E93B8] border-[#9E93B8]/30'
+                              }`}>
+                                {sub.status}
+                              </span>
+                            </td>
+                            <td className="p-3 font-mono font-bold">
+                              <span className={sub.grade_score && sub.grade_score >= 60 ? 'text-[#00F5A0]' : sub.grade_score ? 'text-[#EF4444]' : 'text-[#9E93B8]'}>
+                                {sub.grade_score?.toFixed(1) ?? '—'} / 100
+                              </span>
+                            </td>
+                            <td className="p-3 font-mono text-xs text-[#00D4FF]">
+                              {formatISTDateTime(sub.submitted_at)}
+                            </td>
+                            <td className="p-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => {
+                                    setGradingSubmission(sub);
+                                    setManualScore(sub.grade_score || 80);
+                                    setGradingComments('');
+                                  }}
+                                  className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-[#C9A24B]/20 text-[#C9A24B] hover:bg-[#C9A24B]/30 transition-colors border border-[#C9A24B]/40"
+                                >
+                                  Grade
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -928,9 +1382,10 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Assignment Title</label>
+                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Assignment Name *</label>
                   <input
                     type="text"
+                    required
                     value={newAssignmentTitle}
                     onChange={(e) => setNewAssignmentTitle(e.target.value)}
                     placeholder="e.g. Lab Exam 3: Customer Churn Classification"
@@ -948,6 +1403,32 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     <option value="classification">Classification (Accuracy & Weighted F1)</option>
                     <option value="regression">Regression (R² Score & RMSE)</option>
                   </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-[#00D4FF]" />
+                    <span>Start Date & Time (Optional)</span>
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={newAssignmentStartDate}
+                    onChange={(e) => setNewAssignmentStartDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-[#F59E0B]" />
+                    <span>End Date & Time / Deadline (Optional)</span>
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={newAssignmentEndDate}
+                    onChange={(e) => setNewAssignmentEndDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
+                  />
                 </div>
 
                 <div className="md:col-span-2">
@@ -1307,10 +1788,18 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
           {/* Navigation Bar for Student Workspace */}
           <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-2 flex-wrap gap-2">
             <button
-              onClick={() => setViewMode('entry')}
+              onClick={() => {
+                if (activeClassroom) {
+                  setSelectedClassroomAssignment(null);
+                  setViewMode('classroom');
+                } else {
+                  setViewMode('entry');
+                }
+              }}
               className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#9E93B8] hover:text-white transition-colors border border-[rgba(107,92,166,0.3)] flex items-center gap-1.5"
             >
-              ← Back to All Classrooms
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>{activeClassroom ? 'Back to Classroom' : 'Back to All Classrooms'}</span>
             </button>
             {activeClassroom && (
               <div className="text-xs font-mono text-[#00D4FF]">

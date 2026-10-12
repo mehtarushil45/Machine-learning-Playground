@@ -35,7 +35,7 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import select, func, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import Permission, check_user_permission
+from app.core.permissions import Permission, check_user_permission, has_permission
 from app.database import AsyncSessionLocal
 from app.dependencies import CurrentUser, OptionalCurrentUser, get_current_user
 from app.models.classroom import (
@@ -445,8 +445,42 @@ def _run_data_quality_guardrails(code: str, features: List[str], target_col: str
 # ---------------------------------------------------------------------------
 
 @router.get("/exams", response_model=List[LabExamInfo], summary="List available practical ML lab exams")
-async def list_lab_exams() -> List[LabExamInfo]:
+async def list_lab_exams(db: AsyncSession = Depends(get_db)) -> List[LabExamInfo]:
     """Return all active lab exams with problem statements, datasets, and starter templates."""
+    try:
+        stmt = select(Assignment).limit(50)
+        res = await db.execute(stmt)
+        db_asgns = res.scalars().all()
+        default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
+        for asgn in db_asgns:
+            exam_id = f"exam-{asgn.id}"
+            if exam_id not in CURATED_LAB_EXAMS:
+                rubric_dict = asgn.rubric or {}
+                dataset_file = asgn.dataset_id or "churn_lab_dataset.csv"
+                default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
+                starter_code = default_starter.replace("churn_lab_dataset.csv", dataset_file) if (default_starter and dataset_file != "churn_lab_dataset.csv") else default_starter
+                CURATED_LAB_EXAMS[exam_id] = {
+                    "id": exam_id,
+                    "title": asgn.title,
+                    "course_code": "CS401",
+                    "duration_minutes": int(rubric_dict.get("duration_minutes", 90)),
+                    "problem_type": rubric_dict.get("problem_type", "classification"),
+                    "dataset_name": dataset_file,
+                    "dataset_id": dataset_file,
+                    "target_column": rubric_dict.get("target_column", "churn"),
+                    "feature_columns": ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"],
+                    "description": asgn.description,
+                    "rubric": rubric_dict,
+                    "starter_code": starter_code,
+                    "copilot_policy": "off",
+                    "learning_aids_enabled": False,
+                    "protected_regions": [],
+                    "start_date": rubric_dict.get("start_date"),
+                    "end_date": rubric_dict.get("end_date"),
+                }
+    except Exception:
+        pass
+
     results: List[LabExamInfo] = []
     now = datetime.now(timezone.utc)
     for item in CURATED_LAB_EXAMS.values():
@@ -455,19 +489,58 @@ async def list_lab_exams() -> List[LabExamInfo]:
         if close_t:
             if isinstance(close_t, str):
                 try:
-                    close_t = datetime.fromisoformat(close_t.replace("Z", "+00:00"))
+                    close_dt = datetime.fromisoformat(close_t.replace("Z", "+00:00"))
                 except Exception:
-                    close_t = None
-            if close_t and now > close_t:
+                    close_dt = None
+            elif isinstance(close_t, datetime):
+                close_dt = close_t
+            else:
+                close_dt = None
+            if close_dt and now > close_dt:
                 is_closed = True
-        results.append(LabExamInfo(**item, is_closed=is_closed))
+        results.append(LabExamInfo.model_validate({**item, "is_closed": is_closed}))
     return results
 
 
 @router.get("/exams/{exam_id}", response_model=LabExamInfo, summary="Get lab exam problem statement & rubric")
-async def get_lab_exam(exam_id: str) -> LabExamInfo:
+async def get_lab_exam(exam_id: str, db: AsyncSession = Depends(get_db)) -> LabExamInfo:
     """Retrieve full lab exam problem specification, constraints, and rubric."""
     exam = CURATED_LAB_EXAMS.get(exam_id)
+    if not exam and exam_id.startswith("exam-"):
+        try:
+            from uuid import UUID
+            asgn_id = UUID(exam_id.replace("exam-", ""))
+            stmt = select(Assignment).where(Assignment.id == asgn_id)
+            res = await db.execute(stmt)
+            asgn = res.scalar_one_or_none()
+            if asgn:
+                rubric_dict = asgn.rubric or {}
+                dataset_file = asgn.dataset_id or "churn_lab_dataset.csv"
+                default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
+                starter_code = default_starter.replace("churn_lab_dataset.csv", dataset_file) if (default_starter and dataset_file != "churn_lab_dataset.csv") else default_starter
+                exam = {
+                    "id": exam_id,
+                    "title": asgn.title,
+                    "course_code": "CS401",
+                    "duration_minutes": int(rubric_dict.get("duration_minutes", 90)),
+                    "problem_type": rubric_dict.get("problem_type", "classification"),
+                    "dataset_name": dataset_file,
+                    "dataset_id": dataset_file,
+                    "target_column": rubric_dict.get("target_column", "churn"),
+                    "feature_columns": ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"],
+                    "description": asgn.description,
+                    "rubric": rubric_dict,
+                    "starter_code": starter_code,
+                    "copilot_policy": "off",
+                    "learning_aids_enabled": False,
+                    "protected_regions": [],
+                    "start_date": rubric_dict.get("start_date"),
+                    "end_date": rubric_dict.get("end_date"),
+                }
+                CURATED_LAB_EXAMS[exam_id] = exam
+        except Exception:
+            pass
+
     if not exam:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -475,8 +548,20 @@ async def get_lab_exam(exam_id: str) -> LabExamInfo:
         )
     now = datetime.now(timezone.utc)
     close_t = exam.get("close_time")
-    is_closed = bool(close_t and now > close_t)
-    return LabExamInfo(**exam, is_closed=is_closed)
+    is_closed = False
+    if close_t:
+        if isinstance(close_t, str):
+            try:
+                close_dt = datetime.fromisoformat(close_t.replace("Z", "+00:00"))
+            except Exception:
+                close_dt = None
+        elif isinstance(close_t, datetime):
+            close_dt = close_t
+        else:
+            close_dt = None
+        if close_dt and now > close_dt:
+            is_closed = True
+    return LabExamInfo.model_validate({**exam, "is_closed": is_closed})
 
 
 @router.get("/exams/{exam_id}/session", response_model=LabExamSessionResponse, summary="Get student lab session state")
@@ -1993,8 +2078,9 @@ async def get_exam_lobby(
         diff = int((effective_end - now).total_seconds())
         time_remaining = max(0, diff)
 
-    is_open = classroom.is_exam_started
-    if classroom.exam_start_time and now >= classroom.exam_start_time:
+    if classroom.exam_start_time:
+        is_open = classroom.is_exam_started or (now >= classroom.exam_start_time)
+    else:
         is_open = True
 
     if classroom.exam_end_time:
@@ -2073,7 +2159,10 @@ async def enter_exam_workspace(
 
     now = datetime.now(timezone.utc)
 
-    is_open = classroom.is_exam_started or (classroom.exam_start_time and now >= classroom.exam_start_time)
+    if classroom.exam_start_time:
+        is_open = classroom.is_exam_started or (now >= classroom.exam_start_time)
+    else:
+        is_open = True
     if not is_open:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -2597,8 +2686,8 @@ async def grant_time_extension(
     if not member:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
 
-    old_ext = member.time_extension_minutes
-    member.time_extension_minutes += payload.extension_minutes
+    old_ext = member.time_extension_minutes or 0
+    member.time_extension_minutes = (member.time_extension_minutes or 0) + payload.extension_minutes
 
     audit = ClassroomAuditLog(
         classroom_id=classroom_id,
@@ -2905,14 +2994,22 @@ async def create_assignment(
             detail=f"Role '{current_user.role.value}' does not possess required permission 'assignment:create'.",
         )
 
+    rubric_dict = dict(payload.rubric or {})
+    if payload.start_date:
+        rubric_dict["start_date"] = payload.start_date.isoformat()
+    if payload.end_date:
+        rubric_dict["end_date"] = payload.end_date.isoformat()
+
+    effective_due_date = payload.end_date or payload.due_date
+
     assignment = Assignment(
         organisation_id=current_user.organisation_id,
         classroom_id=payload.classroom_id,
         title=payload.title,
         description=payload.description,
         dataset_id=payload.dataset_id,
-        due_date=payload.due_date,
-        rubric=payload.rubric,
+        due_date=effective_due_date,
+        rubric=rubric_dict,
         max_score=payload.max_score,
         created_by_id=current_user.id,
     )
@@ -2922,23 +3019,27 @@ async def create_assignment(
 
     # Register exam in CURATED_LAB_EXAMS for live runtime evaluation
     exam_id = f"exam-{assignment.id}"
-    rubric_dict = payload.rubric or {}
+    dataset_file = payload.dataset_id or "churn_lab_dataset.csv"
+    default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
+    starter_code = default_starter.replace("churn_lab_dataset.csv", dataset_file) if (default_starter and dataset_file != "churn_lab_dataset.csv") else default_starter
     CURATED_LAB_EXAMS[exam_id] = {
         "id": exam_id,
         "title": assignment.title,
         "course_code": "CS401",
         "duration_minutes": int(rubric_dict.get("duration_minutes", 90)),
         "problem_type": rubric_dict.get("problem_type", "classification"),
-        "dataset_name": payload.dataset_id or "churn_lab_dataset.csv",
-        "dataset_id": payload.dataset_id or "churn_lab_dataset.csv",
+        "dataset_name": dataset_file,
+        "dataset_id": dataset_file,
         "target_column": rubric_dict.get("target_column", "churn"),
         "feature_columns": ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"],
         "description": assignment.description,
         "rubric": rubric_dict,
-        "starter_code": "",
+        "starter_code": starter_code,
         "copilot_policy": "off",
         "learning_aids_enabled": False,
         "protected_regions": [],
+        "start_date": payload.start_date.isoformat() if payload.start_date else None,
+        "end_date": payload.end_date.isoformat() if payload.end_date else None,
     }
 
     return AssignmentResponse.model_validate(assignment)
