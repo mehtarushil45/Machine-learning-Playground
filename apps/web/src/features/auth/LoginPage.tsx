@@ -132,18 +132,18 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
 
       // ── 1. Base background: deep blue-to-desaturated-purple gradient ──
       const bgGrad = ctx.createRadialGradient(cx * 0.9, cy * 0.85, 0, cx, cy, Math.max(width, height) * 0.75);
-      bgGrad.addColorStop(0,   '#0D1F42');
-      bgGrad.addColorStop(0.45,'#0A1535');
-      bgGrad.addColorStop(0.75,'#0D1228');
-      bgGrad.addColorStop(1,   '#13102A');
+      bgGrad.addColorStop(0, '#0D1F42');
+      bgGrad.addColorStop(0.45, '#0A1535');
+      bgGrad.addColorStop(0.75, '#0D1228');
+      bgGrad.addColorStop(1, '#13102A');
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
       // Purple-tinted vignette at corners
       const cornerVig = ctx.createRadialGradient(cx, cy, height * 0.25, cx, cy, Math.max(width, height) * 0.9);
-      cornerVig.addColorStop(0,   'rgba(13,19,42,0)');
+      cornerVig.addColorStop(0, 'rgba(13,19,42,0)');
       cornerVig.addColorStop(0.7, 'rgba(18,10,35,0.45)');
-      cornerVig.addColorStop(1,   'rgba(10,5,25,0.78)');
+      cornerVig.addColorStop(1, 'rgba(10,5,25,0.78)');
       ctx.fillStyle = cornerVig;
       ctx.fillRect(0, 0, width, height);
 
@@ -180,11 +180,11 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
         const ringR = baseRadius + pulse;
         const ringAlpha = (0.18 - r * 0.028) * (0.7 + Math.sin(phase) * 0.3);
         const grd = ctx.createRadialGradient(cx, cy, ringR - 22, cx, cy, ringR + 22);
-        grd.addColorStop(0,   `rgba(255,185,30,0)`);
+        grd.addColorStop(0, `rgba(255,185,30,0)`);
         grd.addColorStop(0.4, `rgba(255,185,30,${ringAlpha.toFixed(3)})`);
-        grd.addColorStop(0.55,`rgba(255,210,80,${(ringAlpha * 1.4).toFixed(3)})`);
+        grd.addColorStop(0.55, `rgba(255,210,80,${(ringAlpha * 1.4).toFixed(3)})`);
         grd.addColorStop(0.7, `rgba(255,185,30,${ringAlpha.toFixed(3)})`);
-        grd.addColorStop(1,   `rgba(255,185,30,0)`);
+        grd.addColorStop(1, `rgba(255,185,30,0)`);
         ctx.beginPath();
         ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
         ctx.strokeStyle = grd;
@@ -218,13 +218,13 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
         // Ambient glow halo around each node
         const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, displayRadius * 6);
         if (p.isGold) {
-          glow.addColorStop(0,   `rgba(255,195,60,${displayOpacity * 0.9})`);
+          glow.addColorStop(0, `rgba(255,195,60,${displayOpacity * 0.9})`);
           glow.addColorStop(0.3, `rgba(255,160,20,${displayOpacity * 0.35})`);
-          glow.addColorStop(1,   'rgba(255,140,0,0)');
+          glow.addColorStop(1, 'rgba(255,140,0,0)');
         } else {
-          glow.addColorStop(0,   `rgba(110,185,255,${displayOpacity * 0.8})`);
+          glow.addColorStop(0, `rgba(110,185,255,${displayOpacity * 0.8})`);
           glow.addColorStop(0.3, `rgba(60,140,255,${displayOpacity * 0.25})`);
-          glow.addColorStop(1,   'rgba(30,100,255,0)');
+          glow.addColorStop(1, 'rgba(30,100,255,0)');
         }
         ctx.beginPath();
         ctx.arc(p.x, p.y, displayRadius * 6, 0, Math.PI * 2);
@@ -522,16 +522,8 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
         }}
       />
 
-      {/* ── 4-Pointed Star Sparkle — Bottom Right ── */}
       <div
-        style={{
-          position: 'absolute',
-          bottom: 64,
-          right: 90,
-          zIndex: 3,
-          pointerEvents: 'none',
-          opacity: 0.62,
-        }}
+
       >
         <svg width="68" height="68" viewBox="0 0 68 68" fill="none">
           <defs>

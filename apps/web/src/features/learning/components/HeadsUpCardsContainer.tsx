@@ -4,13 +4,11 @@ import { HeadsUpCard } from '../rules/types'
 interface HeadsUpCardsContainerProps {
   cards?: HeadsUpCard[]
   className?: string
-  onNavigateToLesson?: (lessonId: string) => void
 }
 
 export function HeadsUpCardsContainer({
   cards: overrideCards,
   className = '',
-  onNavigateToLesson,
 }: HeadsUpCardsContainerProps) {
   const { activeCards, dismissCard, learningAidsAllowed } = useLearning()
   const displayCards = overrideCards || activeCards
@@ -91,10 +89,14 @@ export function HeadsUpCardsContainer({
               <div className="mt-2 text-right">
                 <button
                   type="button"
-                  onClick={() => onNavigateToLesson?.(card.lesson_id)}
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      window.open(`${window.location.origin}${window.location.pathname}#guide`, '_blank')
+                    }
+                  }}
                   className="text-[11px] text-sky-400 hover:text-sky-300 font-medium hover:underline inline-flex items-center gap-1"
                 >
-                  Learn concept in Lesson Guide →
+                  Learn concept in User Guide ↗
                 </button>
               </div>
             )}

@@ -850,22 +850,10 @@ export const CodeExecutionService = {
 };
 
 // ---------------------------------------------------------------------------
-// 7. Student Learning Layer Service (Guided Lessons, Stories, Signals, Code Lint)
+// 7. Student Learning Layer Service (Stories, Signals, Code Lint)
 // ---------------------------------------------------------------------------
 
-export interface LessonProgressPayload {
-  selected_option?: number;
-  platform_state_evidence?: Record<string, any>;
-}
-
 export const LearningService = {
-  getLessons: () => request<any[]>('/learning/lessons'),
-  getProgress: () => request<{ student_id: string; completed_lessons: string[]; last_updated: string }>('/learning/progress'),
-  completeLesson: (lessonId: string, payload: LessonProgressPayload) =>
-    request<any>(`/learning/progress/${lessonId}`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
   getInstructorSummary: () => request<any>('/learning/progress/instructor-summary'),
   logSignal: (payload: { event_type: string; card_id?: string; lesson_id?: string; context_page?: string; learning_mode_enabled?: boolean }) =>
     request<any>('/learning/signals', {

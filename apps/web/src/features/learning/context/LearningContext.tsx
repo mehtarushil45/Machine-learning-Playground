@@ -10,9 +10,8 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
-import { HeadsUpCard, LessonItem, PitfallStory, LearningProjectState } from '../rules/types'
+import { HeadsUpCard, PitfallStory, LearningProjectState } from '../rules/types'
 import { evaluateHeadsUpRules } from '../rules/registry'
-import lessonsContent from '../../../content/lessons/lessons.json'
 
 interface LearningContextValue {
   learningMode: boolean
@@ -22,11 +21,6 @@ interface LearningContextValue {
   activeCards: HeadsUpCard[]
   dismissCard: (ruleId: string) => void
   resetDismissedCards: () => void
-  lessons: LessonItem[]
-  completedLessonIds: string[]
-  currentLessonId: string | null
-  setCurrentLessonId: (id: string | null) => void
-  completeLesson: (lessonId: string, answerOption?: number, evidence?: Record<string, any>) => Promise<boolean>
   stories: PitfallStory[]
   loadStoryDataset: (storyId: string) => Promise<any>
   logSignal: (eventType: string, cardId?: string, lessonId?: string, page?: string) => void
@@ -66,10 +60,6 @@ export function LearningProvider({
     }
   })
 
-  // Guided lessons
-  const lessons = useMemo(() => lessonsContent as unknown as LessonItem[], [])
-  const [completedLessonIds, setCompletedLessonIds] = useState<string[]>([])
-  const [currentLessonId, setCurrentLessonId] = useState<string | null>('lesson-01-read-data')
   const [stories, setStories] = useState<PitfallStory[]>([])
 
   // Telemetry logger (Part F)
@@ -91,17 +81,8 @@ export function LearningProvider({
     }
   }, [learningMode])
 
-  // Fetch initial progress & pitfall stories
+  // Fetch pitfall stories
   useEffect(() => {
-    fetch('/api/v1/learning/progress')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && Array.isArray(data.completed_lessons)) {
-          setCompletedLessonIds(data.completed_lessons)
-        }
-      })
-      .catch(() => {})
-
     fetch('/api/v1/learning/stories')
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
@@ -149,34 +130,7 @@ export function LearningProvider({
     return evaluateHeadsUpRules(projectState, dismissedCardIds)
   }, [projectState, dismissedCardIds, learningAidsAllowed])
 
-  // Complete a lesson with check validation
-  const completeLesson = useCallback(
-    async (lessonId: string, answerOption?: number, evidence?: Record<string, any>): Promise<boolean> => {
-      try {
-        const res = await fetch(`/api/v1/learning/progress/${lessonId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            selected_option: answerOption,
-            platform_state_evidence: evidence || { verified: true },
-          }),
-        })
 
-        if (!res.ok) {
-          const err = await res.json()
-          alert(err.detail || 'Verification check not passed.')
-          return false
-        }
-
-        setCompletedLessonIds((prev) => Array.from(new Set([...prev, lessonId])))
-        logSignal('lesson_completed', undefined, lessonId, window.location.pathname)
-        return true
-      } catch {
-        return false
-      }
-    },
-    [logSignal],
-  )
 
   const loadStoryDataset = useCallback(
     async (storyId: string) => {
@@ -200,11 +154,6 @@ export function LearningProvider({
     activeCards,
     dismissCard,
     resetDismissedCards,
-    lessons,
-    completedLessonIds,
-    currentLessonId,
-    setCurrentLessonId,
-    completeLesson,
     stories,
     loadStoryDataset,
     logSignal,
@@ -225,11 +174,6 @@ export function useLearning() {
       activeCards: [],
       dismissCard: () => {},
       resetDismissedCards: () => {},
-      lessons: lessonsContent as unknown as LessonItem[],
-      completedLessonIds: [],
-      currentLessonId: null,
-      setCurrentLessonId: () => {},
-      completeLesson: async () => false,
       stories: [],
       loadStoryDataset: async () => null,
       logSignal: () => {},

@@ -50,29 +50,7 @@ export interface HeadsUpCard {
   dismissed?: boolean
 }
 
-export interface LessonCheckDetails {
-  metric?: string
-  description?: string
-  question?: string
-  options?: string[]
-  correct_index?: number
-  explanation?: string
-}
 
-export interface LessonItem {
-  id: string
-  number: number
-  title: string
-  page_route: string
-  goal: string
-  short_explanation: string
-  task: string
-  check_type: 'platform_state' | 'knowledge_check'
-  check_details: LessonCheckDetails
-  why_it_matters: string
-  primary_source: string
-  needs_instructor_review: boolean
-}
 
 export interface PitfallStory {
   id: string

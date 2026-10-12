@@ -996,7 +996,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 </div>
 
                 {/* Big Action Box */}
-                <div className="p-4 rounded-xl bg-gradient-to-b from-[#1C1534] to-[#140E2A] border border-[#00D4FF]/30 space-y-3 text-center">
+                <div className="p-4 rounded-xl bg-linear-to-b from-[#1C1534] to-[#140E2A] border border-[#00D4FF]/30 space-y-3 text-center">
                   <p className="text-xs text-[#9E93B8]">
                     Ready to begin? Click below to open your coding environment and start solving.
                   </p>
@@ -1174,7 +1174,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
   if (viewMode === 'student' && isLoadingExams) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[500px] text-center space-y-4">
+      <div className="flex flex-col items-center justify-center min-h-125 text-center space-y-4">
         <Cpu className="w-10 h-10 text-[#00D4FF] animate-spin" />
         <div className="text-sm font-medium text-[#9E93B8]">Loading University Practical Lab Exam Environment...</div>
       </div>
@@ -1406,7 +1406,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1 flex items-center gap-1.5">
+                  <label className="text-[11px] font-semibold text-[#9E93B8] mb-1 flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-[#00D4FF]" />
                     <span>Start Date & Time (Optional)</span>
                   </label>
@@ -1419,7 +1419,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1 flex items-center gap-1.5">
+                  <label className="text-[11px] font-semibold text-[#9E93B8] mb-1 flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5 text-[#F59E0B]" />
                     <span>End Date & Time / Deadline (Optional)</span>
                   </label>
@@ -1983,7 +1983,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 </div>
 
                 {/* Monaco Python Editor Component (B4 Protected Regions) */}
-                <div className="h-[680px] xl:h-[760px] 2xl:h-[820px] relative">
+                <div className="h-170 xl:h-190 2xl:h-205 relative">
                   <MonacoCodeStudioEditor
                     code={code}
                     onChange={(newVal) => setCode(newVal)}
@@ -2094,7 +2094,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     </div>
                     <div className="flex justify-between truncate">
                       <span>Code SHA-256:</span>
-                      <strong className="text-[#00D4FF] truncate max-w-[200px]" title={submissionReceipt.code_sha256}>
+                      <strong className="text-[#00D4FF] truncate max-w-50" title={submissionReceipt.code_sha256}>
                         {submissionReceipt.code_sha256?.slice(0, 16)}...
                       </strong>
                     </div>
