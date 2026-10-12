@@ -801,9 +801,24 @@ def run_recommendation_benchmark(
             )
             df_train = df.iloc[train_indices].copy()
             holdout_rows = len(holdout_indices)
-        except Exception:
+        except Exception as _holdout_exc:
+            # Stratification failed (e.g. a class has too few samples to place
+            # at least one member in both train and test partitions).  Fall back
+            # to using all rows as training data and surface a clear warning so
+            # the user knows the holdout split was not applied.
             df_train = df.copy()
             holdout_rows = 0
+            _exc_summary = type(_holdout_exc).__name__ + ": " + str(_holdout_exc).split("\n")[0][:120]
+            warnings.append(
+                f"Stratified holdout split failed ({_exc_summary}). "
+                "Cross-validation was run on the full dataset instead. "
+                "To resolve this, ensure every class has at least "
+                f"{math.ceil(1.0 / test_size) + 1} samples, or reduce train_test_split."
+            )
+            logger.info(
+                "Holdout split fallback on target '%s': %s",
+                config.target_column, _exc_summary,
+            )
     else:
         df_train = df.copy()
         holdout_rows = 0
@@ -900,7 +915,17 @@ def run_recommendation_benchmark(
         stage_callback("SCREENING", 20.0)
 
     screening_results: List[CandidateBenchmarkResult] = []
-    screening_splitter = StratifiedKFold(n_splits=3, shuffle=True, random_state=config.random_seed) if task_type == "classification" else KFold(n_splits=3, shuffle=True, random_state=config.random_seed)
+    # Screening uses at most 3 folds for speed, but must not exceed the
+    # effective_folds cap derived from the smallest class count.  Using a
+    # hardcoded 3 while effective_folds < 3 causes StratifiedKFold to raise
+    # a ValueError ("Cannot have number of splits n_splits=3 greater than the
+    # number of samples"), which silently fails every candidate.
+    screening_n_splits = min(3, effective_folds)
+    screening_splitter = (
+        StratifiedKFold(n_splits=screening_n_splits, shuffle=True, random_state=config.random_seed)
+        if task_type == "classification"
+        else KFold(n_splits=screening_n_splits, shuffle=True, random_state=config.random_seed)
+    )
 
     for defn in screening_models:
         elapsed_so_far = time.perf_counter() - benchmark_start_time
@@ -1045,6 +1070,67 @@ def run_recommendation_benchmark(
     }
 
     if not completed_candidates:
+        # Diagnose the actual failure cause from individual candidate errors so
+        # the user gets a concrete, actionable message instead of a generic one.
+        failed_candidates = [c for c in all_candidates if c.status == "failed" and c.error_message]
+        _cv_split_failure = any(
+            "StratifiedKFold" in (c.error_message or "")
+            or "n_splits" in (c.error_message or "")
+            or "Cannot have number of splits" in (c.error_message or "")
+            or "The least populated class" in (c.error_message or "")
+            for c in failed_candidates
+        )
+        _timeout_failure = all(
+            "pruned" in (c.error_message or "") or "timeout" in (c.error_message or "").lower()
+            for c in failed_candidates
+        ) if failed_candidates else False
+        _import_failure = any(
+            "ModuleNotFoundError" in (c.error_message or "")
+            or "ImportError" in (c.error_message or "")
+            for c in failed_candidates
+        )
+
+        if _cv_split_failure:
+            failure_limitation = (
+                f"All algorithms failed during cross-validation because at least one class in '{config.target_column}' "
+                f"has too few samples to be split across {effective_folds} folds. "
+                f"Each class must have at least {effective_folds} samples. "
+                "To fix this: collect more data for rare classes, merge small classes, "
+                "or reduce cv_folds to 2."
+            )
+            failure_codes = ["all_candidates_failed", "class_imbalance_cv_split"]
+        elif _timeout_failure:
+            failure_limitation = (
+                "All algorithms exceeded the per-fold time budget and were pruned before completing. "
+                f"Increase max_training_seconds (currently {config.constraints.max_training_seconds}s) "
+                "or reduce the dataset size."
+            )
+            failure_codes = ["all_candidates_failed", "timeout_budget_exceeded"]
+        elif _import_failure:
+            _missing = next(
+                (c.error_message for c in failed_candidates if "ModuleNotFoundError" in (c.error_message or "")),
+                None,
+            )
+            failure_limitation = (
+                f"A required library is not installed in the worker environment: {_missing or 'unknown package'}. "
+                "Contact your platform administrator."
+            )
+            failure_codes = ["all_candidates_failed", "missing_dependency"]
+        else:
+            # Surface the first unique error seen across failed candidates
+            seen_errors = []
+            for c in failed_candidates[:3]:
+                msg = (c.error_message or "").split(":")[0][:80]
+                if msg and msg not in seen_errors:
+                    seen_errors.append(msg)
+            error_summary = "; ".join(seen_errors) if seen_errors else "unknown error"
+            failure_limitation = (
+                f"All {len(failed_candidates)} benchmark algorithms failed during evaluation: {error_summary}. "
+                "Check that the target column contains valid numeric or categorical values and that "
+                "feature columns do not contain exclusively missing data."
+            )
+            failure_codes = ["all_candidates_failed"]
+
         return RecommendationResult(
             status="failed",
             task_type=task_type,
@@ -1057,13 +1143,14 @@ def run_recommendation_benchmark(
             train_sample_rows=train_rows,
             holdout_rows=holdout_rows,
             confidence="insufficient_data",
-            reason_codes=["all_candidates_failed"],
-            limitations=["All benchmark candidate models failed execution."],
+            reason_codes=failure_codes,
+            limitations=[failure_limitation],
             candidates=all_candidates,
             warnings=warnings,
             exclusions=exclusion_dicts,
             reproducibility=reproducibility,
         )
+
 
     # ── Enrich candidates with UI display fields ───────────────────────────
     category_interpretability = {

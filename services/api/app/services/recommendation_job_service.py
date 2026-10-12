@@ -181,10 +181,10 @@ class RecommendationJobService:
                 detail="cv_folds must be between 2 and 10.",
             )
 
-        if request.train_test_split < 0.5 or request.train_test_split > 1.0:
+        if request.train_test_split < 0.5 or request.train_test_split >= 1.0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="train_test_split must be between 0.5 and 1.0.",
+                detail="train_test_split must be in the range [0.5, 1.0) — the value represents the training fraction and must leave a non-zero test partition.",
             )
 
         # ── 3. Build canonical cache key ──────────────────────────────────────
@@ -193,10 +193,27 @@ class RecommendationJobService:
             "prefer_interpretable": request.prefer_interpretable,
         }
         dataset_content_hash = getattr(dataset, "content_hash", None) or dataset_id
+
+        # Derive a task_type hint from the explicitly requested metric so that
+        # a classification run and a regression run on the same dataset/target
+        # produce distinct cache keys.  When no metric is provided we use "auto"
+        # (the engine will detect it) and include it in the key so that both
+        # auto-detected classification and auto-detected regression results remain
+        # cache-safe — two "auto" requests on the same dataset are identical runs.
+        _REGRESSION_METRICS = {"rmse", "mae", "r2", "mse"}
+        _CLASSIFICATION_METRICS = {"roc_auc", "pr_auc", "f1", "macro_f1", "accuracy", "balanced_accuracy"}
+        if metric_clean in _REGRESSION_METRICS:
+            cache_task_type = "regression"
+        elif metric_clean in _CLASSIFICATION_METRICS:
+            cache_task_type = "classification"
+        else:
+            cache_task_type = "auto"
+
         cache_key = compute_recommendation_cache_key(
             dataset_content_hash=dataset_content_hash,
             target_column=target_col,
             feature_columns=clean_features,
+            task_type=cache_task_type,
             metric=metric_clean,
             cv_folds=request.cv_folds,
             random_seed=request.random_seed,
@@ -204,6 +221,7 @@ class RecommendationJobService:
             max_training_seconds=request.max_training_seconds,
             prefer_interpretable=request.prefer_interpretable,
         )
+
 
         req_config_dict: Dict[str, Any] = {
             "target_column": target_col,

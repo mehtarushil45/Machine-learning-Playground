@@ -29,7 +29,7 @@ class RecommendationJobCreateRequest(BaseModel):
     metric: Optional[str] = Field(None, description="Optimization metric override (e.g. roc_auc, macro_f1, rmse, mae)")
     cv_folds: int = Field(default=5, ge=2, le=10, description="Cross-validation fold count")
     random_seed: int = Field(default=42, description="Random state seed for reproducible partitions")
-    train_test_split: float = Field(default=0.8, ge=0.5, le=1.0, description="Train / holdout partition ratio")
+    train_test_split: float = Field(default=0.8, ge=0.5, lt=1.0, description="Train / holdout partition ratio (must be < 1.0 to preserve a test partition)")
     max_training_seconds: Optional[int] = Field(default=120, ge=10, le=600, description="Cooperative time budget limit in seconds")
     prefer_interpretable: bool = Field(default=False, description="Whether to favor linear/tree models during practical equivalence ties")
 
