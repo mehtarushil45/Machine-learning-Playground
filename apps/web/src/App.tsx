@@ -24,10 +24,10 @@ import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { DeploymentsHub } from './features/deployments/DeploymentsHub';
 import { ClassroomHub } from './features/classrooms/ClassroomHub';
 import { LoginPage } from './features/auth';
+import { UserGuidePage } from './features/guide/UserGuidePage';
 import {
   LearningProvider,
   LearningModeToggle,
-  LessonGuideDrawer,
   type LearningProjectState,
 } from './features/learning';
 
@@ -37,7 +37,8 @@ export type PlatformTab =
   | 'training-results'
   | 'deployments'
   | 'classroom'
-  | 'login';
+  | 'login'
+  | 'guide';
 
 export interface ToastMessage {
   id: string;
@@ -66,7 +67,6 @@ function AppContent() {
   const project = useProject();
   const { setLifecycleStage, isProjectInitialized, dataset, activeExperimentFile, resetProject } = project;
   const { user, isAuthenticated, logout } = useAuthContext();
-  const [isLessonDrawerOpen, setIsLessonDrawerOpen] = useState(false);
 
   // Map ProjectContext to reactive LearningProjectState for Heads-Up Rules (Part B)
   const learningState: LearningProjectState = useMemo(() => ({
@@ -89,10 +89,14 @@ function AppContent() {
       if (hash === 'login' || window.location.pathname.includes('login')) {
         return 'login';
       }
+      if (hash === 'guide' || hash === 'user-guide' || window.location.pathname.includes('guide')) {
+        return 'guide';
+      }
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam === 'classroom') return 'classroom';
       if (tabParam === 'login') return 'login';
+      if (tabParam === 'guide') return 'guide';
     }
     return 'workspace';
   });
@@ -110,6 +114,8 @@ function AppContent() {
         setActiveTab('classroom');
       } else if (hash === 'login') {
         setActiveTab('login');
+      } else if (hash === 'guide' || hash === 'user-guide') {
+        setActiveTab('guide');
       } else if (hash === 'workspace' || hash === 'code-studio' || hash === 'training-results' || hash === 'deployments') {
         setActiveTab(hash as PlatformTab);
       }
@@ -145,6 +151,7 @@ function AppContent() {
     else if (tab === '/deployments' || tab === 'deployments') resolvedTab = 'deployments';
     else if (tab === '/classroom' || tab === 'classroom') resolvedTab = 'classroom';
     else if (tab === '/login' || tab === 'login') resolvedTab = 'login';
+    else if (tab === '/guide' || tab === 'guide' || tab === 'user-guide') resolvedTab = 'guide';
     else if (tab.startsWith('/')) resolvedTab = 'workspace';
     else resolvedTab = tab as PlatformTab;
 
@@ -172,6 +179,38 @@ function AppContent() {
     { id: 'deployments',      label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />    },
     { id: 'classroom',        label: 'Classroom (Lab Exam)',      icon: <GraduationCap className="w-5 h-5" /> },
   ];
+
+  if (activeTab === 'guide') {
+    return (
+      <LearningProvider projectState={learningState}>
+        <UserGuidePage onNavigate={(tab) => handleNavigate(tab)} />
+        {/* Global Toast notifications container */}
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            zIndex: 99999,
+            maxWidth: 360,
+            pointerEvents: 'none',
+          }}
+        >
+          {toasts.map((toast) => (
+            <Toast
+              key={toast.id}
+              variant={toast.type === 'error' ? 'error' : toast.type === 'success' ? 'success' : 'info'}
+              title={toast.title}
+              description={toast.description}
+              onClose={() => removeToast(toast.id)}
+            />
+          ))}
+        </div>
+      </LearningProvider>
+    );
+  }
 
   if (activeTab === 'login') {
     return (
@@ -546,12 +585,16 @@ function AppContent() {
             {/* Global Learning Mode Toggle (Part E1) */}
             <LearningModeToggle />
 
-            {/* Guided Lessons Drawer Button (Part C) */}
+            {/* User Guide Button (Opens comprehensive guide in new window) */}
             <button
               type="button"
-              data-testid="open-lesson-guide-btn"
-              onClick={() => setIsLessonDrawerOpen(true)}
-              title="Open Guided ML Curriculum"
+              data-testid="open-user-guide-btn"
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.open(`${window.location.origin}${window.location.pathname}#guide`, '_blank');
+                }
+              }}
+              title="Open Student User Guide (opens in new window)"
               style={{
                 height: 32,
                 padding: '0 10px',
@@ -574,8 +617,8 @@ function AppContent() {
                 e.currentTarget.style.borderColor = BB.border;
               }}
             >
-              <span>🎓</span>
-              <span>Lessons</span>
+              <span>📖</span>
+              <span>User Guide ↗</span>
             </button>
 
             {/* A4: AI Copilot on top of right side — Symbol only */}
@@ -818,13 +861,6 @@ function AppContent() {
           />
         ))}
       </div>
-
-      {/* Guided ML Curriculum Drawer (Part C) */}
-      <LessonGuideDrawer
-        isOpen={isLessonDrawerOpen}
-        onClose={() => setIsLessonDrawerOpen(false)}
-        onNavigate={(route) => handleNavigate(route)}
-      />
     </div>
   </LearningProvider>
   );

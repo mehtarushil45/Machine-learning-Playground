@@ -22,7 +22,6 @@ import {
   Clock,
   BookOpen,
   FileText,
-  HelpCircle,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { parseCsvFile } from '../../services/csvService';
@@ -187,29 +186,6 @@ const READY_MADE_EXAMPLES: ReadyMadeExample[] = [
     task: 'Regression',
     icon: '🏥',
     csvContent: INSURANCE_SAMPLE_CSV,
-  },
-];
-
-const USER_GUIDE_STEPS = [
-  {
-    title: '1. Ingest Dataset',
-    description: 'Upload a tabular CSV or choose a ready example to get started.',
-  },
-  {
-    title: '2. Define Target & Features',
-    description: 'Designate your prediction label; feature types are auto-detected.',
-  },
-  {
-    title: '3. Automated Data Profiling',
-    description: 'DuckDB streaming verifies missing values, cardinality, and leakage.',
-  },
-  {
-    title: '4. Pipeline Code Studio',
-    description: 'Build & run scikit-learn / XGBoost training code with cross-validation.',
-  },
-  {
-    title: '5. Benchmark & Production Deploy',
-    description: 'Review confusion matrices, compare runs, and deploy REST endpoints.',
   },
 ];
 
@@ -1036,7 +1012,7 @@ export function ProjectGatekeeper() {
             </div>
           </div>
 
-          {/* ── COLUMN 3: User Guide (Open layout, 5 concise steps, line by line) ── */}
+          {/* ── COLUMN 3: User Guide (Direct link to comprehensive student guide in new window) ── */}
           <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
             <div
               style={{
@@ -1049,50 +1025,47 @@ export function ProjectGatekeeper() {
                 flexShrink: 0,
               }}
             >
-              <HelpCircle style={{ width: 15, height: 15, color: BB.primaryLight }} />
+              <BookOpen style={{ width: 15, height: 15, color: BB.primaryLight }} />
               <h2 style={{ fontSize: 13, fontWeight: 700, color: BB.text, margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 User Guide
               </h2>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              {USER_GUIDE_STEPS.map((step, idx) => (
-                <div
-                  key={idx}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
+              <p style={{ fontSize: 12, color: BB.textSecondary, margin: 0, lineHeight: 1.45 }}>
+                New to machine learning? Open our comprehensive student guide to learn how each page works from data profiling to code writing, training, and production deployment.
+              </p>
+
+              <div>
+                <button
+                  type="button"
+                  data-testid="gatekeeper-open-guide-btn"
+                  onClick={() => window.open(`${window.location.origin}${window.location.pathname}#guide`, '_blank')}
                   style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 8,
-                    padding: '4px 6px',
-                    borderRadius: 4,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'transparent',
+                    border: 'none',
+                    padding: '2px 0',
+                    color: '#A78BFA',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 150ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = '#C4B5FD';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = '#A78BFA';
                   }}
                 >
-                  <div
-                    style={{
-                      width: 17,
-                      height: 17,
-                      borderRadius: '50%',
-                      background: 'rgba(138, 121, 202, 0.18)',
-                      color: BB.primaryLight,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 9.5,
-                      fontWeight: 800,
-                      flexShrink: 0,
-                      marginTop: 1,
-                    }}
-                  >
-                    {idx + 1}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: BB.text }}>{step.title}</div>
-                    <div style={{ fontSize: 11, color: BB.muted, lineHeight: 1.3 }}>
-                      {step.description}
-                    </div>
-                  </div>
-                </div>
-              ))}
+                  <BookOpen style={{ width: 14, height: 14, color: BB.gold }} />
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: 3 }}>Open User Guide</span>
+                  <span style={{ fontSize: 11, opacity: 0.85 }}>↗</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1100,45 +1073,45 @@ export function ProjectGatekeeper() {
 
       {/* ── STEP 2 MODAL: Name Experiment File ──────────────────────── */}
       {pendingDataset && (
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.78)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: 20,
-        }}
-      >
         <div
           style={{
-            width: '100%',
-            maxWidth: 440,
-            background: 'rgba(18, 14, 34, 0.96)',
-            backdropFilter: 'blur(24px)',
-            border: '1px solid ' + BB.borderLight,
-            borderRadius: 14,
-            padding: '24px 24px',
-            boxShadow: '0 24px 80px rgba(0, 0, 0, 0.8)',
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.78)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 20,
           }}
         >
-          <Step2CreateFile
-            dataset={pendingDataset}
-            onBack={() => setPendingDataset(null)}
-            onConfirm={(name) => {
-              initializeProject(pendingDataset, name);
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 440,
+              background: 'rgba(18, 14, 34, 0.96)',
+              backdropFilter: 'blur(24px)',
+              border: '1px solid ' + BB.borderLight,
+              borderRadius: 14,
+              padding: '24px 24px',
+              boxShadow: '0 24px 80px rgba(0, 0, 0, 0.8)',
             }}
-          />
+          >
+            <Step2CreateFile
+              dataset={pendingDataset}
+              onBack={() => setPendingDataset(null)}
+              onConfirm={(name) => {
+                initializeProject(pendingDataset, name);
+              }}
+            />
+          </div>
         </div>
-      </div>
-    )
-  }
+      )
+      }
     </div >
   );
 }

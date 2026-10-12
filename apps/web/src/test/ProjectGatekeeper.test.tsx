@@ -88,14 +88,24 @@ describe('ProjectGatekeeper Component', () => {
     expect(screen.getByRole('button', { name: /Create File & Enter Studio/i })).toBeInTheDocument();
   });
 
-  it('renders user guide steps line by line', () => {
+  it('renders user guide launcher and opens #guide in a new window', () => {
+    const originalOpen = window.open;
+    const mockOpen = vi.fn();
+    window.open = mockOpen;
+
     renderGatekeeper();
 
-    expect(screen.getByText(/1\. Ingest Dataset/i)).toBeInTheDocument();
-    expect(screen.getByText(/2\. Define Target & Features/i)).toBeInTheDocument();
-    expect(screen.getByText(/3\. Automated Data Profiling/i)).toBeInTheDocument();
-    expect(screen.getByText(/4\. Pipeline Code Studio/i)).toBeInTheDocument();
-    expect(screen.getByText(/5\. Benchmark & Production Deploy/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /User Guide/i })).toBeInTheDocument();
+    expect(screen.getByText(/New to machine learning\? Open our comprehensive student guide/i)).toBeInTheDocument();
+
+    const guideBtn = screen.getByTestId('gatekeeper-open-guide-btn');
+    expect(guideBtn).toBeInTheDocument();
+
+    fireEvent.click(guideBtn);
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+    expect(mockOpen).toHaveBeenCalledWith(expect.stringContaining('#guide'), '_blank');
+
+    window.open = originalOpen;
   });
 
   it('strictly limits previous uploads to a maximum of 5 items and prevents vertical scroll', () => {
