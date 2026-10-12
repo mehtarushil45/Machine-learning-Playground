@@ -70,33 +70,51 @@ def create_access_token(
     }
     if workspace_id is not None:
         payload["wid"] = str(workspace_id)
-    return jwt.encode(payload, settings.secret_key.get_secret_value(), algorithm=_ALGORITHM)
+    return jwt.encode(
+        payload,
+        settings.secret_key.get_secret_value(),
+        algorithm=_ALGORITHM,
+        headers={"kid": settings.jwt_key_id},
+    )
 
 
 def create_refresh_token(
     user_id: uuid.UUID,
     organisation_id: uuid.UUID,
     *,
+    family_id: uuid.UUID | str | None = None,
     token_version: int = 0,
+    expires_delta: timedelta | None = None,
 ) -> str:
-    """Return a signed JWT refresh token.
+    """Return a signed JWT refresh token with session family tracking (C2, C3, C8).
 
     Args:
         user_id: The user's UUID.
         organisation_id: The user's organisation UUID.
+        family_id: Session family ID. Shared across rotated tokens in a single session family.
         token_version: Per-user revocation version embedded as ``ver`` claim.
+        expires_delta: Custom expiry override for Remember Me vs Session cookie.
     """
-    expire = _utcnow() + timedelta(days=settings.refresh_token_expire_days)
+    expire = _utcnow() + (
+        expires_delta or timedelta(days=settings.refresh_token_expire_days)
+    )
+    fam_str = str(family_id) if family_id else _new_jti()
     payload: dict = {
         "sub": str(user_id),
         "org": str(organisation_id),
         "type": "refresh",
+        "fam": fam_str,            # Session family ID for reuse detection
         "jti": _new_jti(),
         "ver": token_version,
         "exp": expire,
         "iat": _utcnow(),
     }
-    return jwt.encode(payload, settings.secret_key.get_secret_value(), algorithm=_ALGORITHM)
+    return jwt.encode(
+        payload,
+        settings.secret_key.get_secret_value(),
+        algorithm=_ALGORITHM,
+        headers={"kid": settings.jwt_key_id},
+    )
 
 
 def decode_token(token: str) -> dict:

@@ -123,8 +123,31 @@ class Settings(BaseSettings):
     # Stored as SecretStr so the value is masked in repr() / logs.
     # Access the raw string via:  settings.secret_key.get_secret_value()
     secret_key: SecretStr = SecretStr("")  # REQUIRED: set SECRET_KEY env var (min 32 chars)
+    jwt_key_id: str = "ml-auth-v1"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    remember_me_expire_days: int = 30
+    session_cookie_expire_seconds: int = 86400  # 1 day for non-remembered browser sessions
+
+    # ── Password Policy Settings ──────────────────────────────────────────────
+    password_min_length: int = 10
+    password_max_length: int = 128
+
+    # ── Mail / SMTP Settings (Part E3) ────────────────────────────────────────
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    smtp_user: str = ""
+    smtp_password: SecretStr = SecretStr("")
+    smtp_from_email: str = "noreply@mlplayground.internal"
+    smtp_tls: bool = False
+
+    # ── Social OAuth Providers (Part F) ───────────────────────────────────────
+    google_client_id: str = ""
+    google_client_secret: SecretStr = SecretStr("")
+    microsoft_client_id: str = ""
+    microsoft_client_secret: SecretStr = SecretStr("")
+    microsoft_tenant_id: str = "common"
+    oauth_redirect_base_url: str = "http://localhost:5173"
 
     # ── Redis ─────────────────────────────────────────────────────────────────
     redis_url: str = "redis://redis:6379/0"

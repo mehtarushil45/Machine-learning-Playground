@@ -32,8 +32,10 @@ accepted briefly during Redis downtime.  Use ``BLACKLIST_STRICT_MODE=true``
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -47,6 +49,7 @@ logger = logging.getLogger(__name__)
 # Redis key prefixes
 _BLACKLIST_PREFIX = "blacklist:"
 _USER_VERSION_PREFIX = "token_ver:"   # for per-user version invalidation
+_SESSION_FAMILY_PREFIX = "auth:fam:"  # for session family tracking & reuse detection
 
 # Minimum TTL to bother storing (tokens expiring in < 5 s aren't worth keeping)
 _MIN_TTL_SECONDS = 5
@@ -205,3 +208,143 @@ async def get_blacklist_stats() -> dict:
             "redis_connected": False,
             "error": str(exc),
         }
+
+
+# ---------------------------------------------------------------------------
+# Session Family Tracking & Reuse Detection (Parts C2, C4, C6)
+# ---------------------------------------------------------------------------
+
+async def register_session_family(
+    family_id: str,
+    user_id: str,
+    jti: str,
+    raw_access: str,
+    raw_refresh: str,
+    ttl_seconds: int,
+) -> bool:
+    """Store initial refresh token session family metadata in Redis."""
+    key = f"{_SESSION_FAMILY_PREFIX}{family_id}"
+    data = {
+        "user_id": user_id,
+        "current_jti": jti,
+        "prev_jti": None,
+        "rotated_at": time.time(),
+        "cached_access": raw_access,
+        "cached_refresh": raw_refresh,
+    }
+    try:
+        redis = await get_redis()
+        await redis.set(key, json.dumps(data), ex=ttl_seconds)
+        return True
+    except Exception as exc:
+        logger.error("Failed to register session family %s: %s", family_id, exc)
+        return False
+
+
+async def rotate_session_family(
+    family_id: str,
+    user_id: str,
+    presented_jti: str,
+    raw_old_refresh: str,
+    new_jti: str,
+    new_access_token: str,
+    new_refresh_token: str,
+    ttl_seconds: int,
+    grace_window_seconds: int = 30,
+) -> dict:
+    """Rotate refresh token with session family tracking and concurrent grace window.
+
+    Returns dict with:
+      - {"action": "rotated", "access_token": ..., "refresh_token": ...} on normal rotation
+      - {"action": "grace", "access_token": ..., "refresh_token": ...} on concurrent request within 30s
+      - {"action": "reuse_detected"} on compromised replayed token (all sessions revoked)
+    """
+    key = f"{_SESSION_FAMILY_PREFIX}{family_id}"
+    lock_key = f"lock:fam:{family_id}"
+    try:
+        redis = await get_redis()
+        async with redis.lock(lock_key, timeout=10, blocking_timeout=5):
+            raw_data = await redis.get(key)
+            if not raw_data:
+                # If no family record exists (e.g., redis restarted or expired), initialize fresh
+                await register_session_family(
+                    family_id=family_id,
+                    user_id=user_id,
+                    jti=new_jti,
+                    raw_access=new_access_token,
+                    raw_refresh=new_refresh_token,
+                    ttl_seconds=ttl_seconds,
+                )
+                await blacklist_token(raw_old_refresh)
+                return {
+                    "action": "rotated",
+                    "access_token": new_access_token,
+                    "refresh_token": new_refresh_token,
+                }
+
+            data = json.loads(raw_data)
+            current_jti = data.get("current_jti")
+            prev_jti = data.get("prev_jti")
+            rotated_at = data.get("rotated_at", 0)
+
+            # ── Case 1: Active token presented — standard rotation ──────────────
+            if presented_jti == current_jti:
+                await blacklist_token(raw_old_refresh)
+                data["prev_jti"] = current_jti
+                data["current_jti"] = new_jti
+                data["rotated_at"] = time.time()
+                data["cached_access"] = new_access_token
+                data["cached_refresh"] = new_refresh_token
+                await redis.set(key, json.dumps(data), ex=ttl_seconds)
+                return {
+                    "action": "rotated",
+                    "access_token": new_access_token,
+                    "refresh_token": new_refresh_token,
+                }
+
+            # ── Case 2: Just-rotated token presented within grace window ────────
+            now = time.time()
+            if presented_jti == prev_jti and (now - rotated_at) <= grace_window_seconds:
+                logger.info(
+                    "Concurrent refresh for family %s within grace window (%.1fs). Returning cached tokens.",
+                    family_id,
+                    now - rotated_at,
+                )
+                return {
+                    "action": "grace",
+                    "access_token": data.get("cached_access", new_access_token),
+                    "refresh_token": data.get("cached_refresh", new_refresh_token),
+                }
+
+            # ── Case 3: Token replay detected outside grace window — REUSE! ─────
+            logger.critical(
+                "SECURITY ALERT: Refresh token reuse detected for family %s, user %s! Revoking all sessions.",
+                family_id,
+                user_id,
+            )
+            await redis.delete(key)
+            await blacklist_all_user_tokens(user_id)
+            return {"action": "reuse_detected"}
+
+    except Exception as exc:
+        logger.error("Session family rotation error: %s", exc)
+        # Fail-safe: still blacklist the old token and return the newly generated ones
+        await blacklist_token(raw_old_refresh)
+        return {
+            "action": "rotated",
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+        }
+
+
+async def revoke_session_family(family_id: str) -> bool:
+    """Revoke a session family from Redis on logout."""
+    key = f"{_SESSION_FAMILY_PREFIX}{family_id}"
+    try:
+        redis = await get_redis()
+        await redis.delete(key)
+        return True
+    except Exception as exc:
+        logger.error("Failed to revoke session family %s: %s", family_id, exc)
+        return False
+

@@ -2687,20 +2687,21 @@ async def grant_time_extension(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
 
     old_ext = member.time_extension_minutes or 0
-    member.time_extension_minutes = (member.time_extension_minutes or 0) + payload.extension_minutes
+    added_minutes = payload.extension_minutes or 0
+    member.time_extension_minutes = old_ext + added_minutes
 
     audit = ClassroomAuditLog(
         classroom_id=classroom_id,
         actor_id=current_user.id,
         target_user_id=user_id,
         action="grant_time_extension",
-        details={"old_extension": old_ext, "added_minutes": payload.extension_minutes, "new_total": member.time_extension_minutes},
+        details={"old_extension": old_ext, "added_minutes": added_minutes, "new_total": member.time_extension_minutes},
     )
     db.add(audit)
     await db.commit()
 
     return {
-        "message": f"Granted {payload.extension_minutes} minute extension to student.",
+        "message": f"Granted {added_minutes} minute extension to student.",
         "time_extension_minutes": member.time_extension_minutes,
     }
 

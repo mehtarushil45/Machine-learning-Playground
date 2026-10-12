@@ -54,6 +54,17 @@ export class ApiTimeoutError extends ApiError {
   }
 }
 
+let _inMemoryAccessToken: string | null = null
+
+
+export function getInMemoryAccessToken(): string | null {
+  return _inMemoryAccessToken
+}
+
+export function setInMemoryAccessToken(token: string | null): void {
+  _inMemoryAccessToken = token
+}
+
 export class ApiClient {
   private baseUrl: string
   private defaultTimeoutMs: number
@@ -75,10 +86,11 @@ export class ApiClient {
     this.defaultTimeoutMs = config.timeoutMs ?? 15000
     this.getAuthToken =
       config.getAuthToken ||
-      (() => (typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null))
+      (() => _inMemoryAccessToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null))
     this.setAuthToken =
       config.setAuthToken ||
       ((token) => {
+        _inMemoryAccessToken = token
         if (typeof localStorage !== 'undefined') {
           if (token) localStorage.setItem('access_token', token)
           else localStorage.removeItem('access_token')
@@ -127,6 +139,8 @@ export class ApiClient {
 
     const headers: Record<string, string> = {
       ...(fetchInit.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+      'X-ML-Auth': '1',
+      'X-Requested-With': 'XMLHttpRequest',
       ...(customHeaders as Record<string, string>),
     }
 
@@ -230,6 +244,22 @@ export class ApiClient {
     endpoint: string,
     options: RequestOptions,
   ): Promise<T> {
+    // Cross-tab lock synchronization via Web Locks API (Part C4)
+    if (typeof navigator !== 'undefined' && 'locks' in navigator && (navigator as any).locks?.request) {
+      return await (navigator as any).locks.request(
+        'ml_platform_auth_refresh_lock',
+        async () => {
+          return await this.executeRefreshCycle<T>(endpoint, options)
+        }
+      )
+    }
+    return await this.executeRefreshCycle<T>(endpoint, options)
+  }
+
+  private async executeRefreshCycle<T>(
+    endpoint: string,
+    options: RequestOptions,
+  ): Promise<T> {
     if (this.isRefreshing) {
       return new Promise<T>((resolve, reject) => {
         this.refreshSubscribers.push((newToken) => {
@@ -246,16 +276,16 @@ export class ApiClient {
 
     try {
       const refreshUrl = this.buildUrl(this.refreshTokenEndpoint)
-      const storedRefreshToken =
-        typeof localStorage !== 'undefined' ? localStorage.getItem('refresh_token') : null
 
+      // HttpOnly cookie sent automatically; no tokens in body or localStorage
       const res = await fetch(refreshUrl, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: storedRefreshToken
-          ? JSON.stringify({ refresh_token: storedRefreshToken })
-          : undefined,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-ML-Auth': '1',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
       })
 
       if (!res.ok) {
@@ -264,17 +294,26 @@ export class ApiClient {
 
       const data = await res.json().catch(() => ({}))
       const newToken = data.access_token || null
-      if (newToken && this.setAuthToken) {
+      if (this.setAuthToken) {
         this.setAuthToken(newToken)
-      }
-      if (data.refresh_token && typeof localStorage !== 'undefined') {
-        localStorage.setItem('refresh_token', data.refresh_token)
       }
 
       this.notifyRefreshSubscribers(newToken)
       return await this.request<T>(endpoint, { ...options, skipRefresh: true })
     } catch (err) {
       this.notifyRefreshSubscribers(null)
+      // Part C5: Notify app to preserve unsaved drafts before prompting re-login
+      try {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('ml_auth_session_expired', {
+              detail: { timestamp: Date.now() },
+            })
+          )
+        }
+      } catch {
+        // ignore
+      }
       const authErr =
         err instanceof AuthExpiredError ? err : new AuthExpiredError('Token refresh failed.')
       this.onAuthError?.(authErr)

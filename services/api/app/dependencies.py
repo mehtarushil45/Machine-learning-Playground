@@ -135,13 +135,20 @@ async def get_current_user(
 async def get_current_active_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
-    """Like ``get_current_user`` but also checks ``is_active``."""
+    """Like ``get_current_user`` but also checks ``is_active`` and ``is_verified`` (Part D3)."""
     if not current_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Inactive user",
         )
+    if not getattr(current_user, "is_verified", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email is not verified. Please verify your email before accessing platform resources.",
+            headers={"X-Error-Code": "EMAIL_NOT_VERIFIED"},
+        )
     return current_user
+
 
 
 CurrentUser = Annotated[User, Depends(get_current_active_user)]

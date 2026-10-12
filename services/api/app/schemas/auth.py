@@ -32,24 +32,17 @@ class UserRegisterRequest(BaseModel):
     """Payload for POST /auth/register."""
 
     email: EmailStr = Field(..., description="User email address")
-    password: str = Field(..., min_length=8, description="User password (min 8 characters)")
+    password: str = Field(..., description="User password")
     full_name: Optional[str] = Field(None, description="Full name of user")
     organisation_id: Optional[UUID] = Field(None, description="Target Organisation ID")
     organisation_name: Optional[str] = Field(None, description="Organisation display name")
+    role: Optional[str] = Field(None, description="Ignored by server; new accounts always get default member role (Part D4)")
 
 
 class UserRegisterResponse(BaseModel):
-    """Response returned upon user registration."""
+    """Response returned upon user registration (Part D2)."""
 
-    user_id: UUID
     email: str
-    full_name: Optional[str]
-    organisation_id: UUID
-    role: str
-    is_verified: bool
-    verification_token: Optional[str] = Field(
-        None, description="Verification token for email confirmation flow"
-    )
     message: str
 
 
@@ -57,6 +50,46 @@ class VerifyEmailRequest(BaseModel):
     """Body or query parameter for email verification."""
 
     token: str = Field(..., description="Email verification token")
+
+
+class ResendVerificationRequest(BaseModel):
+    """Payload for POST /auth/resend-verification."""
+
+    email: EmailStr = Field(..., description="User email address to resend verification link")
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Payload for POST /auth/forgot-password (Part E1)."""
+
+    email: EmailStr = Field(..., description="Registered account email address")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Payload for POST /auth/reset-password (Part E2)."""
+
+    token: str = Field(..., description="Single-use password reset token")
+    new_password: str = Field(..., description="New password matching policy requirements")
+
+
+class OAuthProvidersResponse(BaseModel):
+    """Returned by GET /auth/providers (Part F4)."""
+
+    google: bool = Field(..., description="True if Google OAuth is configured and active")
+    microsoft: bool = Field(..., description="True if Microsoft OAuth is configured and active")
+
+
+class OAuthAuthorizeResponse(BaseModel):
+    """Returned by GET /auth/oauth/{provider}/authorize (Part F1)."""
+
+    authorization_url: str = Field(..., description="PKCE-secured OAuth authorization URL")
+    provider: str = Field(..., description="OAuth provider name")
+
+
+class OAuthCallbackRequest(BaseModel):
+    """Payload for POST /auth/oauth/{provider}/callback (Part F1)."""
+
+    code: str = Field(..., description="Authorization code from OAuth provider")
+    state: str = Field(..., description="Cryptographic state parameter to prevent CSRF")
 
 
 class OAuthLoginRequest(BaseModel):
@@ -67,3 +100,4 @@ class OAuthLoginRequest(BaseModel):
     id_token: Optional[str] = Field(None, description="Optional raw ID token or authorization token")
     provider: str = Field("google", description="OAuth provider: google or microsoft")
     avatar_url: Optional[str] = Field(None, description="Profile picture URL from provider")
+

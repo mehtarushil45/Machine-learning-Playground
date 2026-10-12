@@ -94,13 +94,17 @@ def format_error_payload(
 
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    """Exception handler for HTTPExceptions including request_id."""
+    """Exception handler for HTTPExceptions including request_id and custom headers."""
     payload = format_error_payload(exc.detail, exc.status_code, request)
     req_id = payload["request_id"]
     response = JSONResponse(status_code=exc.status_code, content=payload)
+    if exc.headers:
+        for k, v in exc.headers.items():
+            response.headers[k] = v
     if req_id:
         response.headers["X-Request-ID"] = req_id
     return response
+
 
 
 from fastapi.encoders import jsonable_encoder

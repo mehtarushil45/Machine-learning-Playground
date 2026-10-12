@@ -49,11 +49,15 @@ _EXEMPT_PREFIXES: tuple[str, ...] = (
 
 
 def _extract_bearer(request: Request) -> str | None:
-    """Return the raw token string from the Authorization header, or None."""
+    """Return the raw token string from the Authorization header or access_token cookie."""
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         return auth_header[7:].strip() or None
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token.strip() or None
     return None
+
 
 
 class TokenBlacklistMiddleware(BaseHTTPMiddleware):

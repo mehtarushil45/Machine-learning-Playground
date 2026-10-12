@@ -9,6 +9,9 @@ describe('LoginPage Component', () => {
   const mockLogout = vi.fn();
   const mockLogoutAll = vi.fn();
   const mockRefreshUser = vi.fn();
+  const mockForgotPassword = vi.fn().mockResolvedValue('Reset instructions sent');
+  const mockResetPassword = vi.fn().mockResolvedValue('Password reset successfully');
+  const mockResendVerification = vi.fn().mockResolvedValue('Verification sent');
 
   const createAuthContextValue = (overrides?: Partial<AuthContextValue>): AuthContextValue => ({
     user: null,
@@ -16,6 +19,9 @@ describe('LoginPage Component', () => {
     isAuthenticated: false,
     login: mockLogin,
     loginWithOAuth: mockLoginWithOAuth,
+    forgotPassword: mockForgotPassword,
+    resetPassword: mockResetPassword,
+    resendVerification: mockResendVerification,
     logout: mockLogout,
     logoutAll: mockLogoutAll,
     refreshUser: mockRefreshUser,
