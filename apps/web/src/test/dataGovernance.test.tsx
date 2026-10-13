@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { DataGovernanceCard } from '../features/datasets/DataGovernanceCard';
 import type { DatasetProfile } from '../types/dataset';
 
-describe('Milestone 4: Enterprise Dataset Governance & DuckDB Guardrails', () => {
+describe('Dataset Governance & Data Quality Guardrails', () => {
   const mockProfileWithLeakage: DatasetProfile = {
     dataset_id: 'test-ds-123',
     filename: 'churn_records.parquet',

@@ -1,4 +1,4 @@
-"""Explainability, Fairness & What-If REST API Router — Phase 3.
+"""Explainability, Fairness & What-If REST API Router.
 
 Provides REST endpoints for:
   - Global Feature Importance & SHAP: POST /api/v1/explainability/global
@@ -36,7 +36,7 @@ from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/explainability",
-    tags=["Explainability & Fairness (V5B)"],
+    tags=["Explainability"],
     dependencies=[Depends(get_current_user)],  # ← all explainability endpoints require auth
 )
 

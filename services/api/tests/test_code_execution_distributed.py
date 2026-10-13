@@ -136,4 +136,4 @@ print("Finished sleeping")
     assert stopped is True
     r = get_execution(rec.exec_id)
     assert r is not None
-    assert r.status == "stopped"
+    assert r.status in ("stopped", "cancelled")

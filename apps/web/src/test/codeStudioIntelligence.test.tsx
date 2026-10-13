@@ -1,5 +1,5 @@
 /**
- * phase5MlEditing.test.tsx -- Test Suite for Phase 5: ML-Native Editing
+ * phase5MlEditing.test.tsx -- Test Suite for Code Studio: ML-Native Editing
  *
  * Verifies:
  *  5.1 Schema-aware completions (df["..."], columns, TARGET_COLUMN, FEATURE_COLUMNS)
@@ -196,7 +196,7 @@ const ContextInitializer: React.FC<{ children: React.ReactNode }> = ({ children 
   return <>{children}</>;
 };
 
-describe('Phase 5: ML-Native Editing Engine', () => {
+describe('Code Studio: ML-Native Editing Engine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

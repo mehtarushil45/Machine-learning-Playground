@@ -45,7 +45,7 @@ function createMockJob(overrides: Partial<JobEntity> = {}): JobEntity {
   };
 }
 
-describe('Milestone 3: Deep Experiment Tracking & Diagnostics', () => {
+describe('Experiment Tracking & Model Diagnostics', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

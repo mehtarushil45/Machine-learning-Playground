@@ -317,18 +317,7 @@ def generate_python_code(
 
     step1_code = f"""# --- Step 1: Load Dataset ---
 dataset_path = "{pipeline.dataset_name}"
-try:
-    df = pd.read_csv(dataset_path)
-except Exception:
-    # Fallback to local demo data if dataset file is not found
-    import numpy as np
-    np.random.seed(42)
-    df = pd.DataFrame({{
-        'target': np.random.choice([0, 1], size=100),
-        'f1': np.random.randn(100),
-        'f2': np.random.randn(100),
-        'f3': np.random.randn(100),
-    }})
+df = pd.read_csv(dataset_path)
 
 # Ensure target column is present and drop records where target is missing
 target_col = "{pipeline.target_column}"

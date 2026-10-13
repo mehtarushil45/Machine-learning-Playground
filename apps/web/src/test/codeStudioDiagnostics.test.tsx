@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { parsePipelineTargetAndConfig } from '../utils/codeParser';
 import { RegenerateDiffModal } from '../features/pipelines/RegenerateDiffModal';
 
-describe('Phase 1 — Truthful Diagnostics & Safe Regeneration Verification', () => {
+describe('Code Studio — Diagnostics & Safe Regeneration', () => {
   describe('codeParser.ts — Non-blocking Synchronization Contract', () => {
     it('correctly parses target, algorithm, features, and reports isSynced: true for valid pipeline', () => {
       const validCode = `

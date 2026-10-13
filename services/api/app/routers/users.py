@@ -1,8 +1,6 @@
-"""Users router (V7A) — user profile and directory API.
+"""Users router — user profile, activity and directory API.
 
 Prefix: /api/v1/users
-
-Named users_v7a.py to avoid conflict with the existing auth.py router.
 """
 
 from __future__ import annotations
@@ -16,7 +14,7 @@ from app.dependencies import get_db
 from app.rbac import require_permission, WorkspaceContext
 from app.rbac.workspace_context import get_workspace_context
 
-router = APIRouter(prefix="/users", tags=["Users (V7A)"])
+router = APIRouter(prefix="/users", tags=["Users"])
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]
 

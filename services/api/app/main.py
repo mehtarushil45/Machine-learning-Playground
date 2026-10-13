@@ -26,13 +26,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.blacklist import TokenBlacklistMiddleware
 from app.redis_client import close_redis, ping_redis
 
-from app.routers import auth, classrooms, datasets, deployments, experiments, explainability, health, jobs, models, notifications, pipelines, predictions, algorithms
-from app.routers import organizations, workspaces, users_v7a, api_keys, activity  # V7A
-from app.routers import admin  # V7B Part 1
-from app.routers import studio, explainability_v7b, workflow  # V7B Part 2
-from app.routers import local_deployments  # Prototype 4: Local Deployments
+from app.routers import auth, datasets, deployments, experiments, explainability, health, jobs, models, notifications, pipelines, predictions, algorithms
+from app.routers import organizations, workspaces, users, api_keys, activity
+from app.routers import admin
+from app.routers import studio, workflow
+from app.routers import local_deployments  # Local Deployments
 from app.routers import code_execution      # Code Studio: sandboxed execution
-from app.routers import learning            # Student Learning Layer (Heads-Up Cards, Lessons, Stories)
+from app.routers import learning            # Student Learning Layer
 from app.routers import copilot             # Real-time AI Copilot & Code Assistant
 
 
@@ -57,11 +57,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ML Platform API",
     description=(
-        "Organisation-grade ML learning and lab management platform. "
+        "Enterprise-grade ML experimentation and deployment platform. "
         "Authentication: OAuth2 / JWT (access + refresh tokens) with Redis-backed blacklisting. "
         "All data is scoped to an organisation and user."
     ),
-    version="7B.2",
+    version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -132,32 +132,30 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix=API_V1_PREFIX)
 app.include_router(datasets.router, prefix=API_V1_PREFIX)
 app.include_router(jobs.router, prefix=API_V1_PREFIX)
-app.include_router(models.router, prefix=API_V1_PREFIX)  # V5A: Model Versioning & Lineage
+app.include_router(models.router, prefix=API_V1_PREFIX)
 app.include_router(experiments.router, prefix=API_V1_PREFIX)
 app.include_router(predictions.router, prefix=API_V1_PREFIX)
-app.include_router(classrooms.router, prefix=API_V1_PREFIX)
 app.include_router(pipelines.router, prefix=API_V1_PREFIX)
 app.include_router(explainability.router, prefix=API_V1_PREFIX)
 app.include_router(deployments.router, prefix=API_V1_PREFIX)
 app.include_router(notifications.router, prefix=API_V1_PREFIX)
 app.include_router(algorithms.router, prefix=API_V1_PREFIX)
 
-# ── V7A: Enterprise Organizations, Workspaces & RBAC ─────────────────────────
+# ── Enterprise Organizations, Workspaces & RBAC ─────────────────────────
 app.include_router(organizations.router, prefix=API_V1_PREFIX)
 app.include_router(workspaces.router, prefix=API_V1_PREFIX)
-app.include_router(users_v7a.router, prefix=API_V1_PREFIX)
+app.include_router(users.router, prefix=API_V1_PREFIX)
 app.include_router(api_keys.router, prefix=API_V1_PREFIX)
 app.include_router(activity.router, prefix=API_V1_PREFIX)
-app.include_router(admin.router, prefix=API_V1_PREFIX)  # V7B Part 1
+app.include_router(admin.router, prefix=API_V1_PREFIX)
 
-# ── V7B Part 2: Enterprise Platform Completion ────────────────────────────────
-app.include_router(studio.router, prefix=API_V1_PREFIX)              # View-as-Code Studio
-app.include_router(explainability_v7b.router, prefix=API_V1_PREFIX)  # Ethics & Trust
-app.include_router(workflow.router, prefix=API_V1_PREFIX)             # E2E Workflow
+# ── Studio & Workflows ───────────────────────────────────────────────────
+app.include_router(studio.router, prefix=API_V1_PREFIX)
+app.include_router(workflow.router, prefix=API_V1_PREFIX)
 
-# ── Prototype 4: Local Deployments ───────────────────────────────────────────
-app.include_router(local_deployments.router, prefix=API_V1_PREFIX)        # Local deployment CRUD
-app.include_router(local_deployments.job_router, prefix=API_V1_PREFIX)    # Job-scoped list
+# ── Deployments ─────────────────────────────────────────────────────────
+app.include_router(local_deployments.router, prefix=API_V1_PREFIX)
+app.include_router(local_deployments.job_router, prefix=API_V1_PREFIX)
 
 # ── Code Studio: Sandboxed Code Execution ────────────────────────────────────
 app.include_router(code_execution.router, prefix=API_V1_PREFIX)            # Run / Stop / Stream

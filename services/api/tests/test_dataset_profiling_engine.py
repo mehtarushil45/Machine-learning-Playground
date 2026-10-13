@@ -1,4 +1,4 @@
-"""Comprehensive Milestone 4 test suite for Enterprise Dataset Engine & DuckDB Profiling.
+"""Dataset Profiling & Governance Engine Test Suite.
 
 Verifies:
 1. Out-of-Core streaming profiling across CSV, Parquet, and JSON Lines.

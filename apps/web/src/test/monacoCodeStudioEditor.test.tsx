@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MonacoCodeStudioEditor, type CodeDiagnostic } from '../features/pipelines/MonacoCodeStudioEditor';
 import { CodeExecutionService } from '../services/api';
 
-describe('Milestone 5: Monaco Code Studio & Distributed Compute', () => {
+describe('Monaco Code Studio Editor Component', () => {
   it('renders MonacoCodeStudioEditor container and editor surface', () => {
     const onChange = vi.fn();
     const sampleCode = `import pandas as pd

@@ -1,15 +1,18 @@
-"""Phase 3 Test Suite -- Isolated Execution Sandbox & Output Streaming.
+"""Code Execution Engine Test Suite.
 
 Verifies:
-  - Sandboxed execution with timeout handling and process tree killing
-  - Concurrency queuing per project
-  - Stop kills running process tree with status 'cancelled'
-  - Raw output download endpoint
+1. Sandboxed subprocess execution with stdout/stderr capture and exit code 0.
+2. Timeout handling with process termination.
+3. Cancellation and manual stop handling.
+4. Concurrency queueing per project.
+5. Raw output download endpoint.
+6. Subprocess environment secret scrubbing.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -19,6 +22,7 @@ from app.services.code_execution_service import (
     get_execution,
     stop_execution,
     list_executions,
+    _ALLOWED_ENV_VARS,
 )
 
 
@@ -26,14 +30,14 @@ from app.services.code_execution_service import (
 async def test_execution_success_and_lifecycle():
     """Verify normal script completes, captures stdout and produces exit code 0."""
     code = """
-print("Phase 3 Execution Verified")
+print("Code Execution Engine Verified")
 total = sum([1, 2, 3, 4, 5])
 print(f"SUM={total}")
 """
     rec = await start_execution(
         code=code,
-        filename="verify_phase3.py",
-        project_id="test_proj_p3_success",
+        filename="verify_exec.py",
+        project_id="test_proj_exec_success",
         prefer_celery=False,
     )
     assert rec.exec_id is not None
@@ -52,7 +56,7 @@ print(f"SUM={total}")
 
 
 @pytest.mark.asyncio
-async def test_execution_timeout_kills_process_tree():
+async def test_execution_timeout_kills_process():
     """Verify runaway loops are killed on timeout with status 'timed_out' and exit code 124."""
     code = """
 import time
@@ -62,7 +66,7 @@ while True:
     rec = await start_execution(
         code=code,
         filename="infinite_loop.py",
-        project_id="test_proj_p3_timeout",
+        project_id="test_proj_exec_timeout",
         timeout=2,
         prefer_celery=False,
     )
@@ -82,8 +86,8 @@ while True:
 
 
 @pytest.mark.asyncio
-async def test_execution_stop_kills_process_tree():
-    """Verify manual stop cancels running process tree and records status 'cancelled'."""
+async def test_execution_stop_cancels_process():
+    """Verify manual stop cancels running process and records status 'cancelled'."""
     code = """
 import time
 print("Loop started")
@@ -94,7 +98,7 @@ print("Finished")
     rec = await start_execution(
         code=code,
         filename="stoppable_script.py",
-        project_id="test_proj_p3_stop",
+        project_id="test_proj_exec_stop",
         prefer_celery=False,
     )
 
@@ -111,7 +115,7 @@ print("Finished")
 @pytest.mark.asyncio
 async def test_project_concurrency_queue():
     """Verify concurrent runs on the same project are queued with position and auto-dequeued."""
-    proj = "test_proj_p3_queue"
+    proj = "test_proj_exec_queue"
 
     # Job 1 runs for ~1s
     job1_code = "import time; time.sleep(0.8); print('Job 1 done')"
@@ -143,7 +147,7 @@ async def test_project_concurrency_queue():
 async def test_download_raw_output_endpoint():
     """Verify GET /api/v1/code-execution/{exec_id}/output/download returns raw text file."""
     code = "print('Line A'); print('Line B')"
-    rec = await start_execution(code=code, filename="output_test.py", project_id="test_proj_p3_dl", prefer_celery=False)
+    rec = await start_execution(code=code, filename="output_test.py", project_id="test_proj_exec_dl", prefer_celery=False)
 
     for _ in range(30):
         await asyncio.sleep(0.1)
@@ -159,3 +163,48 @@ async def test_download_raw_output_endpoint():
         assert "attachment" in resp.headers["content-disposition"]
         assert "Line A" in resp.text
         assert "Line B" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_subprocess_environment_allowlist():
+    """Verify sandboxed subprocess environment scrubs sensitive host secrets."""
+    os.environ["DATABASE_URL"] = "postgres://admin:supersecret@db:5432/mlpg"
+    os.environ["SECRET_KEY"] = "super-secret-production-key-value"
+    os.environ["JWT_SECRET"] = "another-secret"
+    os.environ["MLPLAYGROUND_CERT_SECRET"] = "cert-secret"
+
+    code = """
+import os
+print("KEYS:" + ",".join(sorted(os.environ.keys())))
+"""
+    rec = await start_execution(
+        code=code,
+        filename="env_test.py",
+        project_id="test_env_allowlist",
+        prefer_celery=False,
+    )
+
+    for _ in range(40):
+        await asyncio.sleep(0.1)
+        r = get_execution(rec.exec_id)
+        if r and r.status in ("completed", "failed"):
+            break
+
+    final = get_execution(rec.exec_id)
+    assert final is not None
+    assert final.status == "completed"
+    assert "KEYS:" in final.stdout
+
+    output_line = [l for l in final.stdout.splitlines() if l.startswith("KEYS:")][0]
+    keys_in_subprocess = output_line.replace("KEYS:", "").split(",")
+
+    assert "DATABASE_URL" not in keys_in_subprocess
+    assert "SECRET_KEY" not in keys_in_subprocess
+    assert "JWT_SECRET" not in keys_in_subprocess
+    assert "MLPLAYGROUND_CERT_SECRET" not in keys_in_subprocess
+
+    allowed_and_internal = set(_ALLOWED_ENV_VARS) | {
+        "PYTHONPATH", "PYTHONUNBUFFERED", "MLPG_SANDBOX", "PYTHONDONTWRITEBYTECODE",
+    }
+    for k in keys_in_subprocess:
+        assert k in allowed_and_internal or k.upper() in allowed_and_internal, f"Unexpected key leaked: {k}"
