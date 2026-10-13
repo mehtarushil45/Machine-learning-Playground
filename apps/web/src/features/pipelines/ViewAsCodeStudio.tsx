@@ -2133,8 +2133,8 @@ export function ViewAsCodeStudio({
           display: 'flex',
           alignItems: 'stretch',
           justifyContent: 'space-between',
-          overflow: 'hidden',
-          zIndex: 10,
+          overflow: 'visible',
+          zIndex: 40,
         }}
       >
         {/* Left: Tab System */}
@@ -2274,10 +2274,10 @@ export function ViewAsCodeStudio({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 5,
-                padding: '3px 8px',
+                padding: '4px 9px',
                 borderRadius: 5,
                 border: `1px solid ${isSnippetsDropdownOpen ? BB.gold : BB.border}`,
-                background: isSnippetsDropdownOpen ? 'rgba(201,162,75,0.15)' : 'transparent',
+                background: isSnippetsDropdownOpen ? 'rgba(201,162,75,0.18)' : 'rgba(28,21,52,0.6)',
                 color: isSnippetsDropdownOpen ? BB.gold : BB.text,
                 fontSize: 11,
                 fontWeight: 600,
@@ -2287,50 +2287,95 @@ export function ViewAsCodeStudio({
             >
               <FileCode style={{ width: 12, height: 12, color: BB.gold }} />
               <span>Snippets</span>
-              <ChevronDown style={{ width: 10, height: 10 }} />
+              <ChevronDown style={{ width: 10, height: 10, transform: isSnippetsDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 120ms' }} />
             </button>
             {isSnippetsDropdownOpen && (
-              <div
-                data-testid="snippets-dropdown-list"
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  right: 0,
-                  marginTop: 4,
-                  width: 270,
-                  background: BB.surface,
-                  border: `1px solid ${BB.gold}`,
-                  borderRadius: 6,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-                  zIndex: 50,
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, color: BB.gold, borderBottom: `1px solid ${BB.border}`, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                  ML Snippets {learningMode ? '• Learning Mode Active' : ''}
-                </div>
-                {ML_SNIPPETS.map((snip) => (
+              <>
+                {/* Backdrop to close on click outside */}
+                <div
+                  data-testid="snippets-backdrop"
+                  style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    zIndex: 998,
+                  }}
+                  onClick={() => setIsSnippetsDropdownOpen(false)}
+                />
+                <div
+                  data-testid="snippets-dropdown-list"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    width: 320,
+                    maxHeight: 'calc(100vh - 120px)',
+                    overflowY: 'auto',
+                    background: BB.surface,
+                    border: `1px solid ${BB.gold}`,
+                    borderRadius: 8,
+                    boxShadow: '0 12px 36px rgba(0,0,0,0.85), 0 0 15px rgba(201,162,75,0.2)',
+                    zIndex: 999,
+                  }}
+                >
                   <div
-                    key={snip.id}
-                    data-testid={`snippet-item-${snip.id}`}
-                    onClick={() => {
-                      setIsSnippetsDropdownOpen(false);
-                      handleInsertSnippet(snip);
-                    }}
                     style={{
                       padding: '8px 12px',
-                      cursor: 'pointer',
-                      borderBottom: `1px solid ${BB.border}33`,
-                      transition: 'background 80ms',
+                      fontSize: 10.5,
+                      fontWeight: 700,
+                      color: BB.gold,
+                      borderBottom: `1px solid ${BB.border}`,
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'rgba(201, 162, 75, 0.08)',
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(201, 162, 75, 0.15)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <div style={{ fontSize: 11.5, fontWeight: 600, color: BB.text }}>{snip.title}</div>
-                    <div style={{ fontSize: 10, color: BB.muted, marginTop: 2 }}>{snip.documentation}</div>
+                    <span>ML Code Snippets</span>
+                    {learningMode && (
+                      <span style={{ fontSize: 9.5, color: BB.goldLight, padding: '1px 5px', borderRadius: 3, background: 'rgba(201, 162, 75, 0.2)' }}>
+                        🎓 Learning Mode
+                      </span>
+                    )}
                   </div>
-                ))}
-              </div>
+                  {ML_SNIPPETS.map((snip) => (
+                    <div
+                      key={snip.id}
+                      data-testid={`snippet-item-${snip.id}`}
+                      onClick={() => {
+                        setIsSnippetsDropdownOpen(false);
+                        handleInsertSnippet(snip);
+                      }}
+                      style={{
+                        padding: '9px 12px',
+                        cursor: 'pointer',
+                        borderBottom: `1px solid ${BB.border}33`,
+                        transition: 'all 80ms ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(201, 162, 75, 0.14)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, color: BB.text }}>{snip.title}</div>
+                        <span style={{ fontSize: 9, fontFamily: 'Consolas, Monaco, monospace', color: BB.muted }}>
+                          +{snip.id}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 10, color: BB.muted, marginTop: 3, lineHeight: 1.4 }}>
+                        {snip.documentation}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 
