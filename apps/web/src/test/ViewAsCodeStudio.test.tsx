@@ -196,10 +196,13 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
     expect(screen.queryByRole('button', { name: /export \.py/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
 
+    // Verify Save and Format buttons are completely removed
+    expect(screen.queryByRole('button', { name: /save code/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /format code/i })).not.toBeInTheDocument();
+
     // Verify studio action buttons are present via aria-label
     expect(screen.getByRole('button', { name: /copy code/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /regenerate code/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /format code/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run code/i })).toBeInTheDocument();
   });
 });

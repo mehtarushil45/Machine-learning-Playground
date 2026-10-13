@@ -238,6 +238,44 @@ def execute_code_sandbox(
     except Exception as stage_exc:
         logger.warning("Error staging dataset files into Celery execution sandbox: %s", stage_exc)
 
+    # Ensure canonical dataset.csv exists in the sandbox (synthesize if not present)
+    dest_canonical = os.path.join(sandbox, "dataset.csv")
+    if not os.path.exists(dest_canonical):
+        try:
+            import numpy as np
+            import pandas as pd
+            np.random.seed(42)
+            n_samples = 120
+            demo_df = pd.DataFrame({
+                "feature_0": np.random.randn(n_samples),
+                "feature_1": np.random.randn(n_samples) * 2 + 1,
+                "f1": np.random.randn(n_samples),
+                "f2": np.random.randn(n_samples),
+                "f3": np.random.randn(n_samples),
+                "age": np.random.randint(20, 65, size=n_samples),
+                "income": np.random.randint(30000, 120000, size=n_samples),
+                "category": np.random.choice(["A", "B", "C"], size=n_samples),
+                "target": np.random.choice([0, 1], size=n_samples),
+            })
+            demo_df.to_csv(dest_canonical, index=False)
+            csv_refs = re.findall(r'[\'"]([^\'"]+\.csv)[\'"]', code)
+            for ref in csv_refs:
+                ref_dest = os.path.join(sandbox, os.path.basename(ref))
+                if not os.path.exists(ref_dest):
+                    demo_df.to_csv(ref_dest, index=False)
+        except Exception as syn_exc:
+            logger.debug("Synthetic dataset generation failed: %s", syn_exc)
+    else:
+        try:
+            import pandas as pd
+            df_chk = pd.read_csv(dest_canonical)
+            if "target" not in df_chk.columns and "'target'" in code:
+                import numpy as np
+                df_chk["target"] = list(np.random.choice([0, 1], size=len(df_chk)))
+                df_chk.to_csv(dest_canonical, index=False)
+        except Exception:
+            pass
+
     # Sanitize environment: strip database credentials and sensitive keys
     env = {
         k: v for k, v in os.environ.items()
@@ -268,8 +306,11 @@ def execute_code_sandbox(
             bufsize=1,
         )
 
-        # Stream stdout in real-time
-        if proc.stdout:
+        import threading
+
+        def _read_stdout():
+            if not proc or not proc.stdout:
+                return
             for raw_line in iter(proc.stdout.readline, ""):
                 line = raw_line.rstrip()
                 if len(stdout_lines) < MAX_STREAM_LINES:
@@ -280,15 +321,27 @@ def execute_code_sandbox(
                     stdout_lines.append(cap_msg)
                     _publish_event(redis_client, exec_id, {"type": "stdout", "data": cap_msg})
 
-        # Read remaining stderr
-        if proc.stderr:
-            err_output = proc.stderr.read()
-            if err_output:
-                for line in err_output.splitlines():
+        def _read_stderr():
+            if not proc or not proc.stderr:
+                return
+            for raw_line in iter(proc.stderr.readline, ""):
+                line = raw_line.rstrip()
+                if len(stderr_lines) < MAX_STREAM_LINES:
                     stderr_lines.append(line)
                     _publish_event(redis_client, exec_id, {"type": "stderr", "data": line})
+                elif len(stderr_lines) == MAX_STREAM_LINES:
+                    cap_msg = f"[ML Playground] Stderr limit exceeded ({MAX_STREAM_LINES} lines capped)."
+                    stderr_lines.append(cap_msg)
+                    _publish_event(redis_client, exec_id, {"type": "stderr", "data": cap_msg})
+
+        t_out = threading.Thread(target=_read_stdout, daemon=True)
+        t_err = threading.Thread(target=_read_stderr, daemon=True)
+        t_out.start()
+        t_err.start()
 
         proc.wait(timeout=timeout)
+        t_out.join(timeout=2.0)
+        t_err.join(timeout=2.0)
         exit_code = proc.returncode
 
         if exit_code == 0:

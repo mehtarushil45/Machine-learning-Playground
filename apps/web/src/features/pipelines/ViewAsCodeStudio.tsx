@@ -20,9 +20,7 @@ import {
   Search,
   ArrowUp,
   ArrowDown,
-  Wand2,
   Rocket,
-  Save,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService, CopilotApiService } from '../../services/api';
@@ -628,7 +626,6 @@ export function ViewAsCodeStudio({
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [showRegenerateWarning, setShowRegenerateWarning] = useState(false);
   const [pendingRegenerateFile, setPendingRegenerateFile] = useState<string | null>(null);
-  const [isFormatting, setIsFormatting] = useState(false);
 
   /* ── Find in Editor ──────────────────────────────────────────────── */
   const [isFindOpen, setIsFindOpen] = useState(false);
@@ -1032,33 +1029,6 @@ export function ViewAsCodeStudio({
     }
   };
 
-  const handleFormatCode = async () => {
-    if (!displayedCode || !displayedCode.trim()) {
-      onShowToast?.('Empty Buffer', 'No Python code to format.', 'info');
-      return;
-    }
-    setIsFormatting(true);
-
-    try {
-      const res = await CodeExecutionService.formatCode(displayedCode);
-      if (res.error) {
-        onShowToast?.('Format Warning', res.error, 'error');
-        return;
-      }
-      if (res.changed && res.code) {
-        updateExperimentFileCode(currentFile, res.code);
-        markFileModified(currentFile);
-        onShowToast?.('Code Formatted', 'Formatted with Black (PEP 8).', 'success');
-      } else {
-        onShowToast?.('Code Clean', 'Code is already properly formatted.', 'info');
-      }
-    } catch (err: any) {
-      onShowToast?.('Format Error', err.message || 'Formatting failed.', 'error');
-    } finally {
-      setIsFormatting(false);
-    }
-  };
-
   const handleSaveCode = useCallback(() => {
     if (!displayedCode) return;
     markFileModified(currentFile);
@@ -1161,13 +1131,14 @@ export function ViewAsCodeStudio({
       const streamUrl = CodeExecutionService.streamUrl(res.exec_id);
       const es = new EventSource(streamUrl);
       eventSourceRef.current = es;
+      let hasExited = false;
       // Accumulate all output for post-run traceback analysis
       const allOutputRef: string[] = [];
 
       es.onmessage = (event) => {
         const rawData = event.data;
 
-        // ── Try JSON first (backend now sends typed JSON events) ──────────
+        // ── Try JSON first (backend sends typed JSON events) ──────────
         try {
           const data = JSON.parse(rawData);
 
@@ -1188,6 +1159,7 @@ export function ViewAsCodeStudio({
             setLogEntries(prev => [...prev, makeLog('system', data.data)]);
 
           } else if (data.type === 'exit') {
+            hasExited = true;
             const exitCode = data.exit_code ?? 0;
             const dur = data.duration_seconds ?? (Date.now() - startTime) / 1000;
             const arts = Array.isArray(data.artifacts) ? data.artifacts : [];
@@ -1203,17 +1175,17 @@ export function ViewAsCodeStudio({
                 `Process exited with code ${exitCode} in ${dur.toFixed(2)}s`),
               ...(arts.length > 0 ? [makeLog('info', `Artifacts saved: ${arts.join(', ')}`)] : []),
             ]);
-            // Parse traceback → inline error markers (only on failure)
+            // Parse traceback → inline error markers (keep terminal tab active)
             if (exitCode === 0) {
               setRuntimeDiagnostics([]);
             } else {
               const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
               setRuntimeDiagnostics(errDiags);
-              if (errDiags.length > 0) setBottomTab('problems');
             }
             es.close();
 
           } else if (data.type === 'error') {
+            hasExited = true;
             const errMsg = `[Error] ${data.error}`;
             setOutputLines((p) => [...p, errMsg]);
             allOutputRef.push(errMsg);
@@ -1222,7 +1194,6 @@ export function ViewAsCodeStudio({
             setExecDuration((Date.now() - startTime) / 1000);
             const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
             setRuntimeDiagnostics(errDiags);
-            if (errDiags.length > 0) setBottomTab('problems');
             es.close();
 
           }
@@ -1234,6 +1205,7 @@ export function ViewAsCodeStudio({
 
         // ── Plain-text fallback ────────────────────────────────────────
         if (rawData.startsWith('[DONE]')) {
+          hasExited = true;
           const statusMatch = rawData.match(/status=(\w+)/);
           const st = (statusMatch?.[1] ?? 'completed') as any;
           setExecStatus(st);
@@ -1253,7 +1225,6 @@ export function ViewAsCodeStudio({
             } else {
               const errDiags = parseRuntimeErrors(allLines, currentFile, displayedCode.split('\n').length);
               setRuntimeDiagnostics(errDiags);
-              if (errDiags.length > 0) setBottomTab('problems');
             }
           }).catch(() => {});
           es.close();
@@ -1273,6 +1244,8 @@ export function ViewAsCodeStudio({
 
       es.onerror = () => {
         es.close();
+        if (hasExited) return;
+        hasExited = true;
         CodeExecutionService.getResult(res.exec_id)
           .then((finalRes) => {
             if (finalRes.stdout) {
@@ -1296,7 +1269,6 @@ export function ViewAsCodeStudio({
             } else {
               const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
               setRuntimeDiagnostics(errDiags);
-              if (errDiags.length > 0) setBottomTab('problems');
             }
             setLogEntries(prev => [...prev,
               makeLog(st === 'completed' ? 'info' : 'error',
@@ -1762,54 +1734,6 @@ export function ViewAsCodeStudio({
 
         {/* Right: Studio Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', flexShrink: 0 }}>
-          {/* Save Button */}
-          <button
-            onClick={handleSaveCode}
-            disabled={!displayedCode}
-            aria-label="Save code"
-            title="Save code & synchronize configuration (Ctrl+S)"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '4px 9px',
-              borderRadius: 5,
-              border: `1px solid ${isFileModified(currentFile) ? BB.gold : BB.border}`,
-              background: isFileModified(currentFile) ? 'rgba(245,158,11,0.18)' : 'rgba(75,59,124,0.15)',
-              color: isFileModified(currentFile) ? BB.gold : BB.text,
-              fontSize: 11.5,
-              cursor: !displayedCode ? 'not-allowed' : 'pointer',
-              transition: 'all 120ms ease',
-            }}
-          >
-            <Save style={{ width: 12, height: 12 }} />
-            <span>Save</span>
-          </button>
-
-          {/* Format Button */}
-          <button
-            onClick={handleFormatCode}
-            disabled={isFormatting || !displayedCode}
-            aria-label="Format code"
-            title="Auto-format Python code (Black / PEP 8)"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '4px 9px',
-              borderRadius: 5,
-              border: `1px solid ${BB.border}`,
-              background: 'rgba(75,59,124,0.15)',
-              color: BB.text,
-              fontSize: 11.5,
-              cursor: isFormatting || !displayedCode ? 'not-allowed' : 'pointer',
-              transition: 'all 120ms ease',
-            }}
-          >
-            <Wand2 style={{ width: 12, height: 12, color: BB.gold }} />
-            <span>Format</span>
-          </button>
-
           {/* Regenerate Code Button */}
           <button
             onClick={() => safeGeneratePipelineCode(currentFile)}
@@ -2427,6 +2351,72 @@ export function ViewAsCodeStudio({
 
                 <div style={{ flex: 1 }} />
 
+                {/* Execution Status Badge */}
+                {execStatus !== 'idle' && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontFamily: 'Consolas, Monaco, monospace',
+                      padding: '2px 8px',
+                      borderRadius: 10,
+                      fontWeight: 700,
+                      letterSpacing: 0.5,
+                      background:
+                        execStatus === 'running' ? 'rgba(34,197,94,0.15)'
+                        : execStatus === 'completed' ? 'rgba(34,197,94,0.18)'
+                        : execStatus === 'failed' ? 'rgba(239,68,68,0.18)'
+                        : 'rgba(245,158,11,0.15)',
+                      color:
+                        execStatus === 'running' ? BB.success
+                        : execStatus === 'completed' ? BB.success
+                        : execStatus === 'failed' ? '#EF4444'
+                        : '#F59E0B',
+                      border: `1px solid ${
+                        execStatus === 'running' ? 'rgba(34,197,94,0.35)'
+                        : execStatus === 'completed' ? 'rgba(34,197,94,0.35)'
+                        : execStatus === 'failed' ? 'rgba(239,68,68,0.35)'
+                        : 'rgba(245,158,11,0.35)'
+                      }`,
+                      marginRight: 6,
+                    }}
+                  >
+                    {execStatus === 'running'
+                      ? '● RUNNING'
+                      : execStatus === 'completed'
+                      ? '✓ EXIT 0'
+                      : execStatus === 'failed'
+                      ? `✕ FAILED${execExitCode != null ? ` (${execExitCode})` : ''}`
+                      : execStatus.toUpperCase()}
+                  </span>
+                )}
+
+                {/* Copy Terminal Output */}
+                {outputLines.length > 0 && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(outputLines.join('\n'));
+                      onShowToast?.('Terminal Copied', 'Output buffer copied to clipboard.', 'success');
+                    }}
+                    title="Copy terminal output"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: BB.muted,
+                      cursor: 'pointer',
+                      padding: '0 8px',
+                      fontSize: 11,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
+                  >
+                    <Copy style={{ width: 11, height: 11 }} />
+                    <span>Copy</span>
+                  </button>
+                )}
+
                 {outputLines.length > 0 && (
                   <button
                     onClick={() => setOutputLines([])}
@@ -2436,7 +2426,7 @@ export function ViewAsCodeStudio({
                       border: 'none',
                       color: BB.muted,
                       cursor: 'pointer',
-                      padding: '0 10px',
+                      padding: '0 8px',
                       fontSize: 11,
                     }}
                     onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
@@ -2484,8 +2474,18 @@ export function ViewAsCodeStudio({
                     )}
                     {outputLines.map((line, i) => {
                       const isStderr = line.startsWith('[stderr]');
-                      const isError = line.startsWith('[Error]') || line.startsWith('[ERROR]');
-                      const isMlpg = line.startsWith('[ML Playground]');
+                      const isError =
+                        line.startsWith('[Error]') ||
+                        line.startsWith('[ERROR]') ||
+                        line.includes('Traceback (most recent') ||
+                        line.includes('Error:') ||
+                        line.includes('Exception:');
+                      const isSuccess =
+                        line.includes('Accuracy:') ||
+                        line.includes('Execution completed successfully') ||
+                        line.includes('Saved model') ||
+                        line.includes('precision');
+                      const isMlpg = line.startsWith('[ML Playground');
                       return (
                         <div
                           key={i}
@@ -2494,10 +2494,10 @@ export function ViewAsCodeStudio({
                             fontFamily: 'Consolas, Monaco, monospace',
                             fontSize: 11.5,
                             lineHeight: 1.65,
-                            color: isStderr || isError ? BB.error : isMlpg ? BB.primaryLight : '#D4D0C8',
+                            color: isError || isStderr ? BB.error : isSuccess ? BB.success : isMlpg ? BB.primaryLight : '#D4D0C8',
                             whiteSpace: 'pre-wrap',
                             wordBreak: 'break-all',
-                            background: isStderr || isError ? 'rgba(239,68,68,0.06)' : 'transparent',
+                            background: isError || isStderr ? 'rgba(239,68,68,0.06)' : 'transparent',
                           }}
                         >
                           {line}
