@@ -220,5 +220,134 @@ describe('ViewAsCodeStudio — Phase 6 Contract & State Precedence', { timeout: 
     expect(screen.getByRole('button', { name: /copy code/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /regenerate code/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /run code/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /preview impact/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save file/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /insert ml snippet/i })).toBeInTheDocument();
+  });
+
+  it('permanently omits PTY Shell (Blocked) badge and renders clean execution status pill', async () => {
+    const Initializer = () => {
+      const { setTrainingConfig, setSelectedTarget } = useProject();
+      React.useEffect(() => {
+        setSelectedTarget('target');
+        setTrainingConfig({
+          dataset_id: 'ds-123',
+          dataset_name: 'data.csv',
+          target_column: 'target',
+          feature_columns: ['f1'],
+          algorithm: 'logistic_regression',
+          scaler: 'standard_scaler',
+          imputer: 'median',
+          train_test_split: 0.8,
+          cv_folds: 5,
+          random_seed: 42,
+          selection_source: 'manual',
+        });
+      }, [setTrainingConfig, setSelectedTarget]);
+      return <ViewAsCodeStudio />;
+    };
+
+    render(
+      <ProjectProvider>
+        <Initializer />
+      </ProjectProvider>,
+    );
+
+    // Verify defensive PTY Shell (Blocked) badge is permanently absent
+    expect(screen.queryByTestId('pty-shell-blocked-badge')).not.toBeInTheDocument();
+    expect(screen.queryByText(/PTY Shell \(Blocked\)/i)).not.toBeInTheDocument();
+
+    // Verify clean execution status pill is present
+    expect(screen.getByTestId('execution-status-pill')).toBeInTheDocument();
+    expect(screen.getByText(/Ready/i)).toBeInTheDocument();
+  });
+
+  it('cleans up file explorer to show real scripts without locked dummy folders', async () => {
+    const Initializer = () => {
+      const { setTrainingConfig, setSelectedTarget } = useProject();
+      React.useEffect(() => {
+        setSelectedTarget('target');
+        setTrainingConfig({
+          dataset_id: 'ds-123',
+          dataset_name: 'data.csv',
+          target_column: 'target',
+          feature_columns: ['f1'],
+          algorithm: 'logistic_regression',
+          scaler: 'standard_scaler',
+          imputer: 'median',
+          train_test_split: 0.8,
+          cv_folds: 5,
+          random_seed: 42,
+          selection_source: 'manual',
+        });
+      }, [setTrainingConfig, setSelectedTarget]);
+      return <ViewAsCodeStudio />;
+    };
+
+    render(
+      <ProjectProvider>
+        <Initializer />
+      </ProjectProvider>,
+    );
+
+    // Explorer should show SCRIPTS header
+    expect(screen.getByText('SCRIPTS')).toBeInTheDocument();
+    expect(screen.getAllByText('pipeline_generated.py').length).toBeGreaterThanOrEqual(1);
+
+    // Explorer must NOT contain fake locked data/ or outputs/ folder trees
+    expect(screen.queryByText('data/')).not.toBeInTheDocument();
+    expect(screen.queryByText('outputs/')).not.toBeInTheDocument();
+    expect(screen.queryByText(/empty — run to generate/i)).not.toBeInTheDocument();
+  });
+
+  it('opens Scikit-Learn ML Snippets modal when Snippets button is clicked', async () => {
+    const Initializer = () => {
+      const { setTrainingConfig, setSelectedTarget } = useProject();
+      React.useEffect(() => {
+        setSelectedTarget('target');
+        setTrainingConfig({
+          dataset_id: 'ds-123',
+          dataset_name: 'data.csv',
+          target_column: 'target',
+          feature_columns: ['f1'],
+          algorithm: 'logistic_regression',
+          scaler: 'standard_scaler',
+          imputer: 'median',
+          train_test_split: 0.8,
+          cv_folds: 5,
+          random_seed: 42,
+          selection_source: 'manual',
+        });
+      }, [setTrainingConfig, setSelectedTarget]);
+      return <ViewAsCodeStudio />;
+    };
+
+    render(
+      <ProjectProvider>
+        <Initializer />
+      </ProjectProvider>,
+    );
+
+    const snippetsBtn = screen.getByTestId('snippets-menu-btn');
+    expect(snippetsBtn).toBeInTheDocument();
+
+    // Click snippets button
+    fireEvent.click(snippetsBtn);
+
+    // Modal dialog should be rendered
+    const dialog = screen.getByRole('dialog', { name: /scikit-learn ml snippets/i });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText(/Battle-tested scikit-learn patterns/i)).toBeInTheDocument();
+    expect(screen.getByTestId('snippets-dropdown-list')).toBeInTheDocument();
+
+    // Should render snippet items
+    expect(screen.getByTestId('snippet-item-train-test-split')).toBeInTheDocument();
+    expect(screen.getByTestId('snippet-item-ml-pipeline')).toBeInTheDocument();
+
+    // Close modal by clicking backdrop
+    const backdrop = screen.getByTestId('snippets-backdrop');
+    fireEvent.click(backdrop);
+
+    expect(screen.queryByRole('dialog', { name: /scikit-learn ml snippets/i })).not.toBeInTheDocument();
   });
 });

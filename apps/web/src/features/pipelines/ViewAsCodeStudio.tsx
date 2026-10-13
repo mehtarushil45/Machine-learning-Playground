@@ -5,14 +5,9 @@ import {
   Check,
   RefreshCw,
   ChevronRight,
-  ChevronDown,
   Trash2,
   Plus,
   FolderOpen,
-  Folder,
-  Lock,
-  Database,
-  FileText,
   X,
   Play,
   Square,
@@ -25,8 +20,9 @@ import {
   ArrowUp,
   ArrowDown,
   Rocket,
-  Download,
   Sparkles,
+  Save,
+  SplitSquareVertical,
 } from 'lucide-react';
 import { renderAnsiLine } from '../../utils/ansiParser';
 import { useProject } from '../../providers/ProjectContext';
@@ -181,7 +177,7 @@ export function highlightPythonLine(line: string) {
 
 /* ── Experiment File Explorer ────────────────────────────────────────── */
 interface ExperimentExplorerProps {
-  csvName: string;
+  csvName?: string;
   files: { name: string }[];
   activeFile: string;
   pendingNewFileName: string | null;
@@ -197,13 +193,11 @@ interface ExperimentExplorerProps {
 }
 
 function ExperimentExplorer({
-  csvName,
   files,
   activeFile,
   pendingNewFileName,
   modifiedFileNames,
   generatedFileNames,
-  workspaceFiles = [],
   onSelectFile,
   onNewFile,
   onDeleteFile,
@@ -211,27 +205,14 @@ function ExperimentExplorer({
   onPendingNameCommit,
   onPendingNameCancel,
 }: ExperimentExplorerProps) {
-  const [dataFolderOpen, setDataFolderOpen] = useState(true);
-  const [outputsFolderOpen, setOutputsFolderOpen] = useState(true);
-  const [scriptsFolderOpen, setScriptsFolderOpen] = useState(true);
   const [hoveredFile, setHoveredFile] = useState<string | null>(null);
   const newFileInputRef = useRef<HTMLInputElement>(null);
-
-  const shortCsv = csvName.length > 20 ? csvName.slice(0, 18) + '…' : csvName;
 
   useEffect(() => {
     if (pendingNewFileName !== null) {
       setTimeout(() => newFileInputRef.current?.focus(), 50);
     }
   }, [pendingNewFileName]);
-
-  const dataFiles = useMemo(() => {
-    return (workspaceFiles || []).filter((f) => f.path.startsWith('data/') && !f.is_dir);
-  }, [workspaceFiles]);
-
-  const outputFiles = useMemo(() => {
-    return (workspaceFiles || []).filter((f) => f.path.startsWith('outputs/') && !f.is_dir);
-  }, [workspaceFiles]);
 
   return (
     <div
@@ -251,14 +232,29 @@ function ExperimentExplorer({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '8px 12px 6px',
+          padding: '8px 12px',
           borderBottom: `1px solid ${BB.border}`,
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: 10, fontWeight: 700, color: BB.muted, letterSpacing: '0.08em' }}>
-          EXPLORER
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <FolderOpen style={{ width: 12, height: 12, color: BB.gold }} />
+          <span style={{ fontSize: 10, fontWeight: 700, color: BB.muted, letterSpacing: '0.08em' }}>
+            SCRIPTS
+          </span>
+          <span
+            style={{
+              fontSize: 9,
+              color: BB.muted,
+              background: 'rgba(255,255,255,0.06)',
+              padding: '1px 5px',
+              borderRadius: 10,
+              fontFamily: 'Consolas, Monaco, monospace',
+            }}
+          >
+            {files.length}
+          </span>
+        </div>
         <button
           onClick={onNewFile}
           title="New experiment script"
@@ -266,8 +262,8 @@ function ExperimentExplorer({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             borderRadius: 4,
             border: `1px solid ${BB.border}`,
             background: 'transparent',
@@ -276,250 +272,23 @@ function ExperimentExplorer({
             transition: 'all 120ms',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(107,92,166,0.2)';
-            e.currentTarget.style.color = BB.text;
+            e.currentTarget.style.background = 'rgba(201,162,75,0.2)';
+            e.currentTarget.style.color = BB.gold;
+            e.currentTarget.style.borderColor = BB.gold;
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.background = 'transparent';
             e.currentTarget.style.color = BB.muted;
+            e.currentTarget.style.borderColor = BB.border;
           }}
         >
-          <Plus style={{ width: 11, height: 11 }} />
+          <Plus style={{ width: 12, height: 12 }} />
         </button>
       </div>
 
-      {/* File Tree */}
+      {/* Real Project Files List */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
-        {/* 1. DATA / DATASET FOLDER (Strictly Read-Only) */}
-        <div
-          onClick={() => setDataFolderOpen((o) => !o)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '4px 10px',
-            cursor: 'pointer',
-            color: BB.gold,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.03em',
-          }}
-        >
-          {dataFolderOpen
-            ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
-            : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
-          <Database style={{ width: 12, height: 12, flexShrink: 0, color: BB.gold }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-            data/
-          </span>
-          <span
-            title="Read-only dataset mount"
-            style={{
-              fontSize: 8.5,
-              fontWeight: 700,
-              padding: '1px 4px',
-              borderRadius: 3,
-              background: 'rgba(201,162,75,0.15)',
-              color: BB.goldLight,
-              border: `1px solid rgba(201,162,75,0.3)`,
-              flexShrink: 0,
-            }}
-          >
-            RO
-          </span>
-        </div>
-
-        {dataFolderOpen && (
-          <div style={{ marginBottom: 6 }}>
-            {dataFiles.length > 0 ? (
-              dataFiles.map((f) => {
-                const isActive = f.path === activeFile || f.name === activeFile;
-                const isHovered = hoveredFile === f.path;
-                return (
-                  <div
-                    key={f.path}
-                    onClick={() => onSelectFile(f.path)}
-                    onMouseEnter={() => setHoveredFile(f.path)}
-                    onMouseLeave={() => setHoveredFile(null)}
-                    title={`${f.path} (Read-only)`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '3px 10px 3px 22px',
-                      cursor: 'pointer',
-                      background: isActive ? 'rgba(107,92,166,0.18)' : isHovered ? 'rgba(107,92,166,0.08)' : 'transparent',
-                      borderLeft: isActive ? `2px solid ${BB.gold}` : '2px solid transparent',
-                      transition: 'all 80ms',
-                    }}
-                  >
-                    <FileText style={{ width: 11, height: 11, color: isActive ? BB.gold : BB.muted, flexShrink: 0 }} />
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        color: isActive ? BB.text : BB.muted,
-                        fontFamily: 'Consolas, Monaco, monospace',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        flex: 1,
-                      }}
-                    >
-                      {f.name}
-                    </span>
-                    <Lock style={{ width: 9, height: 9, color: BB.muted, flexShrink: 0 }} />
-                  </div>
-                );
-              })
-            ) : (
-              <div
-                onClick={() => onSelectFile(`data/${csvName}`)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '3px 10px 3px 22px',
-                  cursor: 'pointer',
-                  color: BB.muted,
-                  fontSize: 10.5,
-                  fontFamily: 'Consolas, Monaco, monospace',
-                }}
-              >
-                <FileText style={{ width: 11, height: 11, color: BB.muted, flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                  {shortCsv}
-                </span>
-                <Lock style={{ width: 9, height: 9, color: BB.muted, flexShrink: 0 }} />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 2. OUTPUTS FOLDER (Generated run artifacts) */}
-        <div
-          onClick={() => setOutputsFolderOpen((o) => !o)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '4px 10px',
-            cursor: 'pointer',
-            color: BB.primaryLight,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.03em',
-          }}
-        >
-          {outputsFolderOpen
-            ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
-            : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
-          <Folder style={{ width: 12, height: 12, flexShrink: 0, color: BB.primaryLight }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-            outputs/
-          </span>
-          {outputFiles.length > 0 && (
-            <span style={{ fontSize: 9, color: BB.muted, flexShrink: 0 }}>
-              {outputFiles.length}
-            </span>
-          )}
-        </div>
-
-        {outputsFolderOpen && (
-          <div style={{ marginBottom: 6 }}>
-            {outputFiles.length > 0 ? (
-              outputFiles.map((f) => {
-                const isActive = f.path === activeFile || f.name === activeFile;
-                const isHovered = hoveredFile === f.path;
-                return (
-                  <div
-                    key={f.path}
-                    onClick={() => onSelectFile(f.path)}
-                    onMouseEnter={() => setHoveredFile(f.path)}
-                    onMouseLeave={() => setHoveredFile(null)}
-                    title={`${f.path} (${f.size} bytes)`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '3px 10px 3px 22px',
-                      cursor: 'pointer',
-                      background: isActive ? 'rgba(107,92,166,0.18)' : isHovered ? 'rgba(107,92,166,0.08)' : 'transparent',
-                      borderLeft: isActive ? `2px solid ${BB.primaryLight}` : '2px solid transparent',
-                      transition: 'all 80ms',
-                    }}
-                  >
-                    <FileCode style={{ width: 11, height: 11, color: isActive ? BB.primaryLight : BB.muted, flexShrink: 0 }} />
-                    <span
-                      style={{
-                        fontSize: 10.5,
-                        color: isActive ? BB.text : BB.muted,
-                        fontFamily: 'Consolas, Monaco, monospace',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        flex: 1,
-                      }}
-                    >
-                      {f.name}
-                    </span>
-                    {isHovered && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onDeleteFile(f.path); }}
-                        title="Delete output artifact"
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          background: 'transparent',
-                          border: 'none',
-                          color: BB.muted,
-                          cursor: 'pointer',
-                          padding: 1,
-                          borderRadius: 2,
-                          flexShrink: 0,
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = BB.error; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
-                      >
-                        <Trash2 style={{ width: 10, height: 10 }} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })
-            ) : (
-              <div style={{ padding: '3px 10px 3px 22px', fontSize: 10, color: BB.disabled, fontStyle: 'italic' }}>
-                (empty — run to generate)
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 3. SCRIPTS / EXPERIMENTS FOLDER */}
-        <div
-          onClick={() => setScriptsFolderOpen((o) => !o)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '4px 10px',
-            cursor: 'pointer',
-            color: BB.text,
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: '0.03em',
-          }}
-        >
-          {scriptsFolderOpen
-            ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
-            : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
-          <FolderOpen style={{ width: 12, height: 12, flexShrink: 0, color: BB.gold }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-            experiments/
-          </span>
-        </div>
-
-        {/* File Rows */}
-        {scriptsFolderOpen && files.map((f) => {
+        {files.map((f) => {
           const isActive = f.name === activeFile;
           const isHovered = hoveredFile === f.name;
           const isModified = modifiedFileNames.includes(f.name);
@@ -534,18 +303,25 @@ function ExperimentExplorer({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '4px 10px 4px 22px',
+                gap: 7,
+                padding: '6px 12px 6px 14px',
                 cursor: 'pointer',
-                background: isActive ? 'rgba(107,92,166,0.18)' : isHovered ? 'rgba(107,92,166,0.08)' : 'transparent',
+                background: isActive ? 'rgba(107,92,166,0.22)' : isHovered ? 'rgba(107,92,166,0.08)' : 'transparent',
                 borderLeft: isActive ? `2px solid ${BB.gold}` : '2px solid transparent',
                 transition: 'all 80ms',
               }}
             >
-              <FileCode style={{ width: 12, height: 12, color: isActive ? BB.gold : BB.muted, flexShrink: 0 }} />
+              <FileCode
+                style={{
+                  width: 13,
+                  height: 13,
+                  color: isActive ? BB.gold : '#38BDF8',
+                  flexShrink: 0,
+                }}
+              />
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 11.5,
                   color: isActive ? BB.text : BB.muted,
                   fontFamily: 'Consolas, Monaco, monospace',
                   overflow: 'hidden',
@@ -561,7 +337,7 @@ function ExperimentExplorer({
               {/* Status indicators */}
               {isModified && (
                 <span
-                  title="Contains unsaved / user edits"
+                  title="Unsaved changes"
                   style={{ width: 6, height: 6, borderRadius: '50%', background: BB.gold, flexShrink: 0 }}
                 />
               )}
@@ -571,11 +347,14 @@ function ExperimentExplorer({
                 </span>
               )}
 
-              {/* Delete on hover (non-active only) */}
-              {isHovered && files.length > 1 && (
+              {/* Delete on hover (non-active only, when > 1 file) */}
+              {isHovered && files.length > 1 && f.name !== 'pipeline_generated.py' && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); onDeleteFile(f.name); }}
-                  title="Delete file"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteFile(f.name);
+                  }}
+                  title="Delete script"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -583,8 +362,8 @@ function ExperimentExplorer({
                     border: 'none',
                     color: BB.muted,
                     cursor: 'pointer',
-                    padding: 1,
-                    borderRadius: 2,
+                    padding: 2,
+                    borderRadius: 3,
                     flexShrink: 0,
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.color = BB.error; }}
@@ -598,8 +377,8 @@ function ExperimentExplorer({
         })}
 
         {/* Inline new file input */}
-        {scriptsFolderOpen && pendingNewFileName !== null && (
-          <div style={{ padding: '4px 10px 4px 22px' }}>
+        {pendingNewFileName !== null && (
+          <div style={{ padding: '4px 12px' }}>
             <input
               ref={newFileInputRef}
               value={pendingNewFileName}
@@ -609,7 +388,7 @@ function ExperimentExplorer({
                 if (e.key === 'Escape') onPendingNameCancel();
               }}
               onBlur={onPendingNameCommit}
-              placeholder="filename.py"
+              placeholder="script_name.py"
               style={{
                 width: '100%',
                 background: BB.elevated,
@@ -618,7 +397,7 @@ function ExperimentExplorer({
                 color: BB.text,
                 fontSize: 11,
                 fontFamily: 'Consolas, Monaco, monospace',
-                padding: '3px 6px',
+                padding: '4px 8px',
                 outline: 'none',
                 boxSizing: 'border-box',
               }}
@@ -627,11 +406,47 @@ function ExperimentExplorer({
         )}
 
         {/* Empty hint */}
-        {scriptsFolderOpen && files.length === 0 && pendingNewFileName === null && (
-          <div style={{ padding: '10px 22px', fontSize: 10.5, color: BB.disabled, fontStyle: 'italic' }}>
-            Click + to create an experiment file
+        {files.length === 0 && pendingNewFileName === null && (
+          <div style={{ padding: '12px 14px', fontSize: 11, color: BB.disabled, fontStyle: 'italic' }}>
+            No experiment scripts found.
           </div>
         )}
+
+        {/* Action button at bottom */}
+        <div style={{ padding: '8px 12px' }}>
+          <button
+            onClick={onNewFile}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              padding: '5px 8px',
+              borderRadius: 4,
+              border: `1px dashed ${BB.border}`,
+              background: 'transparent',
+              color: BB.muted,
+              fontSize: 10.5,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 120ms ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = BB.gold;
+              e.currentTarget.style.color = BB.gold;
+              e.currentTarget.style.background = 'rgba(201,162,75,0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = BB.border;
+              e.currentTarget.style.color = BB.muted;
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <Plus style={{ width: 11, height: 11 }} />
+            <span>New Script</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1794,6 +1609,25 @@ export function ViewAsCodeStudio({
     }
   };
 
+  /* ── Global IDE Keyboard Shortcuts (Ctrl+Enter: Run, Ctrl+S: Save) ── */
+  useEffect(() => {
+    if (!isActive) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (execStatus !== 'running' && execStatus !== 'queued' && !isGenerating && displayedCode) {
+          handleRunCode();
+        }
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        handleSaveCode();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isActive, execStatus, isGenerating, displayedCode, handleRunCode, handleSaveCode]);
+
   const handleDeployFromCodeStudio = async () => {
     setIsDeployingArtifact(true);
     try {
@@ -2112,6 +1946,214 @@ export function ViewAsCodeStudio({
         onReject={handleRejectDiff}
       />
 
+      {/* ── Scikit-Learn ML Snippets Modal Dialog ── */}
+      {isSnippetsDropdownOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Scikit-Learn ML Snippets"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(5, 3, 10, 0.78)',
+            backdropFilter: 'blur(6px)',
+            padding: 20,
+          }}
+        >
+          {/* Backdrop click target */}
+          <div
+            data-testid="snippets-backdrop"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 1,
+            }}
+            onClick={() => setIsSnippetsDropdownOpen(false)}
+          />
+          {/* Modal Container */}
+          <div
+            data-testid="snippets-dropdown-list"
+            style={{
+              position: 'relative',
+              zIndex: 2,
+              width: '100%',
+              maxWidth: 640,
+              maxHeight: '85vh',
+              background: '#151026',
+              border: `1px solid ${BB.gold}`,
+              borderRadius: 12,
+              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.9), 0 0 20px rgba(201, 162, 75, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                padding: '14px 18px',
+                borderBottom: `1px solid ${BB.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(90deg, #1C1534 0%, #151026 100%)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: 'rgba(201, 162, 75, 0.15)',
+                    border: '1px solid rgba(201, 162, 75, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: BB.gold,
+                  }}
+                >
+                  <FileCode style={{ width: 18, height: 18 }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: BB.text }}>
+                    Scikit-Learn ML Snippets
+                  </div>
+                  <div style={{ fontSize: 11, color: BB.muted, marginTop: 2 }}>
+                    Battle-tested scikit-learn patterns to insert into {currentFile}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsSnippetsDropdownOpen(false)}
+                title="Close snippets (Esc)"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: BB.muted,
+                  cursor: 'pointer',
+                  padding: 6,
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+
+            {/* Snippets List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {ML_SNIPPETS.map((snip) => (
+                <div
+                  key={snip.id}
+                  data-testid={`snippet-item-${snip.id}`}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 8,
+                    background: 'rgba(28, 21, 52, 0.6)',
+                    border: `1px solid ${BB.border}`,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    transition: 'all 100ms ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: BB.text }}>
+                        {snip.title}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontFamily: 'Consolas, Monaco, monospace',
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                          background: 'rgba(201, 162, 75, 0.15)',
+                          color: BB.gold,
+                          border: '1px solid rgba(201, 162, 75, 0.3)',
+                        }}
+                      >
+                        +{snip.id}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsSnippetsDropdownOpen(false);
+                        handleInsertSnippet(snip);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '4px 10px',
+                        borderRadius: 5,
+                        background: 'linear-gradient(135deg, rgba(201,162,75,0.25), rgba(75,59,124,0.35))',
+                        border: `1px solid ${BB.gold}`,
+                        color: BB.gold,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        transition: 'all 120ms ease',
+                      }}
+                    >
+                      <Plus style={{ width: 12, height: 12 }} />
+                      <span>Insert Snippet</span>
+                    </button>
+                  </div>
+
+                  <div style={{ fontSize: 11, color: BB.muted, lineHeight: 1.45 }}>
+                    {snip.documentation}
+                  </div>
+
+                  {snip.learningExplanation && (
+                    <div
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        background: 'rgba(75, 59, 124, 0.25)',
+                        borderLeft: `3px solid ${BB.gold}`,
+                        fontSize: 10.5,
+                        color: '#D4CDE6',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      <strong style={{ color: BB.gold }}>ML Best Practice: </strong>
+                      {snip.learningExplanation}
+                    </div>
+                  )}
+
+                  {/* Code Preview box */}
+                  <div
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      background: '#0B0914',
+                      border: '1px solid rgba(255,255,255,0.06)',
+                      fontFamily: 'Consolas, Monaco, monospace',
+                      fontSize: 10.5,
+                      color: '#9E93B8',
+                      maxHeight: 90,
+                      overflowY: 'auto',
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {snip.insertText.slice(0, 220)}...
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── LEFT & CENTER: STUDIO WORKSPACE (Tabs, Toolbar, Explorer, Editor, Terminal) ── */}
       <div
         style={{
@@ -2165,19 +2207,8 @@ export function ViewAsCodeStudio({
                   transition: 'background 100ms ease, color 100ms ease',
                 }}
               >
-                {tab.startsWith('data/') ? (
-                  <Database style={{ width: 13, height: 13, color: isActiveTab ? BB.gold : BB.muted, flexShrink: 0 }} />
-                ) : tab.startsWith('outputs/') ? (
-                  <Folder style={{ width: 13, height: 13, color: isActiveTab ? BB.primaryLight : BB.muted, flexShrink: 0 }} />
-                ) : (
-                  <FileCode style={{ width: 13, height: 13, color: isActiveTab ? BB.gold : BB.muted, flexShrink: 0 }} />
-                )}
+                <FileCode style={{ width: 13, height: 13, color: isActiveTab ? BB.gold : '#38BDF8', flexShrink: 0 }} />
                 <span>{tab}</span>
-                {tab.startsWith('data/') && (
-                  <span title="Read-only" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    <Lock style={{ width: 10, height: 10, color: BB.muted, flexShrink: 0 }} />
-                  </span>
-                )}
                 {isModified && (
                   <span
                     title="Modified"
@@ -2211,6 +2242,31 @@ export function ViewAsCodeStudio({
 
         {/* Right: Studio Action Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', flexShrink: 0 }}>
+          {/* Preview Impact / Pipeline Guardian Button */}
+          <button
+            onClick={() => safeGeneratePipelineCode(currentFile)}
+            disabled={isGenerating || !isConfigValid}
+            aria-label="Preview impact"
+            title="Review ML cause & effect vs visual pipeline baseline"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              borderRadius: 5,
+              border: `1px solid ${isFileModified(currentFile) ? BB.gold : BB.border}`,
+              background: isFileModified(currentFile) ? 'rgba(201,162,75,0.14)' : 'transparent',
+              color: isFileModified(currentFile) ? BB.gold : BB.muted,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: isGenerating || !isConfigValid ? 'not-allowed' : 'pointer',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <SplitSquareVertical style={{ width: 12, height: 12 }} />
+            <span>Preview Impact</span>
+          </button>
+
           {/* Regenerate Code Button */}
           <button
             onClick={() => safeGeneratePipelineCode(currentFile)}
@@ -2240,6 +2296,31 @@ export function ViewAsCodeStudio({
             />
           </button>
 
+          {/* Save File Button */}
+          <button
+            onClick={handleSaveCode}
+            disabled={!displayedCode || isFileReadOnly || !isFileModified(currentFile)}
+            aria-label="Save file"
+            title="Save changes to workspace (Ctrl+S)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 9px',
+              borderRadius: 5,
+              border: `1px solid ${isFileModified(currentFile) ? BB.gold : BB.border}`,
+              background: isFileModified(currentFile) ? 'rgba(201,162,75,0.18)' : 'transparent',
+              color: isFileModified(currentFile) ? BB.gold : BB.muted,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: isFileModified(currentFile) ? 'pointer' : 'default',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <Save style={{ width: 12, height: 12 }} />
+            <span>Save</span>
+          </button>
+
           {/* Copy Code Button */}
           <button
             onClick={handleCopyCode}
@@ -2263,125 +2344,34 @@ export function ViewAsCodeStudio({
             {copied ? <Check style={{ width: 13, height: 13 }} /> : <Copy style={{ width: 13, height: 13 }} />}
           </button>
 
-          {/* 5.3 Quick ML Snippets Menu */}
-          <div style={{ position: 'relative' }}>
-            <button
-              data-testid="snippets-menu-btn"
-              onClick={() => setIsSnippetsDropdownOpen((o) => !o)}
-              aria-label="Insert ML snippet"
-              title="Insert working scikit-learn ML snippets"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 9px',
-                borderRadius: 5,
-                border: `1px solid ${isSnippetsDropdownOpen ? BB.gold : BB.border}`,
-                background: isSnippetsDropdownOpen ? 'rgba(201,162,75,0.18)' : 'rgba(28,21,52,0.6)',
-                color: isSnippetsDropdownOpen ? BB.gold : BB.text,
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 120ms ease',
-              }}
-            >
-              <FileCode style={{ width: 12, height: 12, color: BB.gold }} />
-              <span>Snippets</span>
-              <ChevronDown style={{ width: 10, height: 10, transform: isSnippetsDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 120ms' }} />
-            </button>
-            {isSnippetsDropdownOpen && (
-              <>
-                {/* Backdrop to close on click outside */}
-                <div
-                  data-testid="snippets-backdrop"
-                  style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    zIndex: 998,
-                  }}
-                  onClick={() => setIsSnippetsDropdownOpen(false)}
-                />
-                <div
-                  data-testid="snippets-dropdown-list"
-                  style={{
-                    position: 'absolute',
-                    top: 'calc(100% + 4px)',
-                    right: 0,
-                    width: 320,
-                    maxHeight: 'calc(100vh - 120px)',
-                    overflowY: 'auto',
-                    background: BB.surface,
-                    border: `1px solid ${BB.gold}`,
-                    borderRadius: 8,
-                    boxShadow: '0 12px 36px rgba(0,0,0,0.85), 0 0 15px rgba(201,162,75,0.2)',
-                    zIndex: 999,
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: '8px 12px',
-                      fontSize: 10.5,
-                      fontWeight: 700,
-                      color: BB.gold,
-                      borderBottom: `1px solid ${BB.border}`,
-                      textTransform: 'uppercase',
-                      letterSpacing: 0.6,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      background: 'rgba(201, 162, 75, 0.08)',
-                    }}
-                  >
-                    <span>ML Code Snippets</span>
-                    {learningMode && (
-                      <span style={{ fontSize: 9.5, color: BB.goldLight, padding: '1px 5px', borderRadius: 3, background: 'rgba(201, 162, 75, 0.2)' }}>
-                        🎓 Learning Mode
-                      </span>
-                    )}
-                  </div>
-                  {ML_SNIPPETS.map((snip) => (
-                    <div
-                      key={snip.id}
-                      data-testid={`snippet-item-${snip.id}`}
-                      onClick={() => {
-                        setIsSnippetsDropdownOpen(false);
-                        handleInsertSnippet(snip);
-                      }}
-                      style={{
-                        padding: '9px 12px',
-                        cursor: 'pointer',
-                        borderBottom: `1px solid ${BB.border}33`,
-                        transition: 'all 80ms ease',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'rgba(201, 162, 75, 0.14)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'transparent';
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ fontSize: 11.5, fontWeight: 600, color: BB.text }}>{snip.title}</div>
-                        <span style={{ fontSize: 9, fontFamily: 'Consolas, Monaco, monospace', color: BB.muted }}>
-                          +{snip.id}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 10, color: BB.muted, marginTop: 3, lineHeight: 1.4 }}>
-                        {snip.documentation}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          {/* Quick ML Snippets Menu Button */}
+          <button
+            data-testid="snippets-menu-btn"
+            onClick={() => setIsSnippetsDropdownOpen((o) => !o)}
+            aria-label="Insert ML snippet"
+            title="Insert working scikit-learn ML snippets"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 9px',
+              borderRadius: 5,
+              border: `1px solid ${isSnippetsDropdownOpen ? BB.gold : BB.border}`,
+              background: isSnippetsDropdownOpen ? 'rgba(201,162,75,0.18)' : 'rgba(28,21,52,0.6)',
+              color: isSnippetsDropdownOpen ? BB.gold : BB.text,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <FileCode style={{ width: 12, height: 12, color: BB.gold }} />
+            <span>Snippets</span>
+          </button>
 
           <div style={{ width: 1, height: 16, background: BB.border, margin: '0 2px' }} />
 
-          {/* Execution: Stop or Run Button */}
+          {/* Execution: Stop or Run Experiment Button */}
           {(execStatus === 'running' || execStatus === 'queued') ? (
             <button
               onClick={handleStopExecution}
@@ -2391,18 +2381,19 @@ export function ViewAsCodeStudio({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 5,
-                padding: '4px 12px',
+                padding: '4px 14px',
                 borderRadius: 5,
                 border: `1px solid ${BB.error}`,
-                background: 'rgba(239,68,68,0.2)',
+                background: 'rgba(239,68,68,0.22)',
                 color: BB.error,
                 fontSize: 11.5,
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
+                boxShadow: '0 0 10px rgba(239,68,68,0.25)',
                 transition: 'all 120ms ease',
               }}
             >
-              <Square style={{ width: 12, height: 12, fill: BB.error }} />
+              <Square style={{ width: 11, height: 11, fill: BB.error }} />
               <span>Stop</span>
             </button>
           ) : (
@@ -2414,20 +2405,21 @@ export function ViewAsCodeStudio({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 5,
-                padding: '4px 12px',
+                gap: 6,
+                padding: '4px 14px',
                 borderRadius: 5,
                 border: '1px solid rgba(34,197,94,0.6)',
-                background: 'linear-gradient(135deg, rgba(34,197,94,0.22), rgba(75,59,124,0.3))',
+                background: 'linear-gradient(135deg, rgba(34,197,94,0.28), rgba(75,59,124,0.35))',
                 color: BB.success,
                 fontSize: 11.5,
                 fontWeight: 700,
                 cursor: isGenerating || !displayedCode ? 'not-allowed' : 'pointer',
+                boxShadow: '0 0 12px rgba(34,197,94,0.22)',
                 transition: 'all 120ms ease',
               }}
             >
               <Play style={{ width: 12, height: 12, fill: BB.success }} />
-              <span>Run</span>
+              <span>Run Experiment</span>
             </button>
           )}
 
@@ -2866,50 +2858,61 @@ export function ViewAsCodeStudio({
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               {/* Execution Status Pill */}
-              {execStatus !== 'idle' && (
-                <span
-                  style={{
-                    padding: '1px 8px',
-                    borderRadius: 3,
-                    fontSize: 10.5,
-                    fontWeight: 600,
-                    background:
-                      execStatus === 'running'
-                        ? 'rgba(34,197,94,0.18)'
-                        : execStatus === 'completed'
-                        ? 'rgba(34,197,94,0.15)'
-                        : execStatus === 'queued'
-                        ? 'rgba(234,179,8,0.15)'
-                        : execStatus === 'timed_out'
-                        ? 'rgba(249,115,22,0.18)'
-                        : execStatus === 'out_of_memory'
-                        ? 'rgba(239,68,68,0.25)'
-                        : execStatus === 'cancelled' || execStatus === 'stopped'
-                        ? 'rgba(148,163,184,0.18)'
-                        : 'rgba(239,68,68,0.18)',
-                    color:
-                      execStatus === 'running' || execStatus === 'completed'
-                        ? BB.success
-                        : execStatus === 'queued'
-                        ? '#EAB308'
-                        : execStatus === 'timed_out'
-                        ? '#F97316'
-                        : execStatus === 'out_of_memory'
-                        ? '#EF4444'
-                        : execStatus === 'cancelled' || execStatus === 'stopped'
-                        ? '#94A3B8'
-                        : BB.error,
-                  }}
-                >
-                  {execStatus === 'running' && '● Running'}
-                  {execStatus === 'queued' && `⏳ Queued${queuePosition ? ` (#${queuePosition})` : ''}`}
-                  {execStatus === 'completed' && `✓ Done${execDuration ? ` (${execDuration.toFixed(1)}s)` : ''}`}
-                  {execStatus === 'timed_out' && '⏱ Timed Out (124)'}
-                  {execStatus === 'out_of_memory' && '💥 Out of Memory (137)'}
-                  {execStatus === 'failed' && (execExitCode !== null ? `✕ Failed (Exit ${execExitCode})` : '✕ Unavailable')}
-                  {(execStatus === 'stopped' || execStatus === 'cancelled') && '■ Cancelled'}
-                </span>
-              )}
+              <span
+                data-testid="execution-status-pill"
+                style={{
+                  padding: '1px 8px',
+                  borderRadius: 3,
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  background:
+                    execStatus === 'running'
+                      ? 'rgba(34,197,94,0.18)'
+                      : execStatus === 'completed'
+                      ? 'rgba(34,197,94,0.15)'
+                      : execStatus === 'queued'
+                      ? 'rgba(234,179,8,0.15)'
+                      : execStatus === 'timed_out'
+                      ? 'rgba(249,115,22,0.18)'
+                      : execStatus === 'out_of_memory'
+                      ? 'rgba(239,68,68,0.25)'
+                      : execStatus === 'cancelled' || execStatus === 'stopped'
+                      ? 'rgba(148,163,184,0.18)'
+                      : execStatus === 'failed'
+                      ? 'rgba(239,68,68,0.18)'
+                      : 'rgba(107,92,166,0.15)',
+                  color:
+                    execStatus === 'running' || execStatus === 'completed'
+                      ? BB.success
+                      : execStatus === 'queued'
+                      ? '#EAB308'
+                      : execStatus === 'timed_out'
+                      ? '#F97316'
+                      : execStatus === 'out_of_memory'
+                      ? '#EF4444'
+                      : execStatus === 'cancelled' || execStatus === 'stopped'
+                      ? '#94A3B8'
+                      : execStatus === 'failed'
+                      ? BB.error
+                      : BB.muted,
+                  border: `1px solid ${
+                    execStatus === 'idle'
+                      ? 'rgba(107,92,166,0.3)'
+                      : execStatus === 'running' || execStatus === 'completed'
+                      ? 'rgba(34,197,94,0.35)'
+                      : 'rgba(239,68,68,0.35)'
+                  }`,
+                }}
+              >
+                {execStatus === 'idle' && '● Ready'}
+                {execStatus === 'running' && '● Running'}
+                {execStatus === 'queued' && `⏳ Queued${queuePosition ? ` (#${queuePosition})` : ''}`}
+                {execStatus === 'completed' && `✓ Done${execDuration ? ` (${execDuration.toFixed(1)}s)` : ''}`}
+                {execStatus === 'timed_out' && '⏱ Timed Out (124)'}
+                {execStatus === 'out_of_memory' && '💥 Out of Memory (137)'}
+                {execStatus === 'failed' && (execExitCode !== null ? `✕ Failed (Exit ${execExitCode})` : '✕ Unavailable')}
+                {(execStatus === 'stopped' || execStatus === 'cancelled') && '■ Cancelled'}
+              </span>
 
               {/* Terminal Toggle Button */}
               <button
@@ -3043,34 +3046,30 @@ export function ViewAsCodeStudio({
 
                 <div style={{ flex: 1 }} />
 
-                {/* Phase 4 Security Gate: PTY Terminal Status Indicator */}
-                <div
-                  data-testid="pty-shell-blocked-badge"
-                  title="DEPLOYMENT BLOCKER: Containerized network and filesystem namespace isolation (gVisor/ephemeral container sandbox) must be configured before arbitrary PTY shell execution is permitted."
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '2px 8px',
-                    marginRight: 8,
-                    borderRadius: 4,
-                    background: 'rgba(239, 68, 68, 0.12)',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    color: '#EF4444',
-                    fontSize: 10.5,
-                    fontFamily: 'Consolas, Monaco, monospace',
-                    fontWeight: 600,
-                    cursor: 'help',
-                    userSelect: 'none',
-                  }}
-                >
-                  <Lock style={{ width: 10, height: 10 }} />
-                  <span>PTY Shell (Blocked)</span>
-                </div>
-
-                {/* Execution Status Badge */}
-                {execStatus !== 'idle' && (
+                {/* Clean Execution Status Indicator */}
+                {execStatus === 'idle' ? (
                   <span
+                    data-testid="execution-status-pill"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 5,
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                      background: 'rgba(107, 92, 166, 0.15)',
+                      border: '1px solid rgba(107, 92, 166, 0.3)',
+                      color: BB.muted,
+                      fontSize: 10,
+                      fontFamily: 'Consolas, Monaco, monospace',
+                      marginRight: 6,
+                    }}
+                  >
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: BB.success }} />
+                    <span>Ready</span>
+                  </span>
+                ) : (
+                  <span
+                    data-testid="execution-status-pill"
                     style={{
                       fontSize: 10,
                       fontFamily: 'Consolas, Monaco, monospace',
@@ -3134,83 +3133,7 @@ export function ViewAsCodeStudio({
                   </span>
                 )}
 
-                {/* Interactive PTY Gate Status Indicator */}
-                <span
-                  title="Interactive PTY shell disabled: Security Gate Blocker. Network and filesystem namespace isolation must be configured before arbitrary shell execution is permitted."
-                  style={{
-                    padding: '2px 8px',
-                    borderRadius: 4,
-                    fontSize: 10,
-                    fontFamily: 'Consolas, Monaco, monospace',
-                    background: 'rgba(239, 68, 68, 0.08)',
-                    border: '1px solid rgba(239, 68, 68, 0.25)',
-                    color: '#EF4444',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    cursor: 'help',
-                    marginRight: 6,
-                  }}
-                >
-                  <Lock style={{ width: 10, height: 10 }} />
-                  <span>PTY Shell (Blocked)</span>
-                </span>
-
-                {/* Download Raw Terminal Output */}
-                {execId && outputLines.length > 0 && (
-                  <a
-                    href={typeof CodeExecutionService?.downloadOutputUrl === 'function' ? CodeExecutionService.downloadOutputUrl(execId) : '#'}
-                    download={`execution-${execId}.txt`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Download complete raw execution output"
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: BB.muted,
-                      textDecoration: 'none',
-                      cursor: 'pointer',
-                      padding: '0 8px',
-                      fontSize: 11,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
-                  >
-                    <Download style={{ width: 11, height: 11 }} />
-                    <span>Download</span>
-                  </a>
-                )}
-
-                {/* Copy Terminal Output */}
-                {outputLines.length > 0 && (
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(outputLines.join('\n'));
-                      onShowToast?.('Terminal Copied', 'Output buffer copied to clipboard.', 'success');
-                    }}
-                    title="Copy terminal output"
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: BB.muted,
-                      cursor: 'pointer',
-                      padding: '0 8px',
-                      fontSize: 11,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
-                  >
-                    <Copy style={{ width: 11, height: 11 }} />
-                    <span>Copy</span>
-                  </button>
-                )}
-
+                {/* Clear Terminal Output */}
                 {outputLines.length > 0 && (
                   <button
                     onClick={() => setOutputLines([])}
