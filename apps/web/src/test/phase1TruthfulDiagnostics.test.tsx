@@ -1,6 +1,5 @@
-import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { parsePipelineTargetAndConfig } from '../utils/codeParser';
 import { RegenerateDiffModal } from '../features/pipelines/RegenerateDiffModal';
 
@@ -86,6 +85,7 @@ print("custom script")
       // In Phase 0 regex analyzer, typing 'hello world' below valid code reported 0 errors.
       // Under truthful Python AST parsing:
       const sampleWithRandomWords = `import pandas as pd\nimport numpy as np\nhello world`;
+      expect(sampleWithRandomWords).toContain('hello world');
       // AST check: invalid syntax
       let syntaxErrorFound = false;
       try {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { DiffEditor } from '@monaco-editor/react';
-import { RefreshCw, Check, X, SplitSquareVertical } from 'lucide-react';
+import { Check, X, SplitSquareVertical } from 'lucide-react';
 
 interface RegenerateDiffModalProps {
   isOpen: boolean;

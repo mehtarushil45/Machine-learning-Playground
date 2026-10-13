@@ -148,7 +148,6 @@ describe('Phase 2: Code Studio Workspace and Persistence', () => {
   });
 
   it('protects data/ files as read-only and forbids deletion', async () => {
-    const onShowToast = vi.fn();
     render(
       <ProjectProvider>
         <WorkspaceHarness />

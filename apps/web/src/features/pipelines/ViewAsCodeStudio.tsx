@@ -1991,7 +1991,9 @@ export function ViewAsCodeStudio({
                 )}
                 <span>{tab}</span>
                 {tab.startsWith('data/') && (
-                  <Lock style={{ width: 10, height: 10, color: BB.muted, flexShrink: 0 }} title="Read-only" />
+                  <span title="Read-only" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <Lock style={{ width: 10, height: 10, color: BB.muted, flexShrink: 0 }} />
+                  </span>
                 )}
                 {isModified && (
                   <span
@@ -2403,6 +2405,7 @@ export function ViewAsCodeStudio({
                   markFileModified(currentFile);
                 }}
                 onCursorChange={(pos) => setCursorPos(pos)}
+                targetPosition={cursorPos}
                 onRunCode={handleRunCode}
                 onSave={handleSaveCode}
                 onToggleTerminal={() => setBottomPanelOpen((o) => !o)}

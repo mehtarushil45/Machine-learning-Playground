@@ -31,6 +31,7 @@ export interface MonacoCodeStudioEditorProps {
   filename?: string;
   diagnostics?: CodeDiagnostic[];
   onCursorChange?: (pos: { line: number; col: number }) => void;
+  targetPosition?: { line: number; col: number } | null;
   onRunCode?: () => void;
   onSave?: () => void;
   onToggleTerminal?: () => void;
@@ -51,6 +52,7 @@ export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
   filename = 'train.py',
   diagnostics = [],
   onCursorChange,
+  targetPosition,
   onRunCode,
   onSave,
   onToggleTerminal,
@@ -299,6 +301,22 @@ export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
 
     monaco.editor.setModelMarkers(model, 'mlpg-lint', markers);
   }, [diagnostics]);
+
+  // Jump cursor and reveal line when targetPosition changes (e.g. clicking a problem)
+  useEffect(() => {
+    if (!editorRef.current || !targetPosition) return;
+    try {
+      editorRef.current.setPosition({
+        lineNumber: Math.max(1, targetPosition.line),
+        column: Math.max(1, targetPosition.col || 1),
+      });
+      editorRef.current.revealPositionInCenter({
+        lineNumber: Math.max(1, targetPosition.line),
+        column: Math.max(1, targetPosition.col || 1),
+      });
+      editorRef.current.focus();
+    } catch {}
+  }, [targetPosition]);
 
   // Handle fallback in test runner environments (JSDOM / Vitest)
   if (isTestEnv) {
