@@ -2812,6 +2812,31 @@ export function ViewAsCodeStudio({
 
                 <div style={{ flex: 1 }} />
 
+                {/* Phase 4 Security Gate: PTY Terminal Status Indicator */}
+                <div
+                  data-testid="pty-shell-blocked-badge"
+                  title="DEPLOYMENT BLOCKER: Containerized network and filesystem namespace isolation (gVisor/ephemeral container sandbox) must be configured before arbitrary PTY shell execution is permitted."
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '2px 8px',
+                    marginRight: 8,
+                    borderRadius: 4,
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: '#EF4444',
+                    fontSize: 10.5,
+                    fontFamily: 'Consolas, Monaco, monospace',
+                    fontWeight: 600,
+                    cursor: 'help',
+                    userSelect: 'none',
+                  }}
+                >
+                  <Lock style={{ width: 10, height: 10 }} />
+                  <span>PTY Shell (Blocked)</span>
+                </div>
+
                 {/* Execution Status Badge */}
                 {execStatus !== 'idle' && (
                   <span
@@ -2877,6 +2902,28 @@ export function ViewAsCodeStudio({
                       : `✕ FAILED${execExitCode != null ? ` (${execExitCode})` : ''}`}
                   </span>
                 )}
+
+                {/* Interactive PTY Gate Status Indicator */}
+                <span
+                  title="Interactive PTY shell disabled: Security Gate Blocker. Network and filesystem namespace isolation must be configured before arbitrary shell execution is permitted."
+                  style={{
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontFamily: 'Consolas, Monaco, monospace',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    color: '#EF4444',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    cursor: 'help',
+                    marginRight: 6,
+                  }}
+                >
+                  <Lock style={{ width: 10, height: 10 }} />
+                  <span>PTY Shell (Blocked)</span>
+                </span>
 
                 {/* Download Raw Terminal Output */}
                 {execId && outputLines.length > 0 && (
@@ -3273,6 +3320,25 @@ export function ViewAsCodeStudio({
 
                 {bottomTab === 'debug' && (
                   <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px', fontSize: 11.5, fontFamily: 'Consolas, Monaco, monospace' }}>
+                    <div
+                      style={{
+                        marginBottom: 12,
+                        padding: '8px 12px',
+                        background: 'rgba(107, 92, 166, 0.1)',
+                        border: `1px solid ${BB.border}`,
+                        borderRadius: 6,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        color: BB.muted,
+                        fontSize: 11,
+                      }}
+                    >
+                      <Activity style={{ width: 13, height: 13, color: BB.gold }} />
+                      <span>
+                        <strong style={{ color: BB.text }}>Execution Inspector</strong> — Interactive breakpoints & step-debugging not available yet (planned for Phase 7).
+                      </span>
+                    </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '4px 12px', lineHeight: 1.8 }}>
                       {/* Execution metadata */}
                       <span style={{ color: BB.muted }}>Execution ID</span>

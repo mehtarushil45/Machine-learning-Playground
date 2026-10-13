@@ -51,6 +51,12 @@ def is_redis_available(host: Optional[str] = None, port: Optional[int] = None, t
         return False
 
 
+_ALLOWED_ENV_VARS: frozenset[str] = frozenset({
+    "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "HOME", "USER",
+    "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+})
+
+
 @dataclass
 class ExecutionRecord:
     exec_id:             str
@@ -372,11 +378,10 @@ async def _run_execution(
         except Exception:
             pass
 
-    # Clean, isolated execution environment: strip database credentials, tokens, secrets
-    _SENSITIVE_PREFIXES = ("DATABASE", "REDIS", "POSTGRES", "AWS", "SECRET", "JWT", "CELERY", "S3", "MINIO", "TOKEN", "API_KEY", "PASSWORD")
+    # Clean, isolated execution environment: strict allowlist of harmless variables only
     env = {
         k: v for k, v in os.environ.items()
-        if not any(k.upper().startswith(p) for p in _SENSITIVE_PREFIXES)
+        if k in _ALLOWED_ENV_VARS or k.upper() in _ALLOWED_ENV_VARS
     }
     env.update(extra_env)
     env["PYTHONPATH"] = sandbox + os.pathsep + env.get("PYTHONPATH", "")

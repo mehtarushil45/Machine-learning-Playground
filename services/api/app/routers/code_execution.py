@@ -549,3 +549,46 @@ async def sync_dataset_route(project_id: str, payload: WorkspaceSyncDatasetReque
     success = sync_dataset_to_workspace(project_id, payload.dataset_id)
     return {"project_id": project_id, "mounted": success}
 
+
+# ---------------------------------------------------------------------------
+# Phase 4: Interactive Terminal / PTY Session Feature Flag & Gate Blocker
+# ---------------------------------------------------------------------------
+ENABLE_INTERACTIVE_TERMINAL: bool = False
+
+
+@router.get("/terminal/status", summary="Get interactive terminal capability status")
+async def get_terminal_status() -> dict:
+    """Return status of interactive PTY terminal capability.
+    
+    Reports security gate status honestly according to platform security policy.
+    """
+    return {
+        "enabled": ENABLE_INTERACTIVE_TERMINAL,
+        "status": "blocked",
+        "reason": "DEPLOYMENT BLOCKER: Containerized network and filesystem namespace isolation (gVisor/ephemeral container sandbox) must be configured before arbitrary PTY shell execution is permitted.",
+        "checks": {
+            "secrets_scrubbed": True,
+            "database_network_isolated": False,
+            "redis_network_isolated": False,
+            "minio_network_isolated": False,
+            "internet_egress_isolated": False,
+            "filesystem_jail_isolated": False,
+        },
+    }
+
+
+@router.websocket("/terminal/pty")
+async def websocket_terminal_gate(websocket: WebSocket) -> None:
+    """WebSocket interactive terminal endpoint.
+    
+    Rejects connection with 403 / DEPLOYMENT_BLOCKER explaining the Phase 4 gate deployment blocker.
+    """
+    await websocket.accept()
+    await websocket.send_json({
+        "type": "error",
+        "code": "DEPLOYMENT_BLOCKER",
+        "message": "Interactive terminal is disabled: Security Gate Blocker. Network and filesystem boundary isolation must be configured before arbitrary shell execution is permitted.",
+    })
+    await websocket.close(code=1008)
+
+

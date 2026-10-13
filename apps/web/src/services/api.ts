@@ -955,6 +955,10 @@ export const CodeExecutionService = {
         body: JSON.stringify({ dataset_id: datasetId }),
       }
     ),
+
+  /** Phase 4 Security Gate: Get interactive terminal status */
+  getTerminalStatus: () =>
+    request<{ enabled: boolean; status: string; reason: string }>('/code-execution/terminal/status'),
 };
 
 // ---------------------------------------------------------------------------

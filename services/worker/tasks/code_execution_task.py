@@ -276,10 +276,14 @@ def execute_code_sandbox(
         except Exception:
             pass
 
-    # Sanitize environment: strip database credentials and sensitive keys
+    # Clean, isolated execution environment: strict allowlist of harmless variables only
+    _ALLOWED_ENV_VARS = {
+        "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "HOME", "USER",
+        "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+    }
     env = {
         k: v for k, v in os.environ.items()
-        if not any(k.upper().startswith(p) for p in _SENSITIVE_PREFIXES)
+        if k in _ALLOWED_ENV_VARS or k.upper() in _ALLOWED_ENV_VARS
     }
     env["PYTHONPATH"] = sandbox + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONUNBUFFERED"] = "1"

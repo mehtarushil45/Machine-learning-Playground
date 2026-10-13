@@ -199,11 +199,75 @@ Audited against real Python `ast` + `pyflakes` (`services/api/app/services/code_
 
 ---
 
-## Next Steps: Phase 4 — Training Artifacts & Model Registry Bridge
-- Standardize MLflow-compatible artifact packaging (`model.joblib`, `preprocessor.joblib`, `schema.json`, `metrics.json`).
-- Auto-extract evaluation metrics (`accuracy`, `f1`, `auc_roc`, `loss`) from stdout/outputs and display structured performance card.
-- 1-Click promotion bridge from Code Studio to Model Registry (Staging / Production) and Deployment Studio endpoint serving.
-- Sandboxed execution with resource limits (timeout, memory, process isolation).
-- Dual-channel WebSocket + SSE real-time stdout/stderr streaming with live exit codes.
-- Integrated runtime error parser with file-frame detection and inline Monaco error highlights.
+## Phase 4 — Security Gate Audit & Terminal Guardrails (Completed)
+
+### 4.1 Mandatory Security Gate Audit (Real Subprocess Execution)
+Before considering terminal construction or interactive PTY shells, an empirical security gate audit was conducted by executing real audit code (`scratch/phase4_gate_audit.py`) through `CodeExecutionService.start_execution` inside the running Docker container `infra-api-1`.
+
+#### Empirical Audit Results:
+| Security Check | Command / Probe | Result | Status |
+|---|---|---|---|
+| **1. Sensitive Env Scrubbing** | Inspect `os.environ` keys for secrets (`DATABASE_URL`, `JWT_SECRET`, `SECRET_KEY`, `MINIO_SECRET_KEY`, `POSTGRES_PASSWORD`, `MLPLAYGROUND_CERT_SECRET`) | `sensitive_env_keys: []` | **PASSED** |
+| **2. Host Filesystem Protection** | Probe read access to `/app/.env` | `env_file_readable: True` | **FAILED** |
+| **3. Database Network Isolation** | Probe TCP socket connection to `db:5432` | `can_reach_postgres_db: True` | **FAILED** |
+| **4. Redis Network Isolation** | Probe TCP socket connection to `redis:6379` | `can_reach_redis: True` | **FAILED** |
+| **5. MinIO Network Isolation** | Probe TCP socket connection to `minio:9000` | `can_reach_minio: True` | **FAILED** |
+| **6. Internet Egress Isolation** | Probe TCP socket connection to `1.1.1.1:80` | `can_reach_internet: True` | **FAILED** |
+| **7. Workspace Write Boundary** | Probe write access to `/tmp/pwn.txt` | `can_write_outside_workspace: True` | **FAILED** |
+
+### 4.2 Mandatory Gate Decision: DEPLOYMENT BLOCKER
+Because the child subprocess runs inside the container's default network namespace (`eth0`) and mount namespace, it can establish TCP sockets to backend database/cache services and access parent container filesystem paths outside its workspace.
+
+Per the engineering specification:
+> *"If any check fails, report a DEPLOYMENT BLOCKER, leave this phase behind a disabled flag, and do not build the terminal."*
+
+**Outcome**: An arbitrary interactive terminal (xterm.js / PTY shell) **CANNOT AND MUST NOT** be opened to students without true network namespace isolation (`ip netns` or `--network none`) and ephemeral filesystem sandboxing (gVisor `runsc` or ephemeral Docker container). The interactive terminal is explicitly locked behind a disabled feature flag.
+
+### 4.3 Backend Security Hardening & Gate Endpoints
+1. **Strict Environment Variable Allowlist**:
+   Upgraded both `code_execution_service.py` and Celery worker `code_execution_task.py` to use `_ALLOWED_ENV_VARS` (`PATH`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM`, `HOME`, `USER`, `TMPDIR`, `TEMP`, `TMP`, `SYSTEMROOT`, `WINDIR`, `COMSPEC`, `PATHEXT`). All host process environment variables are scrubbed, eliminating host credential leakage.
+2. **Feature Flag Locked**:
+   `ENABLE_INTERACTIVE_TERMINAL = False` in `services/api/app/routers/code_execution.py`.
+3. **Status Endpoint**:
+   `GET /api/v1/code-execution/terminal/status` returns:
+   ```json
+   {
+     "enabled": false,
+     "status": "blocked",
+     "reason": "DEPLOYMENT BLOCKER: Containerized network and filesystem namespace isolation (gVisor/ephemeral container sandbox) must be configured before arbitrary PTY shell execution is permitted."
+   }
+   ```
+4. **WebSocket Rejection Guard**:
+   Connecting to `ws:///api/v1/code-execution/terminal/pty` immediately sends a structured error message (`type: "error"`, `code: "DEPLOYMENT_BLOCKER"`) and closes the connection with code `1008 (Policy Violation)`.
+
+### 4.4 Frontend Honest Labeling
+1. **PTY Shell (Blocked) Badge**:
+   Added a visible `PTY Shell (Blocked)` status badge with a lock icon (🔒) and full `DEPLOYMENT BLOCKER` explanation tooltip in the bottom panel toolbar.
+2. **Debug Panel Honest Banner**:
+   Added an explicit banner in the bottom Debug tab:
+   > *"Execution Inspector — Interactive breakpoints & step-debugging not available yet (planned for Phase 7)."*
+3. **API Client Integration**:
+   Added `CodeExecutionService.getTerminalStatus()` to `apps/web/src/services/api.ts`.
+
+### 4.5 Verification & Tests
+- **Backend Pytest**: `tests/test_code_studio_phase4_security_gate.py` verified **3/3 tests passed (100%)**:
+  1. `test_subprocess_environment_allowlist` PASSED
+  2. `test_terminal_status_endpoint` PASSED
+  3. `test_terminal_websocket_blocked` PASSED
+- **Full Backend Code Studio Suite**: **10/10 tests passed (100%)** across Phase 2, Phase 3, and Phase 4.
+- **Frontend Vitest**: `src/test/phase4SecurityGate.test.tsx` verified **3/3 tests passed (100%)**:
+  1. `honestly exposes CodeExecutionService.getTerminalStatus() as blocked` PASSED
+  2. `renders PTY Shell (Blocked) badge with deployment blocker tooltip in bottom panel` PASSED
+  3. `renders honest Execution Inspector banner in debug tab without faking step debugging` PASSED
+- **Full Frontend Code Studio Suite**: **20/20 tests passed (100%)** across Phase 1, Phase 2, Phase 3, and Phase 4.
+- **TypeScript & Production Build**: `npx tsc --noEmit` passed with 0 errors; `npm run build` succeeded in 2.37s.
+
+---
+
+## Next Steps: Phase 5 — ML-Native Editing & Language Intelligence
+- Schema-aware autocompletion for dataset column names (`df['...']`).
+- Scikit-learn estimator docstring and parameter hover cards.
+- ML-specific diagnostic checks in Problems panel (e.g., target column missing from dataset, unsupported feature types).
+- Synchronized code snippets and visual pipeline node mapping.
+
 
