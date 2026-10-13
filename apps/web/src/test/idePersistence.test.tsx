@@ -19,6 +19,19 @@ vi.mock('../services/api', () => ({
     validatePipeline: vi.fn().mockResolvedValue({ is_valid: true, errors: [], warnings: [] }),
     getTemplates: vi.fn().mockResolvedValue({}),
   },
+  CodeExecutionService: {
+    lintCode: vi.fn().mockResolvedValue({ is_valid_syntax: true, diagnostics: [] }),
+    getRuntimeInfo: vi.fn().mockResolvedValue({
+      python_version: '3.12',
+      sklearn_version: '1.9',
+      full_python_version: '3.12.14',
+      full_sklearn_version: '1.9.0',
+      status: 'online',
+    }),
+    wsLintUrl: vi.fn().mockReturnValue('ws://localhost:8000/api/v1/code-execution/ws-lint'),
+    execute: vi.fn().mockResolvedValue({ exec_id: 'test-exec-1' }),
+    streamUrl: vi.fn().mockReturnValue('/api/v1/code-execution/stream/test-exec-1'),
+  },
 }));
 
 function TestHarness() {

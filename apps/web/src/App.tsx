@@ -124,6 +124,28 @@ function AppContent() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        const active = document.activeElement;
+        // If focus is inside Monaco editor or Code Studio, editor owns Ctrl+K chords
+        if (
+          active?.closest('.monaco-editor') ||
+          active?.closest('[data-testid="monaco-code-studio-container"]') ||
+          active?.getAttribute('data-testid') === 'monaco-code-editor'
+        ) {
+          return;
+        }
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const showToast = useCallback((
     title: string,
     description?: string,
@@ -540,6 +562,7 @@ function AppContent() {
               }}
             />
             <input
+              ref={searchInputRef}
               type="text"
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}

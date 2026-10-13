@@ -5,7 +5,7 @@ import { ViewAsCodeStudio } from '../features/pipelines/ViewAsCodeStudio';
 import { ProjectProvider, useProject } from '../providers/ProjectContext';
 import { PipelineService } from '../services/api';
 
-// Mock PipelineService
+// Mock PipelineService and CodeExecutionService
 vi.mock('../services/api', () => ({
   PipelineService: {
     generateCode: vi.fn().mockResolvedValue({
@@ -14,6 +14,22 @@ vi.mock('../services/api', () => ({
       execution_order: ['n1', 'n2', 'n3', 'n4'],
       imports: ['pandas as pd', 'numpy as np'],
     }),
+  },
+  CodeExecutionService: {
+    lintCode: vi.fn().mockResolvedValue({ is_valid_syntax: true, diagnostics: [] }),
+    getRuntimeInfo: vi.fn().mockResolvedValue({
+      python_version: '3.12',
+      sklearn_version: '1.9',
+      full_python_version: '3.12.14',
+      full_sklearn_version: '1.9.0',
+      status: 'online',
+    }),
+    wsLintUrl: vi.fn().mockReturnValue('ws://localhost:8000/api/v1/code-execution/ws-lint'),
+    execute: vi.fn().mockResolvedValue({ exec_id: 'test-exec-1' }),
+    streamUrl: vi.fn().mockReturnValue('/api/v1/code-execution/stream/test-exec-1'),
+  },
+  CopilotApiService: {
+    chat: vi.fn().mockResolvedValue({ reply: 'Test response' }),
   },
 }));
 

@@ -12,11 +12,16 @@ export interface ParsedPipelineConfig {
   imputer?: string;
   testSplit?: number;
   seed?: number;
+  isSynced: boolean;
+  parseError?: string;
 }
 
 export function parsePipelineTargetAndConfig(code: string): ParsedPipelineConfig {
-  const result: ParsedPipelineConfig = {};
-  if (!code || typeof code !== 'string') return result;
+  const result: ParsedPipelineConfig = { isSynced: false };
+  if (!code || typeof code !== 'string') {
+    result.parseError = 'Empty code buffer';
+    return result;
+  }
 
   // 1. Target column extraction
   // Patterns:
@@ -40,8 +45,8 @@ export function parsePipelineTargetAndConfig(code: string): ParsedPipelineConfig
   }
 
   // 2. Feature columns extraction
-  // Pattern: feature_cols = [...]
-  const featMatch = code.match(/feature_cols\s*=\s*\[([\s\S]*?)\]/);
+  // Pattern: feature_cols = [...] or feature_columns = [...]
+  const featMatch = code.match(/(?:feature_cols|feature_columns)\s*=\s*\[([\s\S]*?)\]/);
   if (featMatch && featMatch[1]) {
     const items = featMatch[1].match(/['"]([^'"]+)['"]/g);
     if (items && items.length > 0) {
@@ -91,6 +96,12 @@ export function parsePipelineTargetAndConfig(code: string): ParsedPipelineConfig
   if (seedMatch && seedMatch[1]) {
     const s = parseInt(seedMatch[1], 10);
     if (!isNaN(s)) result.seed = s;
+  }
+
+  if (result.target) {
+    result.isSynced = true;
+  } else {
+    result.parseError = 'No documented target column assignment detected (e.g. target = "..." or y = df["..."])';
   }
 
   return result;

@@ -29,6 +29,8 @@ import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 import { MonacoCodeStudioEditor } from './MonacoCodeStudioEditor';
+import { RegenerateDiffModal } from './RegenerateDiffModal';
+import { usePythonLanguageClient } from './usePythonLanguageClient';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
 import { PanelLearningCollapsible, HeadsUpCardsContainer } from '../learning';
 
@@ -410,58 +412,7 @@ function ExperimentExplorer({
   );
 }
 
-/* ── Static Python Code Analyzer ──────────────────────────────────── */
-function analyzeCode(code: string): Diagnostic[] {
-  const results: Diagnostic[] = [];
-  if (!code.trim()) return results;
-  const lines = code.split('\n');
-  const fullCode = code;
-
-  for (let i = 0; i < lines.length; i++) {
-    const num = i + 1;
-    const raw = lines[i];
-    const trimmed = raw.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    // Line too long (PEP 8 E501 hint)
-    if (raw.length > 120)
-      results.push({ line: num, col: 121, severity: 'info', message: `Line length hint (${raw.length} > 120 chars) — E501`, source: 'static' });
-
-    // Mixed tabs and spaces (E101)
-    const leading = raw.match(/^(\s+)/);
-    if (leading && leading[1].includes('\t') && leading[1].includes(' '))
-      results.push({ line: num, col: 1, severity: 'error', message: 'Mixed tabs and spaces in indentation — E101', source: 'static' });
-
-    // Python 2 print statement
-    if (/\bprint\s+["'a-zA-Z_\[(]/.test(trimmed) && !/\bprint\s*\(/.test(trimmed))
-      results.push({ line: num, col: raw.indexOf('print') + 1, severity: 'warning', message: "Python 2 'print' statement — use print()", source: 'static' });
-
-    // Bare except (E722)
-    if (/^except\s*:/.test(trimmed))
-      results.push({ line: num, col: 1, severity: 'warning', message: 'Bare except: catches all exceptions including SystemExit — E722', source: 'static' });
-
-    // Comparison to None with == (E711)
-    if (/==\s*None\b|None\s*==/.test(trimmed))
-      results.push({ line: num, col: 1, severity: 'warning', message: "Use 'is None' instead of '== None' — E711", source: 'static' });
-
-    // Comparison to True/False (E712)
-    if (/==\s*(True|False)\b/.test(trimmed))
-      results.push({ line: num, col: 1, severity: 'info', message: "Use truthiness check instead of '== True/False' — E712", source: 'static' });
-
-    // Trailing whitespace (W291)
-    if (raw !== raw.trimEnd())
-      results.push({ line: num, col: raw.trimEnd().length + 1, severity: 'info', message: 'Trailing whitespace — W291', source: 'static' });
-
-    // np/pd used without visible import
-    const preamble = fullCode.split('\n').slice(0, i).join('\n');
-    if (/\bnp\./.test(trimmed) && !/import numpy|as np/.test(preamble))
-      results.push({ line: num, col: 1, severity: 'info', message: "'np' used — ensure 'import numpy as np' is present", source: 'static' });
-    if (/\bpd\./.test(trimmed) && !/import pandas|as pd/.test(preamble))
-      results.push({ line: num, col: 1, severity: 'info', message: "'pd' used — ensure 'import pandas as pd' is present", source: 'static' });
-  }
-
-  return results;
-}
+/* ── Static Python Code Analyzer (Replaced by Backend Pyflakes + AST Client) ── */
 
 /* ── Runtime Error Parser (Python traceback → Clean User-Facing Diagnostics) ─────────── */
 function parseRuntimeErrors(
@@ -624,8 +575,6 @@ export function ViewAsCodeStudio({
   const [copied, setCopied] = useState(false);
   const [pendingNewFileName, setPendingNewFileName] = useState<string | null>(null);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-  const [showRegenerateWarning, setShowRegenerateWarning] = useState(false);
-  const [pendingRegenerateFile, setPendingRegenerateFile] = useState<string | null>(null);
 
   /* ── Find in Editor ──────────────────────────────────────────────── */
   const [isFindOpen, setIsFindOpen] = useState(false);
@@ -643,10 +592,18 @@ export function ViewAsCodeStudio({
   const [execDuration, setExecDuration] = useState<number | null>(null);
   const [execExitCode, setExecExitCode] = useState<number | null>(null);
   const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<Diagnostic[]>([]);
-  const [serverDiagnostics, setServerDiagnostics] = useState<Diagnostic[]>([]);
-  const [serverLintDone, setServerLintDone] = useState<boolean>(false);
-  const [isLinting, setIsLinting] = useState<boolean>(false);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
+  const [builderCodeByFile, setBuilderCodeByFile] = useState<Record<string, string>>({});
+  const [savedCodeByFile, setSavedCodeByFile] = useState<Record<string, string>>({});
+  const [diffModalState, setDiffModalState] = useState<{
+    isOpen: boolean;
+    candidateCode: string;
+    filename: string;
+  }>({
+    isOpen: false,
+    candidateCode: '',
+    filename: '',
+  });
 
   /* ── AI Copilot Chat State ───────────────────────────────────────── */
   const [copilotInput, setCopilotInput] = useState('');
@@ -673,20 +630,34 @@ export function ViewAsCodeStudio({
   const effectiveTabs = openTabs.length > 0 ? openTabs : [currentFile];
   const displayedCode = experimentFiles[currentFile] ?? generatedCode ?? '';
 
-  // Auto-clean unused numpy import if present on classification pipelines
-  useEffect(() => {
-    if (!displayedCode) return;
-    if (
-      displayedCode.includes('import numpy as np') &&
-      !displayedCode.includes('np.') &&
-      !displayedCode.includes('numpy.')
-    ) {
-      const cleaned = displayedCode.replace(/^[ \t]*import numpy as np\r?\n?/m, '');
-      if (cleaned !== displayedCode) {
-        updateExperimentFileCode(currentFile, cleaned);
-      }
-    }
-  }, [displayedCode, currentFile, updateExperimentFileCode]);
+  /* ── Enterprise Python Language Client (Authenticated WebSocket) ─ */
+  const pythonLanguageClient = usePythonLanguageClient({
+    code: displayedCode,
+    filename: currentFile,
+    enabled: isActive,
+  });
+
+  /* ── Unified Diagnostic Store (Single Source of Truth: Language Client + Runtime) ─ */
+  const allDiagnostics = useMemo(() => {
+    // If buffer is empty, immediately return empty diagnostics (clean empty-state)
+    if (!displayedCode || !displayedCode.trim()) return [];
+
+    const seen = new Map<string, Diagnostic>();
+    const activeDiagnostics = pythonLanguageClient.diagnostics;
+
+    [...activeDiagnostics, ...runtimeDiagnostics].forEach((d) => {
+      const key = `${d.line}:${d.col ?? 0}:${d.message}`;
+      if (!seen.has(key)) seen.set(key, d);
+    });
+
+    return Array.from(seen.values()).sort((a, b) => {
+      const s: Record<string, number> = { error: 0, warning: 1, info: 2 };
+      return (s[a.severity] ?? 3) - (s[b.severity] ?? 3) || a.line - b.line;
+    });
+  }, [displayedCode, pythonLanguageClient.diagnostics, runtimeDiagnostics]);
+
+  const errorCount = allDiagnostics.filter((d) => d.severity === 'error').length;
+  const warnCount = allDiagnostics.filter((d) => d.severity === 'warning').length;
 
   /* ── Validation ─────────────────────────────────────────────────── */
   const validationErrors = useMemo<string[]>(() => {
@@ -722,85 +693,6 @@ export function ViewAsCodeStudio({
       }
     };
   }, []);
-
-  /* ── Live Debounced AST / Pyflakes Linter (350ms after keystroke) ── */
-  useEffect(() => {
-    // If buffer is empty or blank, immediately clear diagnostics (satisfies empty buffer requirement)
-    if (!displayedCode || !displayedCode.trim()) {
-      setServerDiagnostics([]);
-      setServerLintDone(true);
-      setIsLinting(false);
-      return;
-    }
-
-    setIsLinting(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await CodeExecutionService.lintCode(displayedCode, currentFile);
-        const mapped: Diagnostic[] = (res.diagnostics || [])
-          .filter((d: any) => {
-            if (d.message?.includes("'numpy as np' imported but unused") && !displayedCode.includes("np.")) {
-              return false;
-            }
-            return true;
-          })
-          .map((d) => ({
-            line: d.line,
-            col: d.col,
-            end_line: d.end_line,
-            end_col: d.end_col,
-            severity: d.severity,
-            message: d.message,
-            source: d.source,
-            code: d.code,
-          }));
-        // B7 AST Check: audit preprocessing leakage via learning API
-        try {
-          const leakRes = await fetch('/api/v1/learning/code-lint', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: displayedCode, filename: currentFile }),
-          });
-          if (leakRes.ok) {
-            const leakData = await leakRes.json();
-            if (leakData.has_leakage) {
-              if (Array.isArray(leakData.leaks)) {
-                for (const leak of leakData.leaks) {
-                  mapped.push({
-                    line: leak.line || 1,
-                    col: 1,
-                    severity: 'warning',
-                    message: `Data Leakage Alert (Rule B7): ${leak.message}`,
-                    source: 'static',
-                  });
-                }
-              } else {
-                mapped.push({
-                  line: leakData.line_number || 1,
-                  col: 1,
-                  severity: 'warning',
-                  message: `Data Leakage Alert (Rule B7): ${leakData.message}`,
-                  source: 'static',
-                });
-              }
-            }
-          }
-        } catch {}
-
-        setServerDiagnostics(mapped);
-        setServerLintDone(true);
-      } catch {
-        // Fallback to client-side static analysis if server is unreachable
-        const fallback = analyzeCode(displayedCode);
-        setServerDiagnostics(fallback);
-        setServerLintDone(true);
-      } finally {
-        setIsLinting(false);
-      }
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [displayedCode, currentFile]);
 
   /* ── Code Generation Logic ───────────────────────────────────────── */
   const generatePipelineCode = useCallback(async (targetFileName?: string) => {
@@ -857,6 +749,8 @@ export function ViewAsCodeStudio({
       setStepExplanations(resp.steps_explanation || []);
       setIsValidSyntax(resp.is_valid_syntax);
       updateExperimentFileCode(fileToWrite, resp.python_code);
+      setBuilderCodeByFile((prev) => ({ ...prev, [fileToWrite]: resp.python_code }));
+      setSavedCodeByFile((prev) => ({ ...prev, [fileToWrite]: resp.python_code }));
       markFileGenerated(fileToWrite);
     } catch (err: unknown) {
       setIsValidSyntax(false);
@@ -887,15 +781,106 @@ export function ViewAsCodeStudio({
     markFileGenerated,
   ]);
 
-  const safeGeneratePipelineCode = useCallback((targetFileName?: string) => {
+  const safeGeneratePipelineCode = useCallback(async (targetFileName?: string) => {
     const file = targetFileName || currentFile;
-    if (isFileModified(file)) {
-      setPendingRegenerateFile(file);
-      setShowRegenerateWarning(true);
-    } else {
+    if (!isConfigValid) return;
+
+    const current = experimentFiles[file] || '';
+    if (!current || !current.trim()) {
       generatePipelineCode(file);
+      return;
     }
-  }, [currentFile, isFileModified, generatePipelineCode]);
+
+    const target   = selectedTarget || trainingConfig!.target_column;
+    const features = (
+      selectedFeatures.length > 0 ? selectedFeatures : (trainingConfig!.feature_columns ?? [])
+    ).filter((f) => f !== target && !isColumnIdentifier(f));
+
+    const dag: PipelineDAG = {
+      dataset_name:    activeDatasetName,
+      target_column:   target || 'target',
+      feature_columns: features.length > 0 ? features : ['feature1', 'feature2'],
+      nodes: [
+        {
+          node_id: 'n1',
+          type:    'missing_value_handler',
+          name:    'Simple Imputer',
+          params:  { strategy: canonicalImputer || 'median' },
+        },
+        {
+          node_id: 'n2',
+          type:    'scaler',
+          name:    'Feature Scaler',
+          params:  { scaler_type: canonicalScaler || 'standard_scaler', type: canonicalScaler || 'standard_scaler' },
+        },
+        {
+          node_id: 'n3',
+          type:    'train_test_split',
+          name:    'Train-Test Split',
+          params:  { test_size: testRatio, random_seed: trainingConfig?.random_seed ?? 42 },
+        },
+        {
+          node_id: 'n4',
+          type:    'algorithm',
+          name:    'ML Estimator',
+          params:  {
+            algorithm: canonicalAlgorithm || 'random_forest_classifier',
+            type:      canonicalAlgorithm || 'random_forest_classifier',
+          },
+        },
+      ],
+    };
+
+    try {
+      setIsGenerating(true);
+      const resp = await PipelineService.generateCode(dag, true, true);
+      const candidate = resp.python_code;
+
+      if (current === candidate) {
+        onShowToast?.('Already in Sync', 'File already matches the builder pipeline code.', 'info');
+        return;
+      }
+
+      setDiffModalState({
+        isOpen: true,
+        candidateCode: candidate,
+        filename: file,
+      });
+    } catch (err: any) {
+      onShowToast?.('Generation Error', err?.message || 'Could not generate code', 'error');
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [
+    currentFile,
+    isConfigValid,
+    selectedTarget,
+    trainingConfig,
+    selectedFeatures,
+    activeDatasetName,
+    canonicalImputer,
+    canonicalScaler,
+    testRatio,
+    canonicalAlgorithm,
+    experimentFiles,
+    generatePipelineCode,
+    onShowToast,
+  ]);
+
+  const handleAcceptDiff = useCallback(() => {
+    const { filename: file, candidateCode } = diffModalState;
+    updateExperimentFileCode(file, candidateCode);
+    setBuilderCodeByFile((prev) => ({ ...prev, [file]: candidateCode }));
+    setSavedCodeByFile((prev) => ({ ...prev, [file]: candidateCode }));
+    markFileGenerated(file);
+    setDiffModalState({ isOpen: false, candidateCode: '', filename: '' });
+    onShowToast?.('Code Updated', `Accepted regenerated pipeline code for ${file}.`, 'success');
+  }, [diffModalState, updateExperimentFileCode, markFileGenerated, onShowToast]);
+
+  const handleRejectDiff = useCallback(() => {
+    setDiffModalState({ isOpen: false, candidateCode: '', filename: '' });
+    onShowToast?.('Regeneration Cancelled', 'Kept existing manual edits.', 'info');
+  }, [onShowToast]);
 
   // Initial code generation
   useEffect(() => {
@@ -1031,7 +1016,7 @@ export function ViewAsCodeStudio({
 
   const handleSaveCode = useCallback(() => {
     if (!displayedCode) return;
-    markFileModified(currentFile);
+    setSavedCodeByFile((prev) => ({ ...prev, [currentFile]: displayedCode }));
     const parsed = parsePipelineTargetAndConfig(displayedCode);
     let updatedConfig = trainingConfig;
 
@@ -1059,15 +1044,23 @@ export function ViewAsCodeStudio({
     if (updatedConfig !== trainingConfig) {
       setTrainingConfig(updatedConfig);
     }
-    onShowToast?.(
-      'File Saved',
-      `${currentFile} saved.${parsed.target ? ` Target: ${parsed.target}` : ''}`,
-      'success'
-    );
+
+    if (parsed.isSynced) {
+      onShowToast?.(
+        'File Saved',
+        `${currentFile} saved and synced to builder config.${parsed.target ? ` Target: ${parsed.target}` : ''}`,
+        'success'
+      );
+    } else {
+      onShowToast?.(
+        'File Saved (Config Not Synced)',
+        parsed.parseError || 'Manual edits differ from visual builder structure.',
+        'info'
+      );
+    }
   }, [
     currentFile,
     displayedCode,
-    markFileModified,
     trainingConfig,
     activeJob,
     setSelectedTarget,
@@ -1085,6 +1078,19 @@ export function ViewAsCodeStudio({
       setOutputLines(['[ML Playground] No code to execute. File is empty.']);
       setBottomPanelOpen(true);
       setBottomTab('output');
+      return;
+    }
+
+    // Build/syntax pre-flight check: prevent execution if buffer contains errors
+    const blockingErrors = allDiagnostics.filter((d) => d.severity === 'error');
+    if (blockingErrors.length > 0) {
+      setBottomPanelOpen(true);
+      setBottomTab('problems');
+      onShowToast?.(
+        'Execution Blocked',
+        `Fix ${blockingErrors.length} syntax error${blockingErrors.length > 1 ? 's' : ''} on line ${blockingErrors[0].line} before running.`,
+        'error'
+      );
       return;
     }
 
@@ -1465,34 +1471,6 @@ export function ViewAsCodeStudio({
   const codeLines = displayedCode.split('\n');
   const experimentFileList = Object.keys(experimentFiles).map((name) => ({ name }));
 
-  /* ── Diagnostic Computations (Single Source of Truth: server + runtime) ─ */
-  const allDiagnostics = useMemo(() => {
-    // If buffer is empty, immediately return empty diagnostics (clean empty-state)
-    if (!displayedCode || !displayedCode.trim()) return [];
-
-    const seen = new Map<string, Diagnostic>();
-    // Primary source: real server-side AST and pyflakes diagnostics.
-    // When server lint has completed, trust its results (empty means clean code with 0 problems).
-    // Client-side analyzeCode serves only as initial pre-check while server request is in flight.
-    const activeDiagnostics = serverLintDone
-      ? serverDiagnostics
-      : serverDiagnostics.length > 0
-      ? serverDiagnostics
-      : analyzeCode(displayedCode);
-
-    [...activeDiagnostics, ...runtimeDiagnostics].forEach((d) => {
-      const key = `${d.line}:${d.message}`;
-      if (!seen.has(key)) seen.set(key, d);
-    });
-
-    return Array.from(seen.values()).sort((a, b) => {
-      const s: Record<string, number> = { error: 0, warning: 1, info: 2 };
-      return (s[a.severity] ?? 3) - (s[b.severity] ?? 3) || a.line - b.line;
-    });
-  }, [displayedCode, serverDiagnostics, runtimeDiagnostics]);
-
-  const errorCount = allDiagnostics.filter(d => d.severity === 'error').length;
-  const warnCount  = allDiagnostics.filter(d => d.severity === 'warning').length;
 
   /* ── Accessible Empty State ──────────────────────────────────────── */
   if (!hasUsableConfig) {
@@ -1571,80 +1549,15 @@ export function ViewAsCodeStudio({
         userSelect: isDraggingExplorer || isDraggingBottom ? 'none' : 'auto',
       }}
     >
-      {/* ── Overwrite Warning Modal ── */}
-      {showRegenerateWarning && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 100,
-            background: 'rgba(0,0,0,0.7)',
-            backdropFilter: 'blur(3px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <div
-            style={{
-              background: BB.surface,
-              border: `1px solid ${BB.border}`,
-              borderRadius: 10,
-              padding: 24,
-              maxWidth: 420,
-              width: '90%',
-              boxShadow: '0 12px 36px rgba(0,0,0,0.6)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <TriangleAlert style={{ width: 22, height: 22, color: BB.gold, flexShrink: 0 }} />
-              <span style={{ fontSize: 15, fontWeight: 700, color: BB.text }}>Overwrite User Edits?</span>
-            </div>
-            <p style={{ fontSize: 12.5, color: BB.muted, marginBottom: 20, lineHeight: 1.6 }}>
-              File <strong style={{ color: BB.gold }}>{pendingRegenerateFile}</strong> contains custom manual modifications. Regenerating will replace all current code with fresh scikit-learn pipeline code.
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-              <button
-                onClick={() => {
-                  setShowRegenerateWarning(false);
-                  setPendingRegenerateFile(null);
-                }}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: 6,
-                  background: 'transparent',
-                  border: `1px solid ${BB.border}`,
-                  color: BB.muted,
-                  fontSize: 12,
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  const file = pendingRegenerateFile;
-                  setShowRegenerateWarning(false);
-                  setPendingRegenerateFile(null);
-                  if (file) generatePipelineCode(file);
-                }}
-                style={{
-                  padding: '7px 16px',
-                  borderRadius: 6,
-                  background: BB.maroon,
-                  border: `1px solid rgba(178,58,78,0.6)`,
-                  color: BB.text,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                Overwrite &amp; Regenerate
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Visual Side-by-Side Diff Modal (Enterprise Safe Regeneration) ── */}
+      <RegenerateDiffModal
+        isOpen={diffModalState.isOpen}
+        filename={diffModalState.filename}
+        currentCode={experimentFiles[diffModalState.filename] || ''}
+        regeneratedCode={diffModalState.candidateCode}
+        onAccept={handleAcceptDiff}
+        onReject={handleRejectDiff}
+      />
 
       {/* ── LEFT & CENTER: STUDIO WORKSPACE (Tabs, Toolbar, Explorer, Editor, Terminal) ── */}
       <div
@@ -1739,7 +1652,7 @@ export function ViewAsCodeStudio({
             onClick={() => safeGeneratePipelineCode(currentFile)}
             disabled={isGenerating || !isConfigValid}
             aria-label="Regenerate code"
-            title={isFileModified(currentFile) ? 'Regenerate pipeline code (overwrites edits)' : 'Regenerate pipeline code'}
+            title={isFileModified(currentFile) ? 'Review Regenerated Pipeline Diff' : 'Regenerate pipeline code'}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -2135,29 +2048,82 @@ export function ViewAsCodeStudio({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: BB.success }} />
-                <span>Python 3.10</span>
+              <span
+                style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+                title={
+                  pythonLanguageClient.runtimeInfo.fullPython
+                    ? `Python ${pythonLanguageClient.runtimeInfo.fullPython} (Active Container Environment)`
+                    : 'Python Sandbox Runtime'
+                }
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: pythonLanguageClient.status === 'unavailable' ? BB.warning : BB.success,
+                  }}
+                />
+                <span>Python {pythonLanguageClient.runtimeInfo.python}</span>
               </span>
               <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
-              <span>scikit-learn 1.4</span>
-              {isFileModified(currentFile) && (
-                <span style={{ color: BB.gold }}>● Modified</span>
-              )}
-              {!isFileModified(currentFile) && generatedFiles.includes(currentFile) && (
-                <span style={{ color: BB.primaryLight }}>✦ Generated</span>
-              )}
+              <span
+                title={
+                  pythonLanguageClient.runtimeInfo.fullSklearn
+                    ? `scikit-learn ${pythonLanguageClient.runtimeInfo.fullSklearn}`
+                    : 'scikit-learn Library'
+                }
+              >
+                scikit-learn {pythonLanguageClient.runtimeInfo.sklearn}
+              </span>
+              {(() => {
+                const isModified = displayedCode !== (savedCodeByFile[currentFile] ?? displayedCode);
+                const isDiverged =
+                  !isModified &&
+                  Boolean(builderCodeByFile[currentFile]) &&
+                  savedCodeByFile[currentFile] !== builderCodeByFile[currentFile];
+                const isGenerated =
+                  !isModified &&
+                  !isDiverged &&
+                  (generatedFiles.includes(currentFile) ||
+                    (Boolean(builderCodeByFile[currentFile]) &&
+                      savedCodeByFile[currentFile] === builderCodeByFile[currentFile]));
+
+                if (isModified) {
+                  return <span style={{ color: BB.gold }}>● Modified</span>;
+                }
+                if (isDiverged) {
+                  return <span style={{ color: BB.warning }}>▲ Diverged from builder</span>;
+                }
+                if (isGenerated) {
+                  return <span style={{ color: BB.primaryLight }}>✦ Generated</span>;
+                }
+                return <span style={{ color: BB.success }}>✓ Saved</span>;
+              })()}
               {/* Diagnostics & Linting Status */}
               <button
                 onClick={() => {
                   setBottomPanelOpen(true);
                   setBottomTab('problems');
                 }}
-                title="View Problems (Inline & semantic diagnostics)"
+                title={
+                  pythonLanguageClient.status === 'unavailable'
+                    ? 'Python analysis service offline. Reconnecting...'
+                    : 'View Problems (Inline & semantic diagnostics)'
+                }
                 style={{
                   background: 'transparent',
                   border: 'none',
-                  color: isLinting ? BB.gold : errorCount > 0 ? '#EF4444' : warnCount > 0 ? '#F59E0B' : BB.muted,
+                  color:
+                    pythonLanguageClient.status === 'unavailable'
+                      ? BB.muted
+                      : pythonLanguageClient.isAnalyzing
+                      ? BB.gold
+                      : errorCount > 0
+                      ? '#EF4444'
+                      : warnCount > 0
+                      ? '#F59E0B'
+                      : BB.muted,
                   cursor: 'pointer',
                   padding: '1px 5px',
                   borderRadius: 3,
@@ -2168,7 +2134,12 @@ export function ViewAsCodeStudio({
                   fontFamily: 'inherit',
                 }}
               >
-                {isLinting ? (
+                {pythonLanguageClient.status === 'unavailable' ? (
+                  <>
+                    <AlertCircle style={{ width: 11, height: 11, color: '#EF4444' }} />
+                    <span style={{ color: BB.muted }}>Analysis unavailable</span>
+                  </>
+                ) : pythonLanguageClient.isAnalyzing ? (
                   <>
                     <Activity style={{ width: 11, height: 11 }} />
                     <span>Checking…</span>
@@ -2560,7 +2531,15 @@ export function ViewAsCodeStudio({
 
                 {bottomTab === 'problems' && (
                   <div style={{ flex: 1, overflow: 'auto', fontSize: 11.5 }}>
-                    {allDiagnostics.length === 0 ? (
+                    {pythonLanguageClient.status === 'unavailable' ? (
+                      <div style={{ padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 10, color: BB.muted }}>
+                        <AlertCircle style={{ width: 18, height: 18, color: '#EF4444' }} />
+                        <div>
+                          <div style={{ color: '#EF4444', fontWeight: 600, marginBottom: 2 }}>Python Language Analysis Unavailable</div>
+                          <div style={{ fontSize: 10.5 }}>The code linter service could not be reached. Reconnecting in the background...</div>
+                        </div>
+                      </div>
+                    ) : allDiagnostics.length === 0 ? (
                       <div style={{ padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 10, color: BB.muted }}>
                         <span style={{ fontSize: 18 }}>✓</span>
                         <div>

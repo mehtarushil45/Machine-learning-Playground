@@ -803,6 +803,14 @@ export interface LintResponse {
   warning_count: number;
 }
 
+export interface RuntimeInfoResponse {
+  python_version: string;
+  sklearn_version: string;
+  full_python_version: string;
+  full_sklearn_version: string;
+  status: string;
+}
+
 export const CodeExecutionService = {
   /** Submit code for execution. Returns exec_id immediately. */
   execute: (payload: ExecuteRequest) =>
@@ -833,6 +841,10 @@ export const CodeExecutionService = {
       body: JSON.stringify({ code, filename }),
     }),
 
+  /** Get verified running Python and library versions. */
+  getRuntimeInfo: () =>
+    request<RuntimeInfoResponse>('/code-execution/runtime-info'),
+
   /**
    * Returns the SSE stream URL for a given exec_id.
    * The caller is responsible for creating the EventSource connection.
@@ -846,6 +858,15 @@ export const CodeExecutionService = {
     if (typeof window === 'undefined') return `/api/v1/code-execution/${execId}/ws`;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/api/v1/code-execution/${execId}/ws`;
+  },
+
+  /**
+   * Returns the WebSocket URL for live Python AST & pyflakes linter diagnostics.
+   */
+  wsLintUrl: () => {
+    if (typeof window === 'undefined') return 'ws://127.0.0.1:8000/api/v1/code-execution/ws-lint';
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/api/v1/code-execution/ws-lint`;
   },
 };
 
