@@ -53,24 +53,86 @@ def is_redis_available(host: Optional[str] = None, port: Optional[int] = None, t
 
 @dataclass
 class ExecutionRecord:
-    exec_id:     str
-    status:      str          # queued | running | completed | failed | stopped
-    code:        str
-    dataset_id:  Optional[str]
-    filename:    str
-    project_id:  Optional[str]     = "default_project"
-    started_at:  Optional[float]   = None
-    finished_at: Optional[float]   = None
-    exit_code:   Optional[int]     = None
-    stdout:      str               = ""
-    stderr:      str               = ""
+    exec_id:             str
+    status:              str          # queued | running | completed | failed | cancelled | timed_out | out_of_memory
+    code:                str
+    dataset_id:          Optional[str]
+    filename:            str
+    project_id:          Optional[str]     = "default_project"
+    started_at:          Optional[float]   = None
+    finished_at:         Optional[float]   = None
+    exit_code:           Optional[int]     = None
+    stdout:              str               = ""
+    stderr:              str               = ""
     artifacts:           List[str]         = field(default_factory=list)
     registered_model_id: Optional[str]     = None
     error:               Optional[str]     = None
     is_celery:           bool              = False
+    queue_position:      Optional[int]     = None
+    timeout:             int               = _DEFAULT_TIMEOUT_SECONDS
+    memory_limit_mb:     int               = 512
+    is_truncated:        bool              = False
+    raw_output:          str               = ""
+    extra_env:           Dict[str, str]    = field(default_factory=dict)
     _queue:              "asyncio.Queue[Optional[str]]" = field(default_factory=asyncio.Queue)
     _process:            Optional[asyncio.subprocess.Process] = None
     _sandbox:            Optional[str]     = None
+
+
+# Concurrency tracking per project / user
+_ACTIVE_PROJECT_RUNS: Dict[str, str] = {}  # project_id -> exec_id
+_PROJECT_QUEUES: Dict[str, List[str]] = {}  # project_id -> list of waiting exec_ids
+
+
+async def _kill_process_tree(proc: Optional[asyncio.subprocess.Process], sig: int = 15) -> None:
+    """Recursively kill a process and its child processes across platforms."""
+    if proc is None:
+        return
+    pid = proc.pid
+    if sys.platform != "win32":
+        try:
+            import signal
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            pass
+        except Exception:
+            try:
+                proc.send_signal(sig)
+            except Exception:
+                pass
+    else:
+        try:
+            import subprocess
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=3,
+                check=False,
+            )
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+def _finish_project_execution(project_id: str, finished_exec_id: str) -> None:
+    """Release active project execution slot and auto-dispatch next queued run."""
+    if _ACTIVE_PROJECT_RUNS.get(project_id) == finished_exec_id:
+        _ACTIVE_PROJECT_RUNS.pop(project_id, None)
+
+    q = _PROJECT_QUEUES.get(project_id, [])
+    while q:
+        next_id = q.pop(0)
+        next_rec = _EXECUTIONS.get(next_id)
+        if next_rec and next_rec.status == "queued":
+            _ACTIVE_PROJECT_RUNS[project_id] = next_id
+            next_rec.queue_position = None
+            next_rec.status = "running"
+            logger.info("Dequeued and starting execution %s for project %s", next_id, project_id)
+            asyncio.create_task(_run_execution(next_rec, timeout=next_rec.timeout, extra_env=next_rec.extra_env))
+            break
 
 
 def _detect_artifacts(sandbox: str) -> List[str]:
@@ -89,6 +151,7 @@ async def _stream_output(
     stream: Optional[asyncio.StreamReader],
     buffer: List[str],
     queue: "asyncio.Queue[Optional[str]]",
+    rec: Optional["ExecutionRecord"] = None,
     prefix: str = "",
 ) -> None:
     if stream is None:
@@ -96,7 +159,9 @@ async def _stream_output(
     try:
         async for raw_line in stream:
             if len(buffer) >= MAX_STREAM_LINES:
-                warning_msg = f"{prefix}[ML Playground] Output limit exceeded ({MAX_STREAM_LINES} lines capped)."
+                if rec is not None:
+                    rec.is_truncated = True
+                warning_msg = f"{prefix}[ML Playground] Output limit exceeded ({MAX_STREAM_LINES} lines capped). Download complete raw output from the toolbar."
                 buffer.append(warning_msg)
                 await queue.put(warning_msg)
                 break
@@ -115,19 +180,42 @@ async def start_execution(
     filename: str = "train.py",
     project_id: Optional[str] = "default_project",
     timeout: int = _DEFAULT_TIMEOUT_SECONDS,
+    memory_limit_mb: int = 512,
     extra_env: Optional[Dict[str, str]] = None,
     prefer_celery: Optional[bool] = None,
 ) -> ExecutionRecord:
     exec_id = str(uuid.uuid4())
+    proj_key = project_id or "default_project"
+
+    active_id = _ACTIVE_PROJECT_RUNS.get(proj_key)
+    if active_id:
+        active_rec = _EXECUTIONS.get(active_id)
+        if active_rec and active_rec.status not in ("running", "queued"):
+            _ACTIVE_PROJECT_RUNS.pop(proj_key, None)
+            active_id = None
+
     rec = ExecutionRecord(
         exec_id=exec_id,
         status="queued",
         code=code,
         dataset_id=dataset_id,
         filename=filename,
-        project_id=project_id or "default_project",
+        project_id=proj_key,
+        timeout=timeout,
+        memory_limit_mb=memory_limit_mb,
+        extra_env=extra_env or {},
     )
     _EXECUTIONS[exec_id] = rec
+
+    if active_id:
+        q = _PROJECT_QUEUES.setdefault(proj_key, [])
+        q.append(exec_id)
+        rec.queue_position = len(q)
+        rec.status = "queued"
+        logger.info("Queued execution %s at position %d for project %s", exec_id, rec.queue_position, proj_key)
+        return rec
+
+    _ACTIVE_PROJECT_RUNS[proj_key] = exec_id
 
     # Check Celery dispatch availability
     should_use_celery = prefer_celery if prefer_celery is not None else (
@@ -138,6 +226,7 @@ async def start_execution(
         try:
             from services.worker.tasks.code_execution_task import execute_code_sandbox
             rec.is_celery = True
+            rec.status = "running"
             execute_code_sandbox.delay(
                 exec_id=exec_id,
                 code=code,
@@ -299,21 +388,38 @@ async def _run_execution(
     stderr_lines: List[str] = []
 
     try:
+        preexec = None
+        if sys.platform != "win32":
+            def _preexec_sandbox():
+                os.setsid()
+                try:
+                    import resource
+                    limit_bytes = rec.memory_limit_mb * 1024 * 1024
+                    resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+                except Exception:
+                    pass
+            preexec = _preexec_sandbox
+
+        kwargs: Dict[str, Any] = {}
+        if preexec is not None:
+            kwargs["preexec_fn"] = preexec
+
         proc = await asyncio.create_subprocess_exec(
             sys.executable, code_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=sandbox,
             env=env,
+            **kwargs,
         )
         rec._process = proc
         await rec._queue.put(f"[ML Playground] Starting: {rec.filename}")
 
         stream_tasks = []
         if proc.stdout is not None:
-            stream_tasks.append(_stream_output(proc.stdout, stdout_lines, rec._queue))
+            stream_tasks.append(_stream_output(proc.stdout, stdout_lines, rec._queue, rec=rec))
         if proc.stderr is not None:
-            stream_tasks.append(_stream_output(proc.stderr, stderr_lines, rec._queue, prefix="[stderr] "))
+            stream_tasks.append(_stream_output(proc.stderr, stderr_lines, rec._queue, rec=rec, prefix="[stderr] "))
         stream_tasks.append(proc.wait())
 
         await asyncio.wait_for(
@@ -325,7 +431,14 @@ async def _run_execution(
         rec.stdout = "\n".join(stdout_lines)
         rec.stderr = "\n".join(stderr_lines)
 
-        if proc.returncode == 0:
+        is_oom = any("MemoryError" in l or "allocate" in l.lower() for l in stderr_lines) or proc.returncode in (137, -9)
+
+        if is_oom:
+            rec.status = "out_of_memory"
+            rec.exit_code = 137
+            rec.error = f"Out of memory: execution exceeded limit of {rec.memory_limit_mb}MB."
+            await rec._queue.put(f"[ML Playground] OUT OF MEMORY: Exceeded {rec.memory_limit_mb}MB limit.")
+        elif proc.returncode == 0:
             rec.status = "completed"
             rec.artifacts = _detect_artifacts(sandbox)
             await rec._queue.put("[ML Playground] Completed (exit 0).")
@@ -384,6 +497,7 @@ async def _run_execution(
                                     "feature_columns": feat_cols,
                                     "categorical_columns": cat_cols,
                                     "numeric_columns": num_cols,
+                                    "lineage_id": f"lin-{rec.exec_id[:8]}",
                                 },
                                 "target_column": "target",
                                 "status": "ACTIVE",
@@ -422,12 +536,13 @@ async def _run_execution(
             await rec._queue.put(f"[ML Playground] Failed (exit {proc.returncode}).")
 
     except asyncio.TimeoutError:
-        rec.status = "failed"
+        rec.status = "timed_out"
+        rec.exit_code = 124
         rec.error = f"Execution timed out after {timeout}s."
         await rec._queue.put(f"[ML Playground] TIMEOUT after {timeout}s.")
         try:
             if rec._process:
-                rec._process.kill()
+                await _kill_process_tree(rec._process, 9)
         except Exception:
             pass
 
@@ -438,24 +553,41 @@ async def _run_execution(
 
     finally:
         rec.finished_at = time.monotonic()
+        rec.raw_output = rec.stdout + ("\n" + rec.stderr if rec.stderr else "")
         await rec._queue.put(None)
+        _finish_project_execution(rec.project_id or "default_project", rec.exec_id)
 
 
 async def stop_execution(exec_id: str) -> bool:
     rec = get_execution(exec_id)
     if rec is None:
         return False
+    proj_key = rec.project_id or "default_project"
+
+    # If currently queued, remove from queue
+    if rec.status == "queued" and proj_key in _PROJECT_QUEUES:
+        if exec_id in _PROJECT_QUEUES[proj_key]:
+            _PROJECT_QUEUES[proj_key].remove(exec_id)
+        rec.status = "cancelled"
+        rec.exit_code = 130
+        await rec._queue.put("[ML Playground] Cancelled while in queue.")
+        await rec._queue.put(None)
+        _finish_project_execution(proj_key, exec_id)
+        return True
+
     # If local process running
     if rec._process is not None:
         try:
-            rec._process.terminate()
+            await _kill_process_tree(rec._process, 15)
             try:
-                await asyncio.wait_for(rec._process.wait(), timeout=3)
+                await asyncio.wait_for(rec._process.wait(), timeout=2)
             except asyncio.TimeoutError:
-                rec._process.kill()
-            rec.status = "stopped"
+                await _kill_process_tree(rec._process, 9)
+            rec.status = "cancelled"
+            rec.exit_code = 130
             await rec._queue.put("[ML Playground] Stopped by user.")
             await rec._queue.put(None)
+            _finish_project_execution(proj_key, exec_id)
             return True
         except Exception:
             return False
@@ -468,7 +600,9 @@ async def stop_execution(exec_id: str) -> bool:
         stop_evt = json.dumps({"type": "system", "data": "[ML Playground] Execution stopped by user."})
         await redis_client.publish(f"mlpg:exec:stream:{exec_id}", stop_evt)
         await redis_client.rpush(f"mlpg:exec:logs:{exec_id}", stop_evt)
-        rec.status = "stopped"
+        rec.status = "cancelled"
+        rec.exit_code = 130
+        _finish_project_execution(proj_key, exec_id)
         return True
     except Exception:
         return False
@@ -481,6 +615,14 @@ async def stream_execution_events(exec_id: str) -> AsyncGenerator[Dict[str, Any]
     if rec is None:
         yield {"type": "error", "error": f"Execution {exec_id} not found."}
         return
+
+    # If currently queued, emit queued event first
+    if rec.status == "queued":
+        yield {
+            "type": "queued",
+            "position": rec.queue_position or 1,
+            "exec_id": exec_id,
+        }
 
     # 1. Attempt Redis pub/sub streaming if available
     try:
@@ -532,7 +674,7 @@ async def stream_execution_events(exec_id: str) -> AsyncGenerator[Dict[str, Any]
                         if raw_rec:
                             rec_data = json.loads(raw_rec)
                             st = rec_data.get("status")
-                            if st in ("completed", "failed", "stopped"):
+                            if st in ("completed", "failed", "stopped", "cancelled", "timed_out", "out_of_memory"):
                                 # If completed, replay any remaining logs from buffer before exit
                                 latest_logs = await redis_client.lrange(f"mlpg:exec:logs:{exec_id}", replayed_count, -1)
                                 for r_raw in latest_logs:
@@ -549,6 +691,7 @@ async def stream_execution_events(exec_id: str) -> AsyncGenerator[Dict[str, Any]
                                     "duration_seconds": rec_data.get("duration_seconds"),
                                     "artifacts": rec_data.get("artifacts", []),
                                     "model_id": rec_data.get("registered_model_id"),
+                                    "is_truncated": rec_data.get("is_truncated", False),
                                 }
                                 break
                     except Exception:
@@ -586,6 +729,7 @@ async def stream_execution_events(exec_id: str) -> AsyncGenerator[Dict[str, Any]
                 "duration_seconds": duration,
                 "artifacts": rec.artifacts,
                 "model_id": rec.registered_model_id,
+                "is_truncated": rec.is_truncated,
             }
             break
 

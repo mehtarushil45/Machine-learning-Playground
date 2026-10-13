@@ -782,9 +782,10 @@ export interface WorkspaceFileContentResponse {
 
 export interface ExecuteResponse {
   exec_id:    string;
-  status:     string;
-  filename:   string;
-  dataset_id: string | null;
+  status:         string;
+  filename:       string;
+  dataset_id:     string | null;
+  queue_position?: number | null;
 }
 
 export interface ExecutionResult {
@@ -798,6 +799,7 @@ export interface ExecutionResult {
   duration_seconds: number | null;
   error:            string | null;
   model_id?:        string | null;
+  is_truncated?:    boolean;
 }
 
 export interface FormatResponse {
@@ -871,6 +873,11 @@ export const CodeExecutionService = {
    * The caller is responsible for creating the EventSource connection.
    */
   streamUrl: (execId: string) => `/api/v1/code-execution/${execId}/stream`,
+
+  /**
+   * Returns the direct download URL for complete raw execution output.
+   */
+  downloadOutputUrl: (execId: string) => `/api/v1/code-execution/${execId}/output/download`,
 
   /**
    * Returns the WebSocket stream URL for a given exec_id.

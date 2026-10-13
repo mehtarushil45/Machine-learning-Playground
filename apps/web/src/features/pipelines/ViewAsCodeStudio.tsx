@@ -25,7 +25,9 @@ import {
   ArrowUp,
   ArrowDown,
   Rocket,
+  Download,
 } from 'lucide-react';
+import { renderAnsiLine } from '../../utils/ansiParser';
 import { useProject } from '../../providers/ProjectContext';
 import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService, CopilotApiService, type WorkspaceFileItem } from '../../services/api';
 import { LocalDeploymentService } from '../../services/localDeploymentService';
@@ -805,7 +807,11 @@ export function ViewAsCodeStudio({
 
   /* ── Code Execution State ────────────────────────────────────────── */
   const [execId, setExecId] = useState<string | null>(null);
-  const [execStatus, setExecStatus] = useState<'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped'>('idle');
+  const [execStatus, setExecStatus] = useState<
+    'idle' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'cancelled' | 'timed_out' | 'out_of_memory'
+  >('idle');
+  const [queuePosition, setQueuePosition] = useState<number | null>(null);
+  const [isOutputTruncated, setIsOutputTruncated] = useState<boolean>(false);
   const [outputLines, setOutputLines] = useState<string[]>([]);
   const [execArtifacts, setExecArtifacts] = useState<string[]>([]);
   const [execModelId, setExecModelId] = useState<string | null>(null);
@@ -1468,6 +1474,8 @@ export function ViewAsCodeStudio({
     setBottomTab('output');
     setOutputLines([`[ML Playground] Submitting ${currentFile} for sandboxed execution...`]);
     setExecStatus('queued');
+    setQueuePosition(null);
+    setIsOutputTruncated(false);
     setExecExitCode(null);
     setExecDuration(null);
     setExecArtifacts([]);
@@ -1490,12 +1498,23 @@ export function ViewAsCodeStudio({
       });
 
       setExecId(res.exec_id);
-      setExecStatus('running');
-      setLogEntries(prev => [...prev, makeLog('info', `Execution accepted (ID: ${res.exec_id.slice(0, 8)})`)]);
-      setOutputLines((prev) => [
-        ...prev,
-        `[ML Playground] Execution started (ID: ${res.exec_id.slice(0, 8)}). Streaming output...`,
-      ]);
+      if (res.status === 'queued') {
+        setExecStatus('queued');
+        setQueuePosition(res.queue_position ?? 1);
+        setLogEntries(prev => [...prev, makeLog('info', `Execution queued (position #${res.queue_position ?? 1})`)]);
+        setOutputLines((prev) => [
+          ...prev,
+          `[ML Playground] Execution queued (position #${res.queue_position ?? 1}). Waiting for worker...`,
+        ]);
+      } else {
+        setExecStatus('running');
+        setQueuePosition(null);
+        setLogEntries(prev => [...prev, makeLog('info', `Execution accepted (ID: ${res.exec_id.slice(0, 8)})`)]);
+        setOutputLines((prev) => [
+          ...prev,
+          `[ML Playground] Execution started (ID: ${res.exec_id.slice(0, 8)}). Streaming output...`,
+        ]);
+      }
 
       const streamUrl = CodeExecutionService.streamUrl(res.exec_id);
       const es = new EventSource(streamUrl);
@@ -1511,7 +1530,20 @@ export function ViewAsCodeStudio({
         try {
           const data = JSON.parse(rawData);
 
-          if (data.type === 'stdout' && data.data) {
+          if (data.type === 'queued') {
+            setExecStatus('queued');
+            setQueuePosition(data.position ?? 1);
+            setOutputLines((p) => [...p, `[ML Playground] Job queued (position #${data.position ?? 1}).`]);
+            setLogEntries(prev => [...prev, makeLog('info', `Queued at position #${data.position ?? 1}`)]);
+
+          } else if (data.type === 'status') {
+            if (data.status === 'running') {
+              setExecStatus('running');
+              setQueuePosition(null);
+              setOutputLines((p) => [...p, '[ML Playground] Execution running on worker.']);
+            }
+
+          } else if (data.type === 'stdout' && data.data) {
             setOutputLines((p) => [...p, data.data]);
             allOutputRef.push(data.data);
             setLogEntries(prev => [...prev, makeLog('debug', data.data.slice(0, 120))]);
@@ -1532,16 +1564,31 @@ export function ViewAsCodeStudio({
             const exitCode = data.exit_code ?? 0;
             const dur = data.duration_seconds ?? (Date.now() - startTime) / 1000;
             const arts = Array.isArray(data.artifacts) ? data.artifacts : [];
+            if (data.is_truncated) {
+              setIsOutputTruncated(true);
+            }
             setExecExitCode(exitCode);
             setExecDuration(dur);
             setExecArtifacts(arts);
             if (data.model_id) setExecModelId(data.model_id);
-            const newStatus = exitCode === 0 ? 'completed' : 'failed';
-            setExecStatus(newStatus);
+            const rawStatus = data.status;
+            const newStatus =
+              rawStatus ||
+              (exitCode === 0
+                ? 'completed'
+                : exitCode === 124
+                ? 'timed_out'
+                : exitCode === 137
+                ? 'out_of_memory'
+                : exitCode === 130
+                ? 'cancelled'
+                : 'failed');
+            setExecStatus(newStatus as any);
+            setQueuePosition(null);
             setLogEntries(prev => [
               ...prev,
               makeLog(newStatus === 'completed' ? 'info' : 'error',
-                `Process exited with code ${exitCode} in ${dur.toFixed(2)}s`),
+                `Process exited with code ${exitCode} (${newStatus}) in ${dur.toFixed(2)}s`),
               ...(arts.length > 0 ? [makeLog('info', `Artifacts saved: ${arts.join(', ')}`)] : []),
             ]);
             // Parse traceback → inline error markers (keep terminal tab active)
@@ -1561,6 +1608,7 @@ export function ViewAsCodeStudio({
             allOutputRef.push(errMsg);
             setLogEntries(prev => [...prev, makeLog('error', data.error)]);
             setExecStatus('failed');
+            setQueuePosition(null);
             setExecDuration((Date.now() - startTime) / 1000);
             const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
             setRuntimeDiagnostics(errDiags);
@@ -1631,8 +1679,12 @@ export function ViewAsCodeStudio({
               setOutputLines((p) => [...p, ...errLines]);
               allOutputRef.push(...errLines);
             }
+            if (finalRes.is_truncated) {
+              setIsOutputTruncated(true);
+            }
             const st = finalRes.status as any;
             setExecStatus(st);
+            setQueuePosition(null);
             setExecExitCode(finalRes.exit_code ?? (finalRes.status === 'completed' ? 0 : null));
             setExecDuration(finalRes.duration_seconds ?? (Date.now() - startTime) / 1000);
             if (finalRes.artifacts) setExecArtifacts(finalRes.artifacts);
@@ -1660,6 +1712,7 @@ export function ViewAsCodeStudio({
       setExecStatus('failed');
       setExecExitCode(null); // CRITICAL: Never fabricate an exit code (e.g. exit 1) for a request that didn't run!
       setExecDuration(null);
+      setQueuePosition(null);
       const isNotFound = err?.status === 404;
       const isAuth     = err?.status === 401 || err?.status === 403;
       const errMsg = isNotFound
@@ -1686,8 +1739,9 @@ export function ViewAsCodeStudio({
         eventSourceRef.current.close();
       }
       await CodeExecutionService.stop(execId);
-      setExecStatus('stopped');
-      setOutputLines((p) => [...p, '[ML Playground] Execution stopped by user.']);
+      setExecStatus('cancelled');
+      setQueuePosition(null);
+      setOutputLines((p) => [...p, '[ML Playground] Execution cancelled / stopped by user.']);
     } catch (err: any) {
       setOutputLines((p) => [...p, `[Error] Failed to stop execution: ${err.message}`]);
     }
@@ -1745,6 +1799,37 @@ export function ViewAsCodeStudio({
     const targetIdx = (index + findMatches.length) % findMatches.length;
     setFindMatchIdx(targetIdx);
   };
+
+  /* ── Interactive Traceback Jump ──────────────────────────────────── */
+  const handleJumpToTraceback = useCallback((targetFile: string, lineNum: number) => {
+    const norm = targetFile.replace(/\\/g, '/');
+    const baseName = norm.split('/').pop() || norm;
+
+    // Find matching file among open tabs or workspace files
+    const matchingFileName =
+      openTabs.find((t) => t === baseName || t.endsWith(`/${baseName}`)) ||
+      Object.keys(experimentFiles).find((k) => k === baseName || k.endsWith(`/${baseName}`)) ||
+      baseName;
+
+    if (matchingFileName) {
+      if (!openTabs.includes(matchingFileName)) {
+        setOpenTabs((prev) => [...prev, matchingFileName]);
+      }
+      setActiveExperimentFile(matchingFileName);
+    }
+
+    setCursorPos({ line: lineNum, col: 1 });
+    setRuntimeDiagnostics([
+      {
+        line: lineNum,
+        col: 1,
+        message: `Traceback reference: ${baseName} at line ${lineNum}`,
+        severity: 'error',
+        source: 'runtime',
+      },
+    ]);
+    onShowToast?.('Jumped to Traceback', `${baseName}:${lineNum}`, 'info');
+  }, [openTabs, experimentFiles, setOpenTabs, setActiveExperimentFile, onShowToast]);
 
   /* ── AI Copilot Context Cards ────────────────────────────────────── */
   const copilotMessages = useMemo<CopilotMsg[]>(() => {
@@ -2083,7 +2168,7 @@ export function ViewAsCodeStudio({
           <div style={{ width: 1, height: 16, background: BB.border, margin: '0 2px' }} />
 
           {/* Execution: Stop or Run Button */}
-          {execStatus === 'running' ? (
+          {(execStatus === 'running' || execStatus === 'queued') ? (
             <button
               onClick={handleStopExecution}
               aria-label="Stop execution"
@@ -2563,22 +2648,36 @@ export function ViewAsCodeStudio({
                         ? 'rgba(34,197,94,0.18)'
                         : execStatus === 'completed'
                         ? 'rgba(34,197,94,0.15)'
-                        : execStatus === 'failed'
-                        ? 'rgba(239,68,68,0.18)'
-                        : 'rgba(107,92,166,0.18)',
+                        : execStatus === 'queued'
+                        ? 'rgba(234,179,8,0.15)'
+                        : execStatus === 'timed_out'
+                        ? 'rgba(249,115,22,0.18)'
+                        : execStatus === 'out_of_memory'
+                        ? 'rgba(239,68,68,0.25)'
+                        : execStatus === 'cancelled' || execStatus === 'stopped'
+                        ? 'rgba(148,163,184,0.18)'
+                        : 'rgba(239,68,68,0.18)',
                     color:
                       execStatus === 'running' || execStatus === 'completed'
                         ? BB.success
-                        : execStatus === 'failed'
-                        ? BB.error
-                        : BB.muted,
+                        : execStatus === 'queued'
+                        ? '#EAB308'
+                        : execStatus === 'timed_out'
+                        ? '#F97316'
+                        : execStatus === 'out_of_memory'
+                        ? '#EF4444'
+                        : execStatus === 'cancelled' || execStatus === 'stopped'
+                        ? '#94A3B8'
+                        : BB.error,
                   }}
                 >
                   {execStatus === 'running' && '● Running'}
-                  {execStatus === 'queued' && '⏳ Queued'}
+                  {execStatus === 'queued' && `⏳ Queued${queuePosition ? ` (#${queuePosition})` : ''}`}
                   {execStatus === 'completed' && `✓ Done${execDuration ? ` (${execDuration.toFixed(1)}s)` : ''}`}
+                  {execStatus === 'timed_out' && '⏱ Timed Out (124)'}
+                  {execStatus === 'out_of_memory' && '💥 Out of Memory (137)'}
                   {execStatus === 'failed' && (execExitCode !== null ? `✕ Failed (Exit ${execExitCode})` : '✕ Unavailable')}
-                  {execStatus === 'stopped' && '■ Stopped'}
+                  {(execStatus === 'stopped' || execStatus === 'cancelled') && '■ Cancelled'}
                 </span>
               )}
 
@@ -2724,32 +2823,87 @@ export function ViewAsCodeStudio({
                       fontWeight: 700,
                       letterSpacing: 0.5,
                       background:
-                        execStatus === 'running' ? 'rgba(34,197,94,0.15)'
-                        : execStatus === 'completed' ? 'rgba(34,197,94,0.18)'
-                        : execStatus === 'failed' ? 'rgba(239,68,68,0.18)'
-                        : 'rgba(245,158,11,0.15)',
+                        execStatus === 'running'
+                          ? 'rgba(34,197,94,0.15)'
+                          : execStatus === 'completed'
+                          ? 'rgba(34,197,94,0.18)'
+                          : execStatus === 'queued'
+                          ? 'rgba(234,179,8,0.15)'
+                          : execStatus === 'timed_out'
+                          ? 'rgba(249,115,22,0.18)'
+                          : execStatus === 'out_of_memory'
+                          ? 'rgba(239,68,68,0.25)'
+                          : execStatus === 'cancelled' || execStatus === 'stopped'
+                          ? 'rgba(148,163,184,0.18)'
+                          : 'rgba(239,68,68,0.18)',
                       color:
-                        execStatus === 'running' ? BB.success
-                        : execStatus === 'completed' ? BB.success
-                        : execStatus === 'failed' ? '#EF4444'
-                        : '#F59E0B',
+                        execStatus === 'running' || execStatus === 'completed'
+                          ? BB.success
+                          : execStatus === 'queued'
+                          ? '#EAB308'
+                          : execStatus === 'timed_out'
+                          ? '#F97316'
+                          : execStatus === 'out_of_memory'
+                          ? '#EF4444'
+                          : execStatus === 'cancelled' || execStatus === 'stopped'
+                          ? '#94A3B8'
+                          : '#EF4444',
                       border: `1px solid ${
-                        execStatus === 'running' ? 'rgba(34,197,94,0.35)'
-                        : execStatus === 'completed' ? 'rgba(34,197,94,0.35)'
-                        : execStatus === 'failed' ? 'rgba(239,68,68,0.35)'
-                        : 'rgba(245,158,11,0.35)'
+                        execStatus === 'running' || execStatus === 'completed'
+                          ? 'rgba(34,197,94,0.35)'
+                          : execStatus === 'queued'
+                          ? 'rgba(234,179,8,0.35)'
+                          : execStatus === 'timed_out'
+                          ? 'rgba(249,115,22,0.35)'
+                          : execStatus === 'out_of_memory'
+                          ? 'rgba(239,68,68,0.35)'
+                          : 'rgba(148,163,184,0.35)'
                       }`,
                       marginRight: 6,
                     }}
                   >
                     {execStatus === 'running'
                       ? '● RUNNING'
+                      : execStatus === 'queued'
+                      ? `⏳ QUEUED${queuePosition ? ` (#${queuePosition})` : ''}`
                       : execStatus === 'completed'
                       ? '✓ EXIT 0'
-                      : execStatus === 'failed'
-                      ? `✕ FAILED${execExitCode != null ? ` (${execExitCode})` : ''}`
-                      : execStatus.toUpperCase()}
+                      : execStatus === 'timed_out'
+                      ? '⏱ TIMED OUT (124)'
+                      : execStatus === 'out_of_memory'
+                      ? '💥 OUT OF MEMORY (137)'
+                      : execStatus === 'cancelled' || execStatus === 'stopped'
+                      ? '■ CANCELLED'
+                      : `✕ FAILED${execExitCode != null ? ` (${execExitCode})` : ''}`}
                   </span>
+                )}
+
+                {/* Download Raw Terminal Output */}
+                {execId && outputLines.length > 0 && (
+                  <a
+                    href={typeof CodeExecutionService?.downloadOutputUrl === 'function' ? CodeExecutionService.downloadOutputUrl(execId) : '#'}
+                    download={`execution-${execId}.txt`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Download complete raw execution output"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: BB.muted,
+                      textDecoration: 'none',
+                      cursor: 'pointer',
+                      padding: '0 8px',
+                      fontSize: 11,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = BB.text; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
+                  >
+                    <Download style={{ width: 11, height: 11 }} />
+                    <span>Download</span>
+                  </a>
                 )}
 
                 {/* Copy Terminal Output */}
@@ -2829,6 +2983,47 @@ export function ViewAsCodeStudio({
               >
                 {bottomTab === 'output' && (
                   <>
+                    {/* Truncation Notice Banner */}
+                    {isOutputTruncated && (
+                      <div
+                        style={{
+                          margin: '6px 16px',
+                          padding: '8px 12px',
+                          background: 'rgba(245, 158, 11, 0.1)',
+                          border: '1px solid rgba(245, 158, 11, 0.3)',
+                          borderRadius: 6,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          fontSize: 11.5,
+                          color: '#F59E0B',
+                          fontFamily: 'Consolas, Monaco, monospace',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <TriangleAlert style={{ width: 14, height: 14, flexShrink: 0 }} />
+                          <span>Output exceeded display threshold (5,000 lines) and was capped.</span>
+                        </div>
+                        {execId && (
+                          <a
+                            href={typeof CodeExecutionService?.downloadOutputUrl === 'function' ? CodeExecutionService.downloadOutputUrl(execId) : '#'}
+                            download={`execution-${execId}.txt`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              color: '#F59E0B',
+                              textDecoration: 'underline',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Download Full Output
+                          </a>
+                        )}
+                      </div>
+                    )}
+
                     {outputLines.length === 0 && (
                       <div style={{ padding: '14px 16px', color: BB.muted, fontSize: 11.5, fontFamily: 'Consolas, Monaco, monospace' }}>
                         No output yet. Click <strong style={{ color: BB.success }}>Run</strong> above or press <strong style={{ color: BB.gold }}>Ctrl+Enter</strong> to execute the active script.
@@ -2848,6 +3043,45 @@ export function ViewAsCodeStudio({
                         line.includes('Saved model') ||
                         line.includes('precision');
                       const isMlpg = line.startsWith('[ML Playground');
+
+                      // Interactive Python traceback line match
+                      const tbMatch = line.match(/File "([^"]+)", line (\d+)/);
+                      if (tbMatch) {
+                        const file = tbMatch[1];
+                        const lineNum = parseInt(tbMatch[2], 10);
+                        return (
+                          <div
+                            key={i}
+                            onClick={() => handleJumpToTraceback(file, lineNum)}
+                            title={`Click to jump to ${file}:${lineNum}`}
+                            style={{
+                              padding: '2px 16px',
+                              fontFamily: 'Consolas, Monaco, monospace',
+                              fontSize: 11.5,
+                              lineHeight: 1.65,
+                              color: BB.goldLight,
+                              background: 'rgba(201,162,75,0.08)',
+                              borderLeft: `2px solid ${BB.gold}`,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              transition: 'background 120ms',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(201,162,75,0.16)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(201,162,75,0.08)'; }}
+                          >
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ color: BB.gold }}>↳</span>
+                              <span>{renderAnsiLine(line)}</span>
+                            </span>
+                            <span style={{ fontSize: 10, color: BB.gold, opacity: 0.8, textDecoration: 'underline' }}>
+                              Jump to line {lineNum}
+                            </span>
+                          </div>
+                        );
+                      }
+
                       return (
                         <div
                           key={i}
@@ -2862,7 +3096,7 @@ export function ViewAsCodeStudio({
                             background: isError || isStderr ? 'rgba(239,68,68,0.06)' : 'transparent',
                           }}
                         >
-                          {line}
+                          {renderAnsiLine(line)}
                         </div>
                       );
                     })}

@@ -27,6 +27,7 @@ vi.mock('../services/api', () => ({
     wsLintUrl: vi.fn().mockReturnValue('ws://localhost:8000/api/v1/code-execution/ws-lint'),
     execute: vi.fn().mockResolvedValue({ exec_id: 'test-exec-phase2' }),
     streamUrl: vi.fn().mockReturnValue('/api/v1/code-execution/stream/test-exec-phase2'),
+    downloadOutputUrl: vi.fn().mockReturnValue('/api/v1/code-execution/test-exec-phase2/output/download'),
     listWorkspaceFiles: vi.fn().mockResolvedValue({
       project_id: 'test-p2-project',
       files: [

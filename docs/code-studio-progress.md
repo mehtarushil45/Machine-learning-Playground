@@ -147,7 +147,62 @@ Audited against real Python `ast` + `pyflakes` (`services/api/app/services/code_
 
 ---
 
-## Next Steps: Phase 3 — Isolated Execution Sandbox & Output Streaming
+---
+
+## Phase 3 — Isolated Execution Sandbox and Output Streaming (Completed)
+
+### 3.1 Hardened Cross-Platform Execution Sandbox (`code_execution_service.py` & Celery)
+- **Process Group Isolation & Tree Termination**: Implemented `_kill_process_tree` across POSIX and Windows. On Linux/POSIX, child processes are spawned with `preexec_fn=os.setsid` and killed with `os.killpg(os.getpgid(pid), signal.SIGKILL)`. On Windows, child process trees are terminated using `taskkill /F /T /PID`. Kills the entire process hierarchy including spawned worker pools or runaway child processes.
+- **Resource Constraints**: Capped process time limits to `timeout` seconds (default 90s, max 300s) and memory to `512MB` via `resource.RLIMIT_AS` on POSIX environments.
+- **Real Exit Codes & States**:
+  - `completed` (exit code `0`)
+  - `failed` (exit code `>0`)
+  - `timed_out` (exit code `124`)
+  - `out_of_memory` (exit code `137`)
+  - `cancelled` / `stopped` (exit code `130`)
+  - `queued` (with dynamic integer `queue_position`)
+- **Safe Environment Stripping**: Sandboxed child executions are stripped of sensitive host environment variables (`DATABASE_URL`, `POSTGRES_PASSWORD`, `SECRET_KEY`, `JWT_SECRET`, `CELERY_BROKER_URL`, `MINIO_SECRET_KEY`), passing only safe execution parameters (`PYTHONUNBUFFERED`, `PYTHONDONTWRITEBYTECODE`, `PROJECT_ID`, `DATASET_ID`).
+
+### 3.2 Project-Scoped Concurrency Queue
+- **Concurrency Tracking**: Implemented `_ACTIVE_PROJECT_RUNS` and `_PROJECT_QUEUES` in `code_execution_service.py`. When a run is dispatched for an active project, it is queued with its zero-indexed queue position (`queue_position = 1, 2, ...`).
+- **Auto-Dequeue & Notification**: When the active run terminates or is stopped, the next queued run is dequeued automatically and dispatched to compute, notifying connected SSE listeners via `type: "status", status: "running"`.
+- **Queue Eviction**: Stopping a queued execution removes it from the project queue immediately and marks status as `cancelled`.
+
+### 3.3 Safe ANSI Parser (`ansiParser.tsx`)
+- **Complete 16-Color Code Support**: Parses standard ANSI escape codes (`\u001b[30m`–`37m`, `\u001b[90m`–`97m`, `\u001b[40m`–`47m`, bold, underline, italic, reset `\u001b[0m`) into styled React span elements with tokenized brand colors (`#EF4444`, `#22C55E`, `#F59E0B`, `#3B82F6`, etc.).
+- **Safe Escape Stripping**: Safely filters out cursor positioning codes (`\u001b[2K`, `\u001b[1A`), OSC hyperlinks, and terminal control sequences without escape artifacts or regex denial of service.
+
+### 3.4 Interactive Python Traceback Navigation & Editor Centering
+- **Traceback Frame Detection**: Terminal output parser detects Python traceback lines matching `File "([^"]+)", line (\d+)(?:, in (.+))?`.
+- **Click-to-Jump**: Renders clickable lines with gold indicator (`↳ File "train.py", line 14 [Jump to line 14]`).
+- **Cursor Centering & Inline Marker**: Clicking navigates the Monaco editor to the target file and centers the cursor on the exact error line (`setCursorPos({ line, col: 1 })`), placing an inline runtime diagnostic marker on the offending line.
+
+### 3.5 Output Capping & Full Raw Output Download
+- **Output Streaming Cap**: Enforced `MAX_STREAM_LINES = 5000` limit to prevent browser memory exhaustion on infinite print loops.
+- **Truncation Notice Banner**: Displays warning banner when `is_truncated = true` informing the user that output exceeded 5,000 lines.
+- **Raw Output Attachment Endpoint**: Added `GET /api/v1/code-execution/{exec_id}/output/download` returning the complete untruncated output as an `attachment; filename=execution-{exec_id}.txt` text file.
+- **Quick Download Button**: Download icon added to the bottom panel toolbar allowing 1-click export of the raw output file.
+
+### 3.6 Honest Status & Outage Reporting
+- **No Fabricated Exit Codes**: If the execution backend is unreachable or returns 404, status is marked `failed`, exit code is explicitly kept `null`, and output explains: `[ML Playground] Execution backend unavailable (404 Not Found)`.
+
+### 3.7 Verification & Tests
+- **Backend Pytest**: `tests/test_code_studio_execution_phase3.py` verified **5/5 tests passed (100%)**:
+  1. `test_execution_success_and_lifecycle` PASSED
+  2. `test_execution_timeout_kills_process_tree` PASSED
+  3. `test_execution_stop_kills_process_tree` PASSED
+  4. `test_project_concurrency_queue` PASSED
+  5. `test_download_raw_output_endpoint` PASSED
+- **Combined Backend Test Suite**: **7/7 tests passed (100%)** across Phase 2 & Phase 3.
+- **Frontend Vitest**: **17/17 tests passed (100%)** across `phase3ExecutionStreaming.test.tsx`, `phase2WorkspacePersistence.test.tsx`, and `phase1TruthfulDiagnostics.test.tsx`.
+- **TypeScript & Production Build**: `npx tsc --noEmit` passed with 0 errors; `npm run build` succeeded in 1.13s.
+
+---
+
+## Next Steps: Phase 4 — Training Artifacts & Model Registry Bridge
+- Standardize MLflow-compatible artifact packaging (`model.joblib`, `preprocessor.joblib`, `schema.json`, `metrics.json`).
+- Auto-extract evaluation metrics (`accuracy`, `f1`, `auc_roc`, `loss`) from stdout/outputs and display structured performance card.
+- 1-Click promotion bridge from Code Studio to Model Registry (Staging / Production) and Deployment Studio endpoint serving.
 - Sandboxed execution with resource limits (timeout, memory, process isolation).
 - Dual-channel WebSocket + SSE real-time stdout/stderr streaming with live exit codes.
 - Integrated runtime error parser with file-frame detection and inline Monaco error highlights.

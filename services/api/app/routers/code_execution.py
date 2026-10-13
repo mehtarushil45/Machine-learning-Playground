@@ -48,10 +48,11 @@ class ExecuteRequest(BaseModel):
 
 
 class ExecuteResponse(BaseModel):
-    exec_id:    str
-    status:     str
-    filename:   str
-    dataset_id: Optional[str]
+    exec_id:        str
+    status:         str
+    filename:       str
+    dataset_id:     Optional[str]
+    queue_position: Optional[int] = None
 
 
 class ExecutionResult(BaseModel):
@@ -65,6 +66,7 @@ class ExecutionResult(BaseModel):
     duration_seconds: Optional[float]
     error:            Optional[str]
     model_id:         Optional[str] = None
+    is_truncated:     bool = False
 
 
 class FormatRequest(BaseModel):
@@ -322,6 +324,7 @@ async def execute_code(
         status=rec.status,
         filename=rec.filename,
         dataset_id=rec.dataset_id,
+        queue_position=rec.queue_position,
     )
 
 
@@ -425,6 +428,28 @@ async def get_result(exec_id: str) -> ExecutionResult:
         duration_seconds=duration,
         error=rec.error,
         model_id=rec.registered_model_id,
+        is_truncated=rec.is_truncated,
+    )
+
+
+@router.get(
+    "/{exec_id}/output/download",
+    summary="Download full raw execution output as text file",
+)
+async def download_execution_output(exec_id: str):
+    """Download full raw stdout/stderr output of an execution."""
+    rec = get_execution(exec_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"Execution '{exec_id}' not found.")
+
+    from fastapi.responses import Response
+    content = rec.raw_output or (rec.stdout + ("\n" + rec.stderr if rec.stderr else ""))
+    return Response(
+        content=content,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="execution_{exec_id[:8]}_output.txt"',
+        },
     )
 
 

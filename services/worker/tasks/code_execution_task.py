@@ -295,6 +295,24 @@ def execute_code_sandbox(
     model_id: Optional[str] = None
     proc: Optional[subprocess.Popen] = None
 
+    preexec = None
+    if sys.platform != "win32":
+        def _preexec_sandbox():
+            os.setsid()
+            try:
+                import resource
+                limit_bytes = 512 * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+            except Exception:
+                pass
+        preexec = _preexec_sandbox
+
+    kwargs: Dict[str, Any] = {}
+    if preexec is not None:
+        kwargs["preexec_fn"] = preexec
+
+    is_truncated = False
+
     try:
         proc = subprocess.Popen(
             [sys.executable, code_path],
@@ -304,11 +322,13 @@ def execute_code_sandbox(
             env=env,
             text=True,
             bufsize=1,
+            **kwargs,
         )
 
         import threading
 
         def _read_stdout():
+            nonlocal is_truncated
             if not proc or not proc.stdout:
                 return
             for raw_line in iter(proc.stdout.readline, ""):
@@ -317,11 +337,13 @@ def execute_code_sandbox(
                     stdout_lines.append(line)
                     _publish_event(redis_client, exec_id, {"type": "stdout", "data": line})
                 elif len(stdout_lines) == MAX_STREAM_LINES:
-                    cap_msg = f"[ML Playground] Output limit exceeded ({MAX_STREAM_LINES} lines capped)."
+                    is_truncated = True
+                    cap_msg = f"[ML Playground] Output limit exceeded ({MAX_STREAM_LINES} lines capped). Download complete raw output from the toolbar."
                     stdout_lines.append(cap_msg)
                     _publish_event(redis_client, exec_id, {"type": "stdout", "data": cap_msg})
 
         def _read_stderr():
+            nonlocal is_truncated
             if not proc or not proc.stderr:
                 return
             for raw_line in iter(proc.stderr.readline, ""):
@@ -330,6 +352,7 @@ def execute_code_sandbox(
                     stderr_lines.append(line)
                     _publish_event(redis_client, exec_id, {"type": "stderr", "data": line})
                 elif len(stderr_lines) == MAX_STREAM_LINES:
+                    is_truncated = True
                     cap_msg = f"[ML Playground] Stderr limit exceeded ({MAX_STREAM_LINES} lines capped)."
                     stderr_lines.append(cap_msg)
                     _publish_event(redis_client, exec_id, {"type": "stderr", "data": cap_msg})
@@ -344,7 +367,17 @@ def execute_code_sandbox(
         t_err.join(timeout=2.0)
         exit_code = proc.returncode
 
-        if exit_code == 0:
+        is_oom = any("MemoryError" in l or "allocate" in l.lower() for l in stderr_lines) or exit_code in (137, -9)
+
+        if is_oom:
+            status_str = "out_of_memory"
+            exit_code = 137
+            error_msg = "Out of memory: execution exceeded 512MB limit."
+            _publish_event(redis_client, exec_id, {
+                "type": "error",
+                "error": error_msg,
+            })
+        elif exit_code == 0:
             status_str = "completed"
             artifacts = _detect_artifacts(sandbox)
             _publish_event(redis_client, exec_id, {
@@ -372,8 +405,16 @@ def execute_code_sandbox(
 
     except subprocess.TimeoutExpired:
         if proc:
-            proc.kill()
-        status_str = "failed"
+            if sys.platform != "win32":
+                try:
+                    import signal
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    proc.kill()
+            else:
+                proc.kill()
+        status_str = "timed_out"
+        exit_code = 124
         error_msg = f"Execution timed out after {timeout} seconds."
         _publish_event(redis_client, exec_id, {"type": "error", "error": error_msg})
 
@@ -389,9 +430,11 @@ def execute_code_sandbox(
         _publish_event(redis_client, exec_id, {
             "type": "exit",
             "exit_code": exit_code,
+            "status": status_str,
             "duration_seconds": duration,
             "artifacts": artifacts,
             "model_id": model_id,
+            "is_truncated": is_truncated,
         })
 
         final_record = {
