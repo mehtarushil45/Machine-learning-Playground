@@ -9,6 +9,10 @@ import {
   Trash2,
   Plus,
   FolderOpen,
+  Folder,
+  Lock,
+  Database,
+  FileText,
   X,
   Play,
   Square,
@@ -23,7 +27,7 @@ import {
   Rocket,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
-import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService, CopilotApiService } from '../../services/api';
+import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService, CopilotApiService, type WorkspaceFileItem } from '../../services/api';
 import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
@@ -179,6 +183,7 @@ interface ExperimentExplorerProps {
   pendingNewFileName: string | null;
   modifiedFileNames: string[];
   generatedFileNames: string[];
+  workspaceFiles?: WorkspaceFileItem[];
   onSelectFile: (name: string) => void;
   onNewFile: () => void;
   onDeleteFile: (name: string) => void;
@@ -194,6 +199,7 @@ function ExperimentExplorer({
   pendingNewFileName,
   modifiedFileNames,
   generatedFileNames,
+  workspaceFiles = [],
   onSelectFile,
   onNewFile,
   onDeleteFile,
@@ -201,7 +207,9 @@ function ExperimentExplorer({
   onPendingNameCommit,
   onPendingNameCancel,
 }: ExperimentExplorerProps) {
-  const [folderOpen, setFolderOpen] = useState(true);
+  const [dataFolderOpen, setDataFolderOpen] = useState(true);
+  const [outputsFolderOpen, setOutputsFolderOpen] = useState(true);
+  const [scriptsFolderOpen, setScriptsFolderOpen] = useState(true);
   const [hoveredFile, setHoveredFile] = useState<string | null>(null);
   const newFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -212,6 +220,14 @@ function ExperimentExplorer({
       setTimeout(() => newFileInputRef.current?.focus(), 50);
     }
   }, [pendingNewFileName]);
+
+  const dataFiles = useMemo(() => {
+    return (workspaceFiles || []).filter((f) => f.path.startsWith('data/') && !f.is_dir);
+  }, [workspaceFiles]);
+
+  const outputFiles = useMemo(() => {
+    return (workspaceFiles || []).filter((f) => f.path.startsWith('outputs/') && !f.is_dir);
+  }, [workspaceFiles]);
 
   return (
     <div
@@ -241,7 +257,7 @@ function ExperimentExplorer({
         </span>
         <button
           onClick={onNewFile}
-          title="New experiment file"
+          title="New experiment script"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -270,9 +286,9 @@ function ExperimentExplorer({
 
       {/* File Tree */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
-        {/* CSV Folder Row */}
+        {/* 1. DATA / DATASET FOLDER (Strictly Read-Only) */}
         <div
-          onClick={() => setFolderOpen((o) => !o)}
+          onClick={() => setDataFolderOpen((o) => !o)}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -280,21 +296,226 @@ function ExperimentExplorer({
             padding: '4px 10px',
             cursor: 'pointer',
             color: BB.gold,
-            fontSize: 11.5,
-            fontWeight: 600,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.03em',
           }}
         >
-          {folderOpen
+          {dataFolderOpen
             ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
             : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
-          <FolderOpen style={{ width: 13, height: 13, flexShrink: 0 }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {shortCsv}
+          <Database style={{ width: 12, height: 12, flexShrink: 0, color: BB.gold }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            data/
+          </span>
+          <span
+            title="Read-only dataset mount"
+            style={{
+              fontSize: 8.5,
+              fontWeight: 700,
+              padding: '1px 4px',
+              borderRadius: 3,
+              background: 'rgba(201,162,75,0.15)',
+              color: BB.goldLight,
+              border: `1px solid rgba(201,162,75,0.3)`,
+              flexShrink: 0,
+            }}
+          >
+            RO
+          </span>
+        </div>
+
+        {dataFolderOpen && (
+          <div style={{ marginBottom: 6 }}>
+            {dataFiles.length > 0 ? (
+              dataFiles.map((f) => {
+                const isActive = f.path === activeFile || f.name === activeFile;
+                const isHovered = hoveredFile === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => onSelectFile(f.path)}
+                    onMouseEnter={() => setHoveredFile(f.path)}
+                    onMouseLeave={() => setHoveredFile(null)}
+                    title={`${f.path} (Read-only)`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '3px 10px 3px 22px',
+                      cursor: 'pointer',
+                      background: isActive ? 'rgba(107,92,166,0.18)' : isHovered ? 'rgba(107,92,166,0.08)' : 'transparent',
+                      borderLeft: isActive ? `2px solid ${BB.gold}` : '2px solid transparent',
+                      transition: 'all 80ms',
+                    }}
+                  >
+                    <FileText style={{ width: 11, height: 11, color: isActive ? BB.gold : BB.muted, flexShrink: 0 }} />
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: isActive ? BB.text : BB.muted,
+                        fontFamily: 'Consolas, Monaco, monospace',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        flex: 1,
+                      }}
+                    >
+                      {f.name}
+                    </span>
+                    <Lock style={{ width: 9, height: 9, color: BB.muted, flexShrink: 0 }} />
+                  </div>
+                );
+              })
+            ) : (
+              <div
+                onClick={() => onSelectFile(`data/${csvName}`)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '3px 10px 3px 22px',
+                  cursor: 'pointer',
+                  color: BB.muted,
+                  fontSize: 10.5,
+                  fontFamily: 'Consolas, Monaco, monospace',
+                }}
+              >
+                <FileText style={{ width: 11, height: 11, color: BB.muted, flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                  {shortCsv}
+                </span>
+                <Lock style={{ width: 9, height: 9, color: BB.muted, flexShrink: 0 }} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 2. OUTPUTS FOLDER (Generated run artifacts) */}
+        <div
+          onClick={() => setOutputsFolderOpen((o) => !o)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '4px 10px',
+            cursor: 'pointer',
+            color: BB.primaryLight,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.03em',
+          }}
+        >
+          {outputsFolderOpen
+            ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
+            : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
+          <Folder style={{ width: 12, height: 12, flexShrink: 0, color: BB.primaryLight }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            outputs/
+          </span>
+          {outputFiles.length > 0 && (
+            <span style={{ fontSize: 9, color: BB.muted, flexShrink: 0 }}>
+              {outputFiles.length}
+            </span>
+          )}
+        </div>
+
+        {outputsFolderOpen && (
+          <div style={{ marginBottom: 6 }}>
+            {outputFiles.length > 0 ? (
+              outputFiles.map((f) => {
+                const isActive = f.path === activeFile || f.name === activeFile;
+                const isHovered = hoveredFile === f.path;
+                return (
+                  <div
+                    key={f.path}
+                    onClick={() => onSelectFile(f.path)}
+                    onMouseEnter={() => setHoveredFile(f.path)}
+                    onMouseLeave={() => setHoveredFile(null)}
+                    title={`${f.path} (${f.size} bytes)`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '3px 10px 3px 22px',
+                      cursor: 'pointer',
+                      background: isActive ? 'rgba(107,92,166,0.18)' : isHovered ? 'rgba(107,92,166,0.08)' : 'transparent',
+                      borderLeft: isActive ? `2px solid ${BB.primaryLight}` : '2px solid transparent',
+                      transition: 'all 80ms',
+                    }}
+                  >
+                    <FileCode style={{ width: 11, height: 11, color: isActive ? BB.primaryLight : BB.muted, flexShrink: 0 }} />
+                    <span
+                      style={{
+                        fontSize: 10.5,
+                        color: isActive ? BB.text : BB.muted,
+                        fontFamily: 'Consolas, Monaco, monospace',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        flex: 1,
+                      }}
+                    >
+                      {f.name}
+                    </span>
+                    {isHovered && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDeleteFile(f.path); }}
+                        title="Delete output artifact"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          background: 'transparent',
+                          border: 'none',
+                          color: BB.muted,
+                          cursor: 'pointer',
+                          padding: 1,
+                          borderRadius: 2,
+                          flexShrink: 0,
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = BB.error; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
+                      >
+                        <Trash2 style={{ width: 10, height: 10 }} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              <div style={{ padding: '3px 10px 3px 22px', fontSize: 10, color: BB.disabled, fontStyle: 'italic' }}>
+                (empty — run to generate)
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 3. SCRIPTS / EXPERIMENTS FOLDER */}
+        <div
+          onClick={() => setScriptsFolderOpen((o) => !o)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            padding: '4px 10px',
+            cursor: 'pointer',
+            color: BB.text,
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.03em',
+          }}
+        >
+          {scriptsFolderOpen
+            ? <ChevronDown style={{ width: 11, height: 11, flexShrink: 0 }} />
+            : <ChevronRight style={{ width: 11, height: 11, flexShrink: 0 }} />}
+          <FolderOpen style={{ width: 12, height: 12, flexShrink: 0, color: BB.gold }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            experiments/
           </span>
         </div>
 
         {/* File Rows */}
-        {folderOpen && files.map((f) => {
+        {scriptsFolderOpen && files.map((f) => {
           const isActive = f.name === activeFile;
           const isHovered = hoveredFile === f.name;
           const isModified = modifiedFileNames.includes(f.name);
@@ -310,7 +531,7 @@ function ExperimentExplorer({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                padding: '4px 10px 4px 24px',
+                padding: '4px 10px 4px 22px',
                 cursor: 'pointer',
                 background: isActive ? 'rgba(107,92,166,0.18)' : isHovered ? 'rgba(107,92,166,0.08)' : 'transparent',
                 borderLeft: isActive ? `2px solid ${BB.gold}` : '2px solid transparent',
@@ -373,8 +594,8 @@ function ExperimentExplorer({
         })}
 
         {/* Inline new file input */}
-        {folderOpen && pendingNewFileName !== null && (
-          <div style={{ padding: '4px 10px 4px 24px' }}>
+        {scriptsFolderOpen && pendingNewFileName !== null && (
+          <div style={{ padding: '4px 10px 4px 22px' }}>
             <input
               ref={newFileInputRef}
               value={pendingNewFileName}
@@ -402,9 +623,9 @@ function ExperimentExplorer({
         )}
 
         {/* Empty hint */}
-        {folderOpen && files.length === 0 && pendingNewFileName === null && (
-          <div style={{ padding: '10px 24px', fontSize: 10.5, color: BB.disabled, fontStyle: 'italic' }}>
-            Click + to create a file
+        {scriptsFolderOpen && files.length === 0 && pendingNewFileName === null && (
+          <div style={{ padding: '10px 22px', fontSize: 10.5, color: BB.disabled, fontStyle: 'italic' }}>
+            Click + to create an experiment file
           </div>
         )}
       </div>
@@ -595,6 +816,9 @@ export function ViewAsCodeStudio({
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [builderCodeByFile, setBuilderCodeByFile] = useState<Record<string, string>>({});
   const [savedCodeByFile, setSavedCodeByFile] = useState<Record<string, string>>({});
+  const [serverWorkspaceFiles, setServerWorkspaceFiles] = useState<WorkspaceFileItem[]>([]);
+  const [isAutosaving, setIsAutosaving] = useState(false);
+  const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [diffModalState, setDiffModalState] = useState<{
     isOpen: boolean;
     candidateCode: string;
@@ -629,6 +853,13 @@ export function ViewAsCodeStudio({
   const currentFile = activeExperimentFile || openTabs[0] || 'pipeline_generated.py';
   const effectiveTabs = openTabs.length > 0 ? openTabs : [currentFile];
   const displayedCode = experimentFiles[currentFile] ?? generatedCode ?? '';
+
+  const effectiveProjectId = useMemo(() => {
+    const raw = dataset?.datasetId || trainingConfig?.dataset_id || 'default_project';
+    return raw.replace(/[^a-zA-Z0-9_-]/g, '_');
+  }, [dataset?.datasetId, trainingConfig?.dataset_id]);
+
+  const isFileReadOnly = currentFile.startsWith('data/') || currentFile.endsWith('.joblib') || currentFile.endsWith('.pkl');
 
   /* ── Enterprise Python Language Client (Authenticated WebSocket) ─ */
   const pythonLanguageClient = usePythonLanguageClient({
@@ -677,7 +908,7 @@ export function ViewAsCodeStudio({
 
   /* ── Auto-scroll terminal output ─────────────────────────────────── */
   useEffect(() => {
-    if (outputEndRef.current && bottomPanelOpen) {
+    if (outputEndRef.current && bottomPanelOpen && typeof outputEndRef.current.scrollIntoView === 'function') {
       outputEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [outputLines, bottomPanelOpen]);
@@ -691,8 +922,81 @@ export function ViewAsCodeStudio({
       if (webSocketRef.current) {
         webSocketRef.current.close();
       }
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
     };
   }, []);
+
+  /* ── Workspace Synchronization & File Discovery ─────────────────── */
+  const refreshWorkspaceFiles = useCallback(async () => {
+    try {
+      if (typeof CodeExecutionService?.listWorkspaceFiles === 'function') {
+        const resp = await CodeExecutionService.listWorkspaceFiles(effectiveProjectId);
+        if (resp && Array.isArray(resp.files)) {
+          setServerWorkspaceFiles(resp.files);
+        }
+      }
+    } catch {
+      /* Silently ignore in mock/offline test environments */
+    }
+  }, [effectiveProjectId]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    if (typeof CodeExecutionService?.syncDatasetToWorkspace === 'function') {
+      CodeExecutionService.syncDatasetToWorkspace(effectiveProjectId, dataset?.datasetId || trainingConfig?.dataset_id)
+        .catch(() => {})
+        .finally(() => {
+          refreshWorkspaceFiles();
+        });
+    } else {
+      refreshWorkspaceFiles();
+    }
+  }, [isActive, effectiveProjectId, dataset?.datasetId, trainingConfig?.dataset_id, refreshWorkspaceFiles]);
+
+  /* ── Debounced Background Autosave (1500ms) ──────────────────────── */
+  useEffect(() => {
+    if (!isActive || !displayedCode || !displayedCode.trim() || isFileReadOnly) return;
+    const isModified = displayedCode !== (savedCodeByFile[currentFile] ?? displayedCode);
+    if (!isModified) return;
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = setTimeout(async () => {
+      setIsAutosaving(true);
+      try {
+        if (typeof CodeExecutionService?.saveWorkspaceFile === 'function') {
+          await CodeExecutionService.saveWorkspaceFile(effectiveProjectId, currentFile, displayedCode);
+        }
+        setSavedCodeByFile((prev) => ({ ...prev, [currentFile]: displayedCode }));
+      } catch (err: any) {
+        if (err?.status === 403) {
+          onShowToast?.('Read-only File', 'This file is read-only and cannot be saved.', 'error');
+        }
+      } finally {
+        setIsAutosaving(false);
+        refreshWorkspaceFiles();
+      }
+    }, 1500);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, [
+    isActive,
+    displayedCode,
+    currentFile,
+    savedCodeByFile,
+    isFileReadOnly,
+    effectiveProjectId,
+    refreshWorkspaceFiles,
+    onShowToast,
+  ]);
 
   /* ── Code Generation Logic ───────────────────────────────────────── */
   const generatePipelineCode = useCallback(async (targetFileName?: string) => {
@@ -951,12 +1255,30 @@ export function ViewAsCodeStudio({
   }, [bottomPanelHeight]);
 
   /* ── File Management Handlers ────────────────────────────────────── */
-  const handleSelectFile = useCallback((name: string) => {
+  const handleSelectFile = useCallback(async (name: string) => {
     if (!openTabs.includes(name)) {
       setOpenTabs((prev) => [...prev, name]);
     }
     setActiveExperimentFile(name);
-  }, [openTabs, setActiveExperimentFile, setOpenTabs]);
+    // If not loaded in memory, fetch content from workspace backend
+    if (!experimentFiles[name]) {
+      try {
+        if (typeof CodeExecutionService?.readWorkspaceFile === 'function') {
+          const res = await CodeExecutionService.readWorkspaceFile(effectiveProjectId, name);
+          if (res && typeof res.content === 'string') {
+            updateExperimentFileCode(name, res.content);
+            setSavedCodeByFile((prev) => ({ ...prev, [name]: res.content }));
+          }
+        }
+      } catch (err: any) {
+        if (err?.detail?.includes('binary') || err?.message?.includes('binary')) {
+          const binaryNotice = `# [Binary Artifact: ${name}]\n# This file contains serialized weights or binary data and cannot be displayed as plain text.`;
+          updateExperimentFileCode(name, binaryNotice);
+          setSavedCodeByFile((prev) => ({ ...prev, [name]: binaryNotice }));
+        }
+      }
+    }
+  }, [openTabs, setActiveExperimentFile, setOpenTabs, experimentFiles, effectiveProjectId, updateExperimentFileCode]);
 
   const handleCloseTab = useCallback((fileName: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -980,7 +1302,7 @@ export function ViewAsCodeStudio({
     setPendingNewFileName(name);
   }, [experimentFiles]);
 
-  const handleConfirmNewFile = useCallback(() => {
+  const handleConfirmNewFile = useCallback(async () => {
     if (!pendingNewFileName || !pendingNewFileName.trim()) {
       setPendingNewFileName(null);
       return;
@@ -988,17 +1310,38 @@ export function ViewAsCodeStudio({
     const safeName = pendingNewFileName.trim().endsWith('.py')
       ? pendingNewFileName.trim()
       : `${pendingNewFileName.trim()}.py`;
-    createExperimentFile(safeName, '# Machine Learning Experiment Pipeline\nimport numpy as np\nimport pandas as pd\n\n');
+    const initialCode = '# Machine Learning Experiment Pipeline\nimport numpy as np\nimport pandas as pd\n\n';
+    createExperimentFile(safeName, initialCode);
     setPendingNewFileName(null);
-  }, [pendingNewFileName, createExperimentFile]);
+    try {
+      if (typeof CodeExecutionService?.createWorkspaceFile === 'function') {
+        await CodeExecutionService.createWorkspaceFile(effectiveProjectId, safeName, initialCode);
+      }
+      refreshWorkspaceFiles();
+    } catch {
+      /* Graceful fallback if backend offline */
+    }
+  }, [pendingNewFileName, createExperimentFile, effectiveProjectId, refreshWorkspaceFiles]);
 
   const handleCancelNewFile = useCallback(() => {
     setPendingNewFileName(null);
   }, []);
 
-  const handleDeleteFile = useCallback((name: string) => {
+  const handleDeleteFile = useCallback(async (name: string) => {
+    if (name.startsWith('data/') || name === 'data') {
+      onShowToast?.('Forbidden', 'Files in data/ are read-only and cannot be deleted.', 'error');
+      return;
+    }
     deleteExperimentFile(name);
-  }, [deleteExperimentFile]);
+    try {
+      if (typeof CodeExecutionService?.deleteWorkspaceFile === 'function') {
+        await CodeExecutionService.deleteWorkspaceFile(effectiveProjectId, name);
+      }
+      refreshWorkspaceFiles();
+    } catch {
+      /* Graceful fallback if backend offline */
+    }
+  }, [deleteExperimentFile, effectiveProjectId, refreshWorkspaceFiles, onShowToast]);
 
 
 
@@ -1014,9 +1357,25 @@ export function ViewAsCodeStudio({
     }
   };
 
-  const handleSaveCode = useCallback(() => {
-    if (!displayedCode) return;
-    setSavedCodeByFile((prev) => ({ ...prev, [currentFile]: displayedCode }));
+  const handleSaveCode = useCallback(async () => {
+    if (!displayedCode || isFileReadOnly) return;
+    setIsAutosaving(true);
+    try {
+      if (typeof CodeExecutionService?.saveWorkspaceFile === 'function') {
+        await CodeExecutionService.saveWorkspaceFile(effectiveProjectId, currentFile, displayedCode);
+      }
+      setSavedCodeByFile((prev) => ({ ...prev, [currentFile]: displayedCode }));
+      refreshWorkspaceFiles();
+    } catch (err: any) {
+      if (err?.status === 403) {
+        onShowToast?.('Read-only File', 'This file is read-only and cannot be saved.', 'error');
+        setIsAutosaving(false);
+        return;
+      }
+    } finally {
+      setIsAutosaving(false);
+    }
+
     const parsed = parsePipelineTargetAndConfig(displayedCode);
     let updatedConfig = trainingConfig;
 
@@ -1061,6 +1420,8 @@ export function ViewAsCodeStudio({
   }, [
     currentFile,
     displayedCode,
+    isFileReadOnly,
+    effectiveProjectId,
     trainingConfig,
     activeJob,
     setSelectedTarget,
@@ -1068,6 +1429,7 @@ export function ViewAsCodeStudio({
     setActiveJob,
     setFileJob,
     setSelectedFeatures,
+    refreshWorkspaceFiles,
     onShowToast,
   ]);
 
@@ -1123,6 +1485,7 @@ export function ViewAsCodeStudio({
         code: displayedCode,
         filename: currentFile,
         dataset_id: dataset?.datasetId || trainingConfig?.dataset_id,
+        project_id: effectiveProjectId,
         timeout: 90,
       });
 
@@ -1188,6 +1551,7 @@ export function ViewAsCodeStudio({
               const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
               setRuntimeDiagnostics(errDiags);
             }
+            refreshWorkspaceFiles();
             es.close();
 
           } else if (data.type === 'error') {
@@ -1200,6 +1564,7 @@ export function ViewAsCodeStudio({
             setExecDuration((Date.now() - startTime) / 1000);
             const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
             setRuntimeDiagnostics(errDiags);
+            refreshWorkspaceFiles();
             es.close();
 
           }
@@ -1232,7 +1597,9 @@ export function ViewAsCodeStudio({
               const errDiags = parseRuntimeErrors(allLines, currentFile, displayedCode.split('\n').length);
               setRuntimeDiagnostics(errDiags);
             }
-          }).catch(() => {});
+          }).catch(() => {}).finally(() => {
+            refreshWorkspaceFiles();
+          });
           es.close();
           return;
         }
@@ -1284,6 +1651,9 @@ export function ViewAsCodeStudio({
           .catch(() => {
             setExecStatus('completed');
             setLogEntries(prev => [...prev, makeLog('warn', 'Stream ended (status unknown)')]);
+          })
+          .finally(() => {
+            refreshWorkspaceFiles();
           });
       };
     } catch (err: any) {
@@ -1612,8 +1982,17 @@ export function ViewAsCodeStudio({
                   transition: 'background 100ms ease, color 100ms ease',
                 }}
               >
-                <FileCode style={{ width: 13, height: 13, color: isActiveTab ? BB.gold : BB.muted }} />
+                {tab.startsWith('data/') ? (
+                  <Database style={{ width: 13, height: 13, color: isActiveTab ? BB.gold : BB.muted, flexShrink: 0 }} />
+                ) : tab.startsWith('outputs/') ? (
+                  <Folder style={{ width: 13, height: 13, color: isActiveTab ? BB.primaryLight : BB.muted, flexShrink: 0 }} />
+                ) : (
+                  <FileCode style={{ width: 13, height: 13, color: isActiveTab ? BB.gold : BB.muted, flexShrink: 0 }} />
+                )}
                 <span>{tab}</span>
+                {tab.startsWith('data/') && (
+                  <Lock style={{ width: 10, height: 10, color: BB.muted, flexShrink: 0 }} title="Read-only" />
+                )}
                 {isModified && (
                   <span
                     title="Modified"
@@ -1796,6 +2175,7 @@ export function ViewAsCodeStudio({
             pendingNewFileName={pendingNewFileName}
             modifiedFileNames={modifiedFiles}
             generatedFileNames={generatedFiles}
+            workspaceFiles={serverWorkspaceFiles}
             onSelectFile={handleSelectFile}
             onNewFile={handleNewFile}
             onDeleteFile={handleDeleteFile}
@@ -2018,6 +2398,7 @@ export function ViewAsCodeStudio({
                 filename={currentFile}
                 diagnostics={allDiagnostics}
                 onChange={(newCode) => {
+                  if (isFileReadOnly) return;
                   updateExperimentFileCode(currentFile, newCode);
                   markFileModified(currentFile);
                 }}
@@ -2026,6 +2407,7 @@ export function ViewAsCodeStudio({
                 onSave={handleSaveCode}
                 onToggleTerminal={() => setBottomPanelOpen((o) => !o)}
                 minimapEnabled={true}
+                readOnly={isFileReadOnly}
               />
             </div>
           </div>
@@ -2077,6 +2459,12 @@ export function ViewAsCodeStudio({
                 scikit-learn {pythonLanguageClient.runtimeInfo.sklearn}
               </span>
               {(() => {
+                if (isFileReadOnly) {
+                  return <span style={{ color: BB.muted }}>🔒 Read-Only</span>;
+                }
+                if (isAutosaving) {
+                  return <span style={{ color: BB.gold }}>● Autosaving…</span>;
+                }
                 const isModified = displayedCode !== (savedCodeByFile[currentFile] ?? displayedCode);
                 const isDiverged =
                   !isModified &&

@@ -58,6 +58,7 @@ class ExecutionRecord:
     code:        str
     dataset_id:  Optional[str]
     filename:    str
+    project_id:  Optional[str]     = "default_project"
     started_at:  Optional[float]   = None
     finished_at: Optional[float]   = None
     exit_code:   Optional[int]     = None
@@ -112,6 +113,7 @@ async def start_execution(
     code: str,
     dataset_id: Optional[str] = None,
     filename: str = "train.py",
+    project_id: Optional[str] = "default_project",
     timeout: int = _DEFAULT_TIMEOUT_SECONDS,
     extra_env: Optional[Dict[str, str]] = None,
     prefer_celery: Optional[bool] = None,
@@ -123,6 +125,7 @@ async def start_execution(
         code=code,
         dataset_id=dataset_id,
         filename=filename,
+        project_id=project_id or "default_project",
     )
     _EXECUTIONS[exec_id] = rec
 
@@ -174,6 +177,25 @@ async def _run_execution(
         await rec._queue.put(f"[ERROR] {rec.error}")
         await rec._queue.put(None)
         return
+
+    # Stage workspace files and folders into execution sandbox
+    if rec.project_id:
+        try:
+            from app.services.workspace_filesystem_service import get_project_workspace_root
+            ws_root = get_project_workspace_root(rec.project_id)
+            for item in ws_root.iterdir():
+                if item.name == "outputs" or item.name.startswith("."):
+                    continue
+                dest_item = os.path.join(sandbox, item.name)
+                if item.is_dir() and not os.path.exists(dest_item):
+                    shutil.copytree(item, dest_item)
+                elif item.is_file() and not os.path.exists(dest_item):
+                    shutil.copy2(item, dest_item)
+        except Exception as ws_err:
+            logger.debug("Workspace staging error: %s", ws_err)
+
+    # Ensure outputs directory exists in sandbox
+    os.makedirs(os.path.join(sandbox, "outputs"), exist_ok=True)
 
     # Stage dataset CSV into execution sandbox so pd.read_csv resolves correctly
     try:
@@ -373,6 +395,28 @@ async def _run_execution(
                             break
                         except Exception as reg_exc:
                             logger.warning("Failed to auto-register code execution model: %s", reg_exc)
+
+            # Sync generated outputs and artifacts back to project workspace outputs directory
+            if rec.project_id:
+                try:
+                    from app.services.workspace_filesystem_service import get_project_workspace_root
+                    ws_root = get_project_workspace_root(rec.project_id)
+                    ws_outputs = ws_root / "outputs"
+                    os.makedirs(ws_outputs, exist_ok=True)
+
+                    sandbox_outputs = os.path.join(sandbox, "outputs")
+                    if os.path.isdir(sandbox_outputs):
+                        for f in os.listdir(sandbox_outputs):
+                            src_f = os.path.join(sandbox_outputs, f)
+                            if os.path.isfile(src_f):
+                                shutil.copy2(src_f, ws_outputs / f)
+
+                    for art in (rec.artifacts or []):
+                        art_src = os.path.join(sandbox, art)
+                        if os.path.isfile(art_src):
+                            shutil.copy2(art_src, ws_outputs / art)
+                except Exception as sync_back_err:
+                    logger.debug("Artifact sync-back error: %s", sync_back_err)
         else:
             rec.status = "failed"
             await rec._queue.put(f"[ML Playground] Failed (exit {proc.returncode}).")

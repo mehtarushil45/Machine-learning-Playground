@@ -756,7 +756,28 @@ export interface ExecuteRequest {
   code:       string;
   filename?:  string;
   dataset_id?: string;
+  project_id?: string;
   timeout?:   number;
+}
+
+export interface WorkspaceFileItem {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  is_readonly: boolean;
+  size: number;
+  modified_at: number;
+}
+
+export interface WorkspaceFilesResponse {
+  project_id: string;
+  files: WorkspaceFileItem[];
+}
+
+export interface WorkspaceFileContentResponse {
+  project_id: string;
+  filename: string;
+  content: string;
 }
 
 export interface ExecuteResponse {
@@ -868,6 +889,65 @@ export const CodeExecutionService = {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/api/v1/code-execution/ws-lint`;
   },
+
+  /** List all files and directories in project workspace */
+  listWorkspaceFiles: (projectId: string = 'default_project') =>
+    request<WorkspaceFilesResponse>(`/code-execution/workspaces/${encodeURIComponent(projectId)}/files`),
+
+  /** Read content of a workspace file */
+  readWorkspaceFile: (projectId: string = 'default_project', filename: string) => {
+    const q = new URLSearchParams({ filename });
+    return request<WorkspaceFileContentResponse>(`/code-execution/workspaces/${encodeURIComponent(projectId)}/file?${q.toString()}`);
+  },
+
+  /** Save / autosave content to a workspace file */
+  saveWorkspaceFile: (projectId: string = 'default_project', filename: string, content: string) =>
+    request<{ filename: string; size: number; status: string }>(
+      `/code-execution/workspaces/${encodeURIComponent(projectId)}/file`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ filename, content }),
+      }
+    ),
+
+  /** Create a new file or directory in workspace */
+  createWorkspaceFile: (projectId: string = 'default_project', filename: string, content: string = '', isDir: boolean = false) =>
+    request<{ filename: string; is_dir: boolean; status: string }>(
+      `/code-execution/workspaces/${encodeURIComponent(projectId)}/create-file`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ filename, content, is_dir: isDir }),
+      }
+    ),
+
+  /** Rename a file in workspace */
+  renameWorkspaceFile: (projectId: string = 'default_project', oldFilename: string, newFilename: string) =>
+    request<{ old_filename: string; new_filename: string; status: string }>(
+      `/code-execution/workspaces/${encodeURIComponent(projectId)}/rename-file`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ old_filename: oldFilename, new_filename: newFilename }),
+      }
+    ),
+
+  /** Delete a file in workspace */
+  deleteWorkspaceFile: (projectId: string = 'default_project', filename: string) => {
+    const q = new URLSearchParams({ filename });
+    return request<{ filename: string; status: string }>(
+      `/code-execution/workspaces/${encodeURIComponent(projectId)}/file?${q.toString()}`,
+      { method: 'DELETE' }
+    );
+  },
+
+  /** Sync dataset into workspace read-only data/ directory */
+  syncDatasetToWorkspace: (projectId: string = 'default_project', datasetId?: string) =>
+    request<{ project_id: string; mounted: boolean }>(
+      `/code-execution/workspaces/${encodeURIComponent(projectId)}/sync-dataset`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ dataset_id: datasetId }),
+      }
+    ),
 };
 
 // ---------------------------------------------------------------------------

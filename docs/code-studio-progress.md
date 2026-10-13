@@ -94,8 +94,61 @@ Audited against real Python `ast` + `pyflakes` (`services/api/app/services/code_
 
 ---
 
-## Next Steps: Phase 2 — Workspace and Persistence
-- Server-side project workspace filesystem per user/project.
-- Safe file operations (create, rename, delete, switch).
-- Read-only `/workspace/data/` mount and isolated `/workspace/outputs/` directory.
-- Background debounce autosave to server.
+---
+
+## Phase 2 — Workspace and Persistence (Completed)
+
+### 2.1 Backend Workspace Filesystem Service (`workspace_filesystem_service.py`)
+- **Server-Side Project Workspace Root**: Created structured workspace manager storing user project files under `UPLOADS_DIR/workspaces/{project_id}`.
+- **Directory Layout Standard**:
+  - `data/`: Mount for project datasets (strictly read-only). Automatically synchronizes active dataset CSV (`dataset.csv`).
+  - `outputs/`: Dedicated directory for run artifacts (trained models, `.joblib`, `.json`, logs, charts).
+  - Project root: Stores Python experiment scripts (`pipeline_generated.py`, user scripts).
+- **CRUD Operations**:
+  - `list_workspace_files(project_id)`: Recursively scans workspace returning structured metadata (`name`, `path`, `is_dir`, `is_readonly`, `size`, `modified_at`).
+  - `read_workspace_file(project_id, filename)`: Reads UTF-8 content; safely rejects binary files with informative 400 error.
+  - `write_workspace_file(project_id, filename, content)`: Handles autosaves and manual edits; validates path and write permissions.
+  - `create_workspace_file(project_id, filename, content, is_dir)`: Creates files or subdirectories.
+  - `rename_workspace_file(project_id, old_filename, new_filename)`: Safely renames files.
+  - `delete_workspace_file(project_id, filename)`: Safely removes non-read-only files.
+
+### 2.2 Security Guardrails & Path Traversal Protection
+- **Path Boundary Enforcement**: `resolve_safe_path(root, filename)` ensures all paths resolve strictly inside the project root via `path.resolve().relative_to(root.resolve())`. Rejects `..` traversal, root escapes, and null bytes with HTTP 400.
+- **Read-Only `data/` Protection**: Any attempt to write (`write_workspace_file`), create, rename, or delete files inside `data/` raises HTTP 403 Forbidden: `"The 'data/' directory is read-only. Uploaded datasets cannot be modified directly."`
+
+### 2.3 Execution Sandbox Staging & Artifact Sync-Back (`code_execution_service.py`)
+- **Project Scoping**: Added `project_id` to `ExecuteRequest` and `ExecutionRecord`.
+- **Pre-execution Staging**: Prior to execution in `_run_execution`, all files from `workspaces/{project_id}` (including `data/` and user scripts) are staged into the execution sandbox directory, guaranteeing user scripts can read `data/dataset.csv`.
+- **Post-execution Sync-Back**: Upon process exit, generated artifacts in `sandbox/outputs` as well as any root model files (`*.joblib`, `*.pkl`, `*.onnx`) are automatically persisted back to the project's permanent `workspaces/{project_id}/outputs` directory.
+
+### 2.4 Frontend Workspace File Explorer & Categorization (`ViewAsCodeStudio.tsx`)
+- **3-Tier Grouped Explorer**:
+  1. `data/`: Shows dataset files (`data/dataset.csv`) with `RO` badge and lock icon (🔒). Selection opens file in read-only mode in Monaco editor; deletion is disabled.
+  2. `outputs/`: Shows generated run artifacts (`outputs/metrics.json`, `outputs/model.joblib`) with artifact icons, sizes, and quick delete button.
+  3. `experiments/`: Shows editable Python scripts (`pipeline_generated.py`, etc.) with `✦ Generated` and `● Modified` status indicators, inline file creation input, and delete buttons.
+- **Category-Aware Tabs**: Tabs display category-specific icons (Database icon for `data/`, Folder icon for `outputs/`, FileCode for scripts) and lock badges for read-only files.
+- **Read-Only Protection in Editor**: When a user selects a file in `data/` or a binary artifact, Monaco editor is set to `readOnly={true}`, and the status bar displays `🔒 Read-Only`.
+
+### 2.5 1500ms Debounced Autosave Engine & Status Transitions
+- **Debounced Server Sync**: When the user edits code, an autosave timer debounces for 1500ms.
+- **Visual Status Transitions**:
+  - While editing: Status bar displays `● Modified` (gold).
+  - During save: Status bar displays `● Autosaving…` (gold).
+  - Upon server confirmation: Status bar displays `✓ Saved` (green) (or `✦ Generated` / `▲ Diverged from builder`).
+- **Immediate Save**: Ctrl+S or manual save calls `CodeExecutionService.saveWorkspaceFile` immediately and refreshes the workspace file tree.
+
+### 2.6 Verification & Testing
+- **Backend Pytest**: `tests/test_code_studio_workspace.py` verified 2/2 tests passed (100%):
+  - Full CRUD lifecycle (create, write, read, list, rename, delete).
+  - Path traversal protection (`..` -> 400 Bad Request).
+  - Read-only protection (`data/` write & delete -> 403 Forbidden).
+- **Frontend Vitest**: 14/14 tests passed across 4 test suites (`phase2WorkspacePersistence.test.tsx`, `phase1TruthfulDiagnostics.test.tsx`, `ViewAsCodeStudio.test.tsx`, `idePersistence.test.tsx`).
+- **Production Web Bundle**: Built cleanly via `npm run build` in 1.13s with zero TypeScript/Vite errors.
+
+---
+
+## Next Steps: Phase 3 — Isolated Execution Sandbox & Output Streaming
+- Sandboxed execution with resource limits (timeout, memory, process isolation).
+- Dual-channel WebSocket + SSE real-time stdout/stderr streaming with live exit codes.
+- Integrated runtime error parser with file-frame detection and inline Monaco error highlights.
+

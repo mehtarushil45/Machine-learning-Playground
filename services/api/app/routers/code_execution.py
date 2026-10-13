@@ -43,6 +43,7 @@ class ExecuteRequest(BaseModel):
     code:        str           = Field(..., description="Python source code to execute")
     filename:    str           = Field("train.py", description="Logical filename")
     dataset_id:  Optional[str] = Field(None, description="Dataset ID for context")
+    project_id:  Optional[str] = Field("default_project", description="Project ID for workspace persistence")
     timeout:     int           = Field(90, ge=5, le=300, description="Max execution seconds")
 
 
@@ -313,6 +314,7 @@ async def execute_code(
         code=payload.code,
         dataset_id=payload.dataset_id,
         filename=payload.filename,
+        project_id=payload.project_id or "default_project",
         timeout=payload.timeout,
     )
     return ExecuteResponse(
@@ -433,3 +435,92 @@ async def get_result(exec_id: str) -> ExecutionResult:
 async def list_recent() -> list:
     """Return summary of all tracked executions (newest-relevant)."""
     return list_executions()
+
+
+# -- Workspace Filesystem Schemas & Endpoints -------------------------------
+
+class WorkspaceFileItem(BaseModel):
+    name: str
+    path: str
+    is_dir: bool
+    is_readonly: bool
+    size: int
+    modified_at: float
+
+
+class WorkspaceFilesResponse(BaseModel):
+    project_id: str
+    files: List[WorkspaceFileItem]
+
+
+class WorkspaceFileContentResponse(BaseModel):
+    project_id: str
+    filename: str
+    content: str
+
+
+class WorkspaceSaveFileRequest(BaseModel):
+    filename: str = Field(..., description="Relative path in workspace")
+    content: str = Field(..., description="File content")
+
+
+class WorkspaceCreateFileRequest(BaseModel):
+    filename: str = Field(..., description="Relative path in workspace")
+    content: Optional[str] = Field("", description="Initial content")
+    is_dir: Optional[bool] = Field(False, description="Whether to create directory")
+
+
+class WorkspaceRenameFileRequest(BaseModel):
+    old_filename: str = Field(..., description="Current relative path")
+    new_filename: str = Field(..., description="New relative path")
+
+
+class WorkspaceSyncDatasetRequest(BaseModel):
+    dataset_id: Optional[str] = Field(None, description="Dataset ID to mount into data/")
+
+
+@router.get("/workspaces/{project_id}/files", response_model=WorkspaceFilesResponse, summary="List project workspace files")
+async def get_workspace_files(project_id: str) -> WorkspaceFilesResponse:
+    from app.services.workspace_filesystem_service import list_workspace_files, ensure_project_workspace
+    ensure_project_workspace(project_id)
+    files = list_workspace_files(project_id)
+    return WorkspaceFilesResponse(project_id=project_id, files=files)
+
+
+@router.get("/workspaces/{project_id}/file", response_model=WorkspaceFileContentResponse, summary="Read workspace file")
+async def get_workspace_file_content(project_id: str, filename: str) -> WorkspaceFileContentResponse:
+    from app.services.workspace_filesystem_service import read_workspace_file
+    content = read_workspace_file(project_id, filename)
+    return WorkspaceFileContentResponse(project_id=project_id, filename=filename, content=content)
+
+
+@router.post("/workspaces/{project_id}/file", summary="Save workspace file")
+async def save_workspace_file(project_id: str, payload: WorkspaceSaveFileRequest) -> dict:
+    from app.services.workspace_filesystem_service import write_workspace_file
+    return write_workspace_file(project_id, payload.filename, payload.content)
+
+
+@router.post("/workspaces/{project_id}/create-file", summary="Create file or folder")
+async def create_new_workspace_file(project_id: str, payload: WorkspaceCreateFileRequest) -> dict:
+    from app.services.workspace_filesystem_service import create_workspace_file
+    return create_workspace_file(project_id, payload.filename, payload.content or "", bool(payload.is_dir))
+
+
+@router.post("/workspaces/{project_id}/rename-file", summary="Rename workspace file")
+async def rename_existing_workspace_file(project_id: str, payload: WorkspaceRenameFileRequest) -> dict:
+    from app.services.workspace_filesystem_service import rename_workspace_file
+    return rename_workspace_file(project_id, payload.old_filename, payload.new_filename)
+
+
+@router.delete("/workspaces/{project_id}/file", summary="Delete workspace file")
+async def delete_existing_workspace_file(project_id: str, filename: str) -> dict:
+    from app.services.workspace_filesystem_service import delete_workspace_file
+    return delete_workspace_file(project_id, filename)
+
+
+@router.post("/workspaces/{project_id}/sync-dataset", summary="Sync dataset to data/")
+async def sync_dataset_route(project_id: str, payload: WorkspaceSyncDatasetRequest) -> dict:
+    from app.services.workspace_filesystem_service import sync_dataset_to_workspace
+    success = sync_dataset_to_workspace(project_id, payload.dataset_id)
+    return {"project_id": project_id, "mounted": success}
+
