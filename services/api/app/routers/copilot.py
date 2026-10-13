@@ -25,7 +25,7 @@ class CopilotChatRequest(BaseModel):
     dataset_schema: Optional[Dict[str, Any]] = Field(None, description="Features and column metadata")
     error_traceback: Optional[str] = Field(None, description="Recent execution error traceback")
     chat_history: Optional[List[Dict[str, str]]] = Field(None, description="Recent conversation turns")
-    policy: str = Field("full", description="Copilot policy: 'full' | 'explain-only'")
+    policy: str = Field("full", description="Copilot policy: 'full' | 'explain-only' | 'off'")
 
 
 class CopilotChatResponse(BaseModel):

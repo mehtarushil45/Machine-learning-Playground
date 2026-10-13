@@ -264,10 +264,63 @@ Per the engineering specification:
 
 ---
 
-## Next Steps: Phase 5 — ML-Native Editing & Language Intelligence
-- Schema-aware autocompletion for dataset column names (`df['...']`).
-- Scikit-learn estimator docstring and parameter hover cards.
-- ML-specific diagnostic checks in Problems panel (e.g., target column missing from dataset, unsupported feature types).
-- Synchronized code snippets and visual pipeline node mapping.
+---
+
+## Phase 5 — ML-Native Editing & Language Intelligence (Completed)
+
+### 5.1 Schema-Aware Autocompletion (`mlCodeIntelligence.ts`)
+- **Subscript Introspection**: Typing `df["`, `df['`, `data["`, `X["`, `df.drop(columns=["...`, or within `columns = [...]` triggers autocomplete suggestions containing all columns in the active dataset's schema.
+- **Rich Column Metadata**: Each column completion displays its inferred data type (`numeric`, `categorical`, `string`), origin dataset name, and assigned role (`🎯 Target Variable`, `★ Selected Feature`, or `Feature`).
+- **Target & Feature Shortcuts**: When outside column subscripts, autocompletion offers `TARGET_COLUMN` (e.g. `"churn"`) and `FEATURE_COLUMNS` (JSON array of selected feature columns) with full inline documentation.
+- **ML Primitives Autocomplete**: Outside quotes, provides completions for pinned scikit-learn models (`RandomForestClassifier`, `GradientBoostingClassifier`, `LogisticRegression`), transformers (`StandardScaler`, `SimpleImputer`, `ColumnTransformer`, `Pipeline`), and model selection utilities (`train_test_split`, `cross_val_score`).
+
+### 5.2 Hover & Signature Help Engine
+- **Pinned Library Docstrings**: Registered a dedicated Monaco Hover Provider supplying formatted markdown docstrings for scikit-learn 1.9.0, Python 3.12, pandas, and joblib.
+- **Dataset Column Hover**: Hovering over any dataset column identifier displays its schema metadata, inferred type, parent dataset, and whether it is configured as the active target variable or feature.
+- **Active Signature Help**: Registered a Monaco Signature Help Provider tracking cursor position inside function calls (e.g. `train_test_split(`, `RandomForestClassifier(`, `cross_val_score(`) with parameter documentation and active parameter highlighting based on comma positions outside strings.
+
+### 5.3 Working Snippet Set with Learning Explanations
+Created 5 core executable ML snippets directly accessible via toolbar dropdown and Monaco autocomplete:
+1. `train-test-split`: Unbiased train (80%) and test (20%) partitioning with random state.
+2. `ml-pipeline`: Complete leak-proof scikit-learn `Pipeline` encapsulating imputation, scaling, and classification.
+3. `cross-validation`: Generalization stability measurement via 5-fold cross-validation.
+4. `confusion-matrix`: Evaluation on test split showing confusion matrix and classification report.
+5. `feature-importance`: Gini impurity reduction extraction across features.
+- **Learning Mode Guidance**: When Learning Mode is active, inserting any snippet triggers an educational toast explaining *why* the pattern is critical (e.g., preventing data leakage, addressing metric imbalance) and logs a telemetry signal via `LearningContext.logSignal`.
+
+### 5.4 Learning-Layer Static AST Checks (`ML Playground checks`)
+- **AST Preprocessing Leakage Audit**: Evaluates user code with debounced calls (350ms) to `LearningService.auditCode`. Detects data leakage (e.g., preprocessing transformer `.fit()` executed prior to `train_test_split()`).
+- **Clean Diagnostics Separation**: In the Problems tab, learning violations are badged distinctly as `🎓 ML Playground checks` with gold borders and high-contrast styling. They are never mixed into Python syntax, Pyflakes, or runtime errors.
+
+### 5.5 AI Copilot Explain & Fix Actions with Side-by-Side Diff Review
+- **In-Problem Actions**: Every diagnostic item and terminal traceback line displays dedicated `[Explain]` and `[Fix]` buttons.
+- **Explain Action**: Dispatches an inquiry to AI Copilot describing the exact code line, error message, and ML context, opening the AI Copilot side drawer.
+- **Fix Action & Explicit Acceptance**: Asking Copilot for a fix triggers code generation and immediately displays the side-by-side `RegenerateDiffModal` (`DiffEditor`). No edits are ever applied silently to the user's buffer without explicit review and clicking "Accept & Replace Code".
+- **Server-Side Policy Enforcement**: `CopilotService.generate_response` strictly enforces classroom exam policies:
+  - `policy="off"`: Rejects requests immediately with `allowed: False` and policy warning notice without calling the LLM.
+  - `policy="explain-only"`: Injects strict non-solution guidelines forbidding complete pipelines or copy-paste code.
+  - `policy="full"`: Standard pair-programming.
+
+### 5.6 Verification & Tests
+- **Frontend Vitest**: `src/test/phase5MlEditing.test.tsx` verified **13/13 tests passed (100%)**:
+  1. `suggests column names when typing inside df["..."] subscript` PASSED
+  2. `suggests column names inside single quotes subscript df['...` PASSED
+  3. `provides TARGET_COLUMN and FEATURE_COLUMNS suggestions` PASSED
+  4. `suggests scikit-learn and pandas ML primitives when outside subscripts` PASSED
+  5. `returns scikit-learn 1.9.0 pinned docstrings for ML models and transformers` PASSED
+  6. `returns dataset column hover info for columns in the active schema` PASSED
+  7. `returns null hover docstring for unrecognized keywords` PASSED
+  8. `provides accurate signature help for functions with active parameter detection` PASSED
+  9. `provides all 5 core ML snippets required by the Phase 5 spec` PASSED
+  10. `ensures each snippet includes working executable code and learning explanation` PASSED
+  11. `renders separate "ML Playground checks" badge in Problems tab when AST audit finds data leakage` PASSED
+  12. `triggers Copilot Explain message when Explain button is clicked` PASSED
+  13. `triggers Copilot Fix message and opens side-by-side RegenerateDiffModal for user acceptance` PASSED
+- **Regression Test Suites**: **20/20 tests passed (100%)** across `phase1TruthfulDiagnostics.test.tsx`, `phase2WorkspacePersistence.test.tsx`, `phase3ExecutionStreaming.test.tsx`, and `phase4SecurityGate.test.tsx`.
+- **Backend Pytest**: `tests/test_copilot_service.py` verified **6/6 tests passed (100%)**, including policy enforcement (`off`, `explain-only`, `full`).
+- **Full Backend Code Studio Suite**: **8/8 tests passed (100%)** across `test_code_studio_execution_phase3.py` and `test_code_studio_phase4_security_gate.py`.
+- **Frontend Typecheck & Production Build**:
+  - `npx tsc --noEmit` passed with 0 errors.
+  - `npm run build` succeeded with clean bundle in 1.81s.
 
 

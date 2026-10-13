@@ -13,6 +13,12 @@
 
 import React, { useRef, useEffect } from 'react';
 import Editor, { type OnMount, type BeforeMount, type Monaco } from '@monaco-editor/react';
+import {
+  getSchemaCompletions,
+  getHoverDocstring,
+  getSignatureHelp,
+  type DatasetColumnInfo,
+} from './mlCodeIntelligence';
 
 export interface CodeDiagnostic {
   line: number;
@@ -37,6 +43,12 @@ export interface MonacoCodeStudioEditorProps {
   onToggleTerminal?: () => void;
   minimapEnabled?: boolean;
   readOnly?: boolean;
+  datasetColumns?: DatasetColumnInfo[];
+  datasetName?: string;
+  selectedTarget?: string | null;
+  selectedFeatures?: string[];
+  isLearningMode?: boolean;
+  onInsertSnippetExplanation?: (title: string, explanation: string) => void;
 }
 
 // Check if running inside Vitest / JSDOM test environment
@@ -58,10 +70,31 @@ export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
   onToggleTerminal,
   minimapEnabled = true,
   readOnly = false,
+  datasetColumns = [],
+  datasetName = 'dataset.csv',
+  selectedTarget = null,
+  selectedFeatures = [],
+  isLearningMode = false,
+  onInsertSnippetExplanation,
 }) => {
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const completionRegisteredRef = useRef(false);
+
+  // Keep live references to active dataset schema and learning mode for Monaco language providers
+  const datasetColumnsRef = useRef(datasetColumns);
+  const datasetNameRef = useRef(datasetName);
+  const selectedTargetRef = useRef(selectedTarget);
+  const selectedFeaturesRef = useRef(selectedFeatures);
+  const isLearningModeRef = useRef(isLearningMode);
+  const onInsertSnippetExplanationRef = useRef(onInsertSnippetExplanation);
+
+  datasetColumnsRef.current = datasetColumns;
+  datasetNameRef.current = datasetName;
+  selectedTargetRef.current = selectedTarget;
+  selectedFeaturesRef.current = selectedFeatures;
+  isLearningModeRef.current = isLearningMode;
+  onInsertSnippetExplanationRef.current = onInsertSnippetExplanation;
 
   // Configure custom dark theme and Python language completions
   const handleBeforeMount: BeforeMount = (monaco) => {
@@ -103,10 +136,13 @@ export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
       },
     });
 
-    // 2. Register Python ML Completions and Snippets
+    // 2. Register Python ML Language Intelligence Providers
     if (!completionRegisteredRef.current) {
       completionRegisteredRef.current = true;
+
+      // 2a. Schema-Aware Completion Provider (5.1 & 5.3)
       monaco.languages.registerCompletionItemProvider('python', {
+        triggerCharacters: ['"', "'", '[', '.', ' '],
         provideCompletionItems: (model: any, position: any) => {
           const word = model.getWordUntilPosition(position);
           const range = {
@@ -116,133 +152,85 @@ export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
             endColumn: word.endColumn,
           };
 
-          const suggestions: any[] = [
-            // Scikit-learn models & transformers
-            {
-              label: 'RandomForestClassifier',
-              kind: monaco.languages.CompletionItemKind.Class,
-              insertText: 'RandomForestClassifier(n_estimators=${1:100}, max_depth=${2:None}, random_state=42)',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Random Forest Classifier ensemble from scikit-learn',
-              range,
-            },
-            {
-              label: 'GradientBoostingClassifier',
-              kind: monaco.languages.CompletionItemKind.Class,
-              insertText: 'GradientBoostingClassifier(learning_rate=${1:0.1}, n_estimators=${2:100}, random_state=42)',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Gradient Boosting Classifier from scikit-learn',
-              range,
-            },
-            {
-              label: 'LogisticRegression',
-              kind: monaco.languages.CompletionItemKind.Class,
-              insertText: 'LogisticRegression(C=${1:1.0}, max_iter=1000, random_state=42)',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Regularized Logistic Regression classifier',
-              range,
-            },
-            {
-              label: 'StandardScaler',
-              kind: monaco.languages.CompletionItemKind.Class,
-              insertText: 'StandardScaler()',
-              documentation: 'Standardize features by removing mean and scaling to unit variance',
-              range,
-            },
-            {
-              label: 'SimpleImputer',
-              kind: monaco.languages.CompletionItemKind.Class,
-              insertText: 'SimpleImputer(strategy="${1:median}")',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Univariate imputer for missing values with specified strategy',
-              range,
-            },
-            {
-              label: 'Pipeline',
-              kind: monaco.languages.CompletionItemKind.Class,
-              insertText: 'Pipeline([\n    ("preprocessor", ${1:preprocessor}),\n    ("classifier", ${2:classifier}),\n])',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Pipeline of transforms with a final estimator',
-              range,
-            },
-            {
-              label: 'ColumnTransformer',
-              kind: monaco.languages.CompletionItemKind.Class,
-              insertText: 'ColumnTransformer([\n    ("num", StandardScaler(), ${1:num_cols}),\n    ("cat", OneHotEncoder(handle_unknown="ignore"), ${2:cat_cols}),\n])',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Applies transformers to columns of an array or pandas DataFrame',
-              range,
-            },
-            {
-              label: 'train_test_split',
-              kind: monaco.languages.CompletionItemKind.Function,
-              insertText: 'X_train, X_test, y_train, y_test = train_test_split(${1:X}, ${2:y}, test_size=${3:0.2}, random_state=42)',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Split arrays or matrices into random train and test subsets',
-              range,
-            },
+          const rawSuggestions = getSchemaCompletions(
+            model.getValue(),
+            position.lineNumber,
+            position.column,
+            datasetColumnsRef.current,
+            selectedTargetRef.current,
+            selectedFeaturesRef.current,
+            datasetNameRef.current
+          );
 
-            // Pandas & Numpy
-            {
-              label: 'pd.read_csv',
-              kind: monaco.languages.CompletionItemKind.Function,
-              insertText: 'pd.read_csv("${1:dataset.csv}")',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Read a comma-separated values (csv) file into DataFrame',
-              range,
-            },
-            {
-              label: 'joblib.dump',
-              kind: monaco.languages.CompletionItemKind.Function,
-              insertText: 'joblib.dump(${1:pipeline}, "model.joblib")',
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Persist arbitrary Python model pipeline to disk for Model Registry deployment',
-              range,
-            },
-
-            // High-productivity ML snippets
-            {
-              label: 'snippet:ml-pipeline',
-              kind: monaco.languages.CompletionItemKind.Snippet,
-              insertText: [
-                'import pandas as pd',
-                'import joblib',
-                'from sklearn.model_selection import train_test_split',
-                'from sklearn.pipeline import Pipeline',
-                'from sklearn.preprocessing import StandardScaler',
-                'from sklearn.impute import SimpleImputer',
-                'from sklearn.ensemble import RandomForestClassifier',
-                'from sklearn.metrics import classification_report',
-                '',
-                '# 1. Load Data',
-                'df = pd.read_csv("dataset.csv")',
-                'X = df.drop(columns=["target"])',
-                'y = df["target"]',
-                '',
-                '# 2. Split',
-                'X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)',
-                '',
-                '# 3. Build & Train Pipeline',
-                'pipeline = Pipeline([',
-                '    ("imputer", SimpleImputer(strategy="median")),',
-                '    ("scaler", StandardScaler()),',
-                '    ("classifier", RandomForestClassifier(n_estimators=100, random_state=42)),',
-                '])',
-                'pipeline.fit(X_train, y_train)',
-                '',
-                '# 4. Evaluate & Save',
-                'score = pipeline.score(X_test, y_test)',
-                'print(f"Accuracy: {score:.4f}")',
-                'joblib.dump(pipeline, "model.joblib")',
-                'print("Model artifact successfully saved to model.joblib")',
-              ].join('\n'),
-              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              documentation: 'Complete Scikit-Learn training pipeline with data staging, fit, eval, and model artifact persistence',
-              range,
-            },
-          ];
+          const suggestions = rawSuggestions.map((item) => ({
+            label: item.label,
+            kind: item.kind,
+            detail: item.detail,
+            documentation: { value: item.documentation },
+            insertText: item.insertText,
+            insertTextRules: item.isSnippet
+              ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+              : undefined,
+            sortText: item.sortText,
+            range,
+          }));
 
           return { suggestions };
+        },
+      });
+
+      // 2b. Hover Provider from Pinned Library Docstrings & Schema (5.2)
+      monaco.languages.registerHoverProvider('python', {
+        provideHover: (model: any, position: any) => {
+          const word = model.getWordAtPosition(position);
+          if (!word || !word.word) return null;
+
+          const hoverInfo = getHoverDocstring(
+            word.word,
+            datasetColumnsRef.current,
+            datasetNameRef.current,
+            selectedTargetRef.current
+          );
+
+          if (!hoverInfo) return null;
+
+          return {
+            range: new monaco.Range(
+              position.lineNumber,
+              word.startColumn,
+              position.lineNumber,
+              word.endColumn
+            ),
+            contents: hoverInfo.contents.map((c) => ({ value: c })),
+          };
+        },
+      });
+
+      // 2c. Signature Help Provider for scikit-learn Functions (5.2)
+      monaco.languages.registerSignatureHelpProvider('python', {
+        signatureHelpTriggerCharacters: ['(', ','],
+        provideSignatureHelp: (model: any, position: any) => {
+          const lineText = model.getLineContent(position.lineNumber);
+          const sigResult = getSignatureHelp(lineText, position.column);
+          if (!sigResult) return null;
+
+          return {
+            value: {
+              activeSignature: 0,
+              activeParameter: sigResult.activeParameter,
+              signatures: [
+                {
+                  label: sigResult.signature.label,
+                  documentation: { value: sigResult.signature.documentation },
+                  parameters: sigResult.signature.parameters.map((p) => ({
+                    label: p.label,
+                    documentation: { value: p.documentation },
+                  })),
+                },
+              ],
+            },
+            dispose: () => {},
+          };
         },
       });
     }

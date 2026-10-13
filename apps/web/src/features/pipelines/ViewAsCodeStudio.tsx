@@ -26,10 +26,11 @@ import {
   ArrowDown,
   Rocket,
   Download,
+  Sparkles,
 } from 'lucide-react';
 import { renderAnsiLine } from '../../utils/ansiParser';
 import { useProject } from '../../providers/ProjectContext';
-import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService, CopilotApiService, type WorkspaceFileItem } from '../../services/api';
+import { PipelineService, type CodeStepExplanation, type PipelineDAG, CodeExecutionService, CopilotApiService, type WorkspaceFileItem, LearningService } from '../../services/api';
 import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { AuthExpiredError, ApiTimeoutError } from '../../services/apiClient';
 import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
@@ -38,7 +39,8 @@ import { MonacoCodeStudioEditor } from './MonacoCodeStudioEditor';
 import { RegenerateDiffModal } from './RegenerateDiffModal';
 import { usePythonLanguageClient } from './usePythonLanguageClient';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
-import { PanelLearningCollapsible, HeadsUpCardsContainer } from '../learning';
+import { PanelLearningCollapsible, HeadsUpCardsContainer, useLearning } from '../learning';
+import { ML_SNIPPETS, type MLSnippetDefinition } from './mlCodeIntelligence';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -86,7 +88,7 @@ interface Diagnostic {
   end_col?: number;
   severity: 'error' | 'warning' | 'info';
   message: string;
-  source: 'syntax' | 'pyflakes' | 'pep8' | 'runtime' | 'static';
+  source: 'syntax' | 'pyflakes' | 'pep8' | 'runtime' | 'static' | 'ML Playground checks';
   code?: string | null;
 }
 
@@ -729,9 +731,18 @@ export function ViewAsCodeStudio({
   isActive = true,
   onShowToast,
   onNavigate,
-  isCopilotOpen = false,
-  onToggleCopilot,
+  isCopilotOpen: propIsCopilotOpen,
+  onToggleCopilot: propOnToggleCopilot,
 }: ViewAsCodeStudioProps) {
+  const [internalCopilotOpen, setInternalCopilotOpen] = useState(false);
+  const isCopilotOpen = propIsCopilotOpen !== undefined ? propIsCopilotOpen : internalCopilotOpen;
+  const setIsCopilotOpen = useCallback((open: boolean) => {
+    setInternalCopilotOpen(open);
+    if (open && !isCopilotOpen && propOnToggleCopilot) {
+      propOnToggleCopilot();
+    }
+  }, [isCopilotOpen, propOnToggleCopilot]);
+
   const {
     dataset,
     trainingConfig,
@@ -867,6 +878,42 @@ export function ViewAsCodeStudio({
 
   const isFileReadOnly = currentFile.startsWith('data/') || currentFile.endsWith('.joblib') || currentFile.endsWith('.pkl');
 
+  const { learningMode, logSignal } = useLearning();
+  const [mlPlaygroundChecks, setMlPlaygroundChecks] = useState<Diagnostic[]>([]);
+  const [isSnippetsDropdownOpen, setIsSnippetsDropdownOpen] = useState(false);
+
+  /* ── 5.4 Learning-Layer Static AST Checks (Data Leakage & Preprocessing Rules) ─ */
+  useEffect(() => {
+    if (!displayedCode || !displayedCode.trim() || isFileReadOnly) {
+      setMlPlaygroundChecks([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await LearningService.auditCode(displayedCode, currentFile);
+        if (res && res.has_leakage) {
+          setMlPlaygroundChecks([
+            {
+              line: res.line_number || 1,
+              col: 1,
+              severity: 'warning',
+              message: res.message || 'Data Leakage Detected: Preprocessing transformer fit before train_test_split.',
+              source: 'ML Playground checks',
+              code: 'B7-leakage',
+            },
+          ]);
+        } else {
+          setMlPlaygroundChecks([]);
+        }
+      } catch {
+        setMlPlaygroundChecks([]);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [displayedCode, currentFile, isFileReadOnly]);
+
   /* ── Enterprise Python Language Client (Authenticated WebSocket) ─ */
   const pythonLanguageClient = usePythonLanguageClient({
     code: displayedCode,
@@ -874,7 +921,7 @@ export function ViewAsCodeStudio({
     enabled: isActive,
   });
 
-  /* ── Unified Diagnostic Store (Single Source of Truth: Language Client + Runtime) ─ */
+  /* ── Unified Diagnostic Store (Single Source of Truth: Language Client + ML Checks + Runtime) ─ */
   const allDiagnostics = useMemo(() => {
     // If buffer is empty, immediately return empty diagnostics (clean empty-state)
     if (!displayedCode || !displayedCode.trim()) return [];
@@ -882,8 +929,8 @@ export function ViewAsCodeStudio({
     const seen = new Map<string, Diagnostic>();
     const activeDiagnostics = pythonLanguageClient.diagnostics;
 
-    [...activeDiagnostics, ...runtimeDiagnostics].forEach((d) => {
-      const key = `${d.line}:${d.col ?? 0}:${d.message}`;
+    [...activeDiagnostics, ...mlPlaygroundChecks, ...runtimeDiagnostics].forEach((d) => {
+      const key = `${d.line}:${d.col ?? 0}:${d.message}:${d.source ?? ''}`;
       if (!seen.has(key)) seen.set(key, d);
     });
 
@@ -891,7 +938,7 @@ export function ViewAsCodeStudio({
       const s: Record<string, number> = { error: 0, warning: 1, info: 2 };
       return (s[a.severity] ?? 3) - (s[b.severity] ?? 3) || a.line - b.line;
     });
-  }, [displayedCode, pythonLanguageClient.diagnostics, runtimeDiagnostics]);
+  }, [displayedCode, pythonLanguageClient.diagnostics, mlPlaygroundChecks, runtimeDiagnostics]);
 
   const errorCount = allDiagnostics.filter((d) => d.severity === 'error').length;
   const warnCount = allDiagnostics.filter((d) => d.severity === 'warning').length;
@@ -1843,7 +1890,10 @@ export function ViewAsCodeStudio({
       text: `Supervised target variable: **${target || 'not set'}** (${inferredTaskType || 'supervised learning'}).`,
     });
 
-    const excludedIds = (dataset?.columns || []).filter((c) => isColumnIdentifier(c));
+    const excludedIds = (dataset?.columns || [])
+      .map((c: any) => (typeof c === 'string' ? c : c?.name))
+      .filter(Boolean)
+      .filter((name: string) => isColumnIdentifier(name));
     if (excludedIds.length > 0) {
       msgs.push({
         id:   'pipeline-id-leakage',
@@ -1874,7 +1924,7 @@ export function ViewAsCodeStudio({
   }, [selectedTarget, selectedFeatures, trainingConfig, dataset, canonicalAlgorithm, canonicalScaler, canonicalImputer, testRatio, canonicalCvFolds, inferredTaskType, isValidSyntax]);
 
   /* ── AI Copilot Ask Question Handler (Real LLM Backend) ──────────── */
-  const handleSendCopilotMessage = async (promptText?: string) => {
+  const handleSendCopilotMessage = async (promptText?: string, expectProposal: boolean = false) => {
     const textToSend = (promptText || copilotInput).trim();
     if (!textToSend || isCopilotThinking) return;
 
@@ -1908,6 +1958,19 @@ export function ViewAsCodeStudio({
         ...prev,
         { id: `a-${Date.now()}`, role: 'assistant', text: res.reply },
       ]);
+
+      // If Copilot proposed code and user requested a fix, open side-by-side diff review
+      const codeMatch = res.reply.match(/```(?:python)?\s*([\s\S]+?)\s*```/);
+      if (expectProposal && codeMatch && codeMatch[1]) {
+        const proposedCode = codeMatch[1].trim();
+        if (proposedCode.length > 20) {
+          setDiffModalState({
+            isOpen: true,
+            filename: currentFile,
+            candidateCode: proposedCode,
+          });
+        }
+      }
     } catch (err: any) {
       setCopilotChat((prev) => [
         ...prev,
@@ -1919,6 +1982,41 @@ export function ViewAsCodeStudio({
       ]);
     } finally {
       setIsCopilotThinking(false);
+    }
+  };
+
+  /* ── 5.5 Copilot Explain & Fix Actions with Side-by-Side Diff Review ── */
+  const handleCopilotExplainDiagnostic = (diag: Diagnostic) => {
+    setIsCopilotOpen(true);
+    const prompt = `Please explain this issue: "${diag.message}" (source: ${diag.source || 'linter'}) on line ${diag.line} of ${currentFile}. Why does this matter and how does it impact ML model correctness?`;
+    handleSendCopilotMessage(prompt, false);
+  };
+
+  const handleCopilotFixDiagnostic = (diag: Diagnostic) => {
+    setIsCopilotOpen(true);
+    const prompt = `Please fix this problem in my code: "${diag.message}" on line ${diag.line} of ${currentFile}. Return the complete updated Python code block for the file.`;
+    handleSendCopilotMessage(prompt, true);
+  };
+
+  /* ── 5.3 Quick ML Snippet Insertion with Learning Mode Guidance ──── */
+  const handleInsertSnippet = (snip: MLSnippetDefinition) => {
+    if (isFileReadOnly) return;
+    const cleanSnippetCode = snip.insertText.replace(/\$\{\d+:([^}]+)\}/g, '$1');
+    const newCode = displayedCode ? `${displayedCode}\n\n${cleanSnippetCode}\n` : `${cleanSnippetCode}\n`;
+    updateExperimentFileCode(currentFile, newCode);
+    markFileModified(currentFile);
+
+    if (learningMode) {
+      onShowToast?.(
+        `🎓 [Learning Mode] ${snip.title}`,
+        snip.learningExplanation,
+        'info'
+      );
+      try {
+        logSignal('snippet_inserted', snip.id, undefined, 'code_studio');
+      } catch {}
+    } else {
+      onShowToast?.('Snippet Inserted', `Added ${snip.title} to ${currentFile}`, 'success');
     }
   };
 
@@ -2164,6 +2262,77 @@ export function ViewAsCodeStudio({
           >
             {copied ? <Check style={{ width: 13, height: 13 }} /> : <Copy style={{ width: 13, height: 13 }} />}
           </button>
+
+          {/* 5.3 Quick ML Snippets Menu */}
+          <div style={{ position: 'relative' }}>
+            <button
+              data-testid="snippets-menu-btn"
+              onClick={() => setIsSnippetsDropdownOpen((o) => !o)}
+              aria-label="Insert ML snippet"
+              title="Insert working scikit-learn ML snippets"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '3px 8px',
+                borderRadius: 5,
+                border: `1px solid ${isSnippetsDropdownOpen ? BB.gold : BB.border}`,
+                background: isSnippetsDropdownOpen ? 'rgba(201,162,75,0.15)' : 'transparent',
+                color: isSnippetsDropdownOpen ? BB.gold : BB.text,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 120ms ease',
+              }}
+            >
+              <FileCode style={{ width: 12, height: 12, color: BB.gold }} />
+              <span>Snippets</span>
+              <ChevronDown style={{ width: 10, height: 10 }} />
+            </button>
+            {isSnippetsDropdownOpen && (
+              <div
+                data-testid="snippets-dropdown-list"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  marginTop: 4,
+                  width: 270,
+                  background: BB.surface,
+                  border: `1px solid ${BB.gold}`,
+                  borderRadius: 6,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                  zIndex: 50,
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, color: BB.gold, borderBottom: `1px solid ${BB.border}`, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  ML Snippets {learningMode ? '• Learning Mode Active' : ''}
+                </div>
+                {ML_SNIPPETS.map((snip) => (
+                  <div
+                    key={snip.id}
+                    data-testid={`snippet-item-${snip.id}`}
+                    onClick={() => {
+                      setIsSnippetsDropdownOpen(false);
+                      handleInsertSnippet(snip);
+                    }}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      borderBottom: `1px solid ${BB.border}33`,
+                      transition: 'background 80ms',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(201, 162, 75, 0.15)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: BB.text }}>{snip.title}</div>
+                    <div style={{ fontSize: 10, color: BB.muted, marginTop: 2 }}>{snip.documentation}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div style={{ width: 1, height: 16, background: BB.border, margin: '0 2px' }} />
 
@@ -2496,6 +2665,21 @@ export function ViewAsCodeStudio({
                 onToggleTerminal={() => setBottomPanelOpen((o) => !o)}
                 minimapEnabled={true}
                 readOnly={isFileReadOnly}
+                datasetColumns={
+                  dataset?.columns?.map((c: any) => ({
+                    name: typeof c === 'string' ? c : c.name,
+                    type: typeof c === 'object' ? c.type : 'numeric',
+                  })) || []
+                }
+                datasetName={dataset?.fileName || activeDatasetName || 'dataset.csv'}
+                selectedTarget={selectedTarget}
+                selectedFeatures={selectedFeatures}
+                isLearningMode={learningMode}
+                onInsertSnippetExplanation={(title, exp) => {
+                  if (learningMode) {
+                    onShowToast?.(`🎓 [Learning Mode] ${title}`, exp, 'info');
+                  }
+                }}
               />
             </div>
           </div>
@@ -2578,6 +2762,7 @@ export function ViewAsCodeStudio({
               })()}
               {/* Diagnostics & Linting Status */}
               <button
+                data-testid="status-bar-problems-btn"
                 onClick={() => {
                   setBottomPanelOpen(true);
                   setBottomTab('problems');
@@ -2764,6 +2949,7 @@ export function ViewAsCodeStudio({
                 {(['output', 'problems', 'logs', 'debug'] as const).map((tab) => (
                   <button
                     key={tab}
+                    data-testid={`bottom-tab-${tab}`}
                     onClick={() => setBottomTab(tab)}
                     style={{
                       padding: '6px 14px',
@@ -3122,9 +3308,52 @@ export function ViewAsCodeStudio({
                               <span style={{ color: BB.gold }}>↳</span>
                               <span>{renderAnsiLine(line)}</span>
                             </span>
-                            <span style={{ fontSize: 10, color: BB.gold, opacity: 0.8, textDecoration: 'underline' }}>
-                              Jump to line {lineNum}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 10, color: BB.gold, opacity: 0.8, textDecoration: 'underline' }}>
+                                Jump to line {lineNum}
+                              </span>
+                              <button
+                                data-testid={`tb-explain-btn-${i}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsCopilotOpen(true);
+                                  handleSendCopilotMessage(`Explain this runtime traceback error on line ${lineNum} in ${file}: "${line.trim()}"`);
+                                }}
+                                title="Ask AI Copilot to explain this error"
+                                style={{
+                                  padding: '1px 6px',
+                                  fontSize: 9.5,
+                                  borderRadius: 3,
+                                  background: 'rgba(124, 107, 174, 0.25)',
+                                  border: `1px solid ${BB.border}`,
+                                  color: BB.primaryLight,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Explain
+                              </button>
+                              <button
+                                data-testid={`tb-fix-btn-${i}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsCopilotOpen(true);
+                                  handleSendCopilotMessage(`Fix this runtime error on line ${lineNum} in ${file}: "${line.trim()}". Return the complete updated Python code block for the file.`, true);
+                                }}
+                                title="Ask AI Copilot to propose a fix with diff review"
+                                style={{
+                                  padding: '1px 6px',
+                                  fontSize: 9.5,
+                                  borderRadius: 3,
+                                  background: 'rgba(201, 162, 75, 0.2)',
+                                  border: `1px solid ${BB.gold}`,
+                                  color: BB.gold,
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Fix
+                              </button>
+                            </div>
                           </div>
                         );
                       }
@@ -3258,14 +3487,81 @@ export function ViewAsCodeStudio({
                                       {currentFile}:{d.line}:{d.col}
                                     </span>
                                   </div>
-                                  <span style={{
-                                    fontSize: 9.5, padding: '1px 5px', borderRadius: 3,
-                                    background: d.source === 'runtime' ? 'rgba(239,68,68,0.15)' : 'rgba(107,92,166,0.2)',
-                                    color: d.source === 'runtime' ? '#EF4444' : BB.primaryLight,
-                                    flexShrink: 0,
-                                  }}>
-                                    {d.source}
+                                  <span
+                                    data-testid={`problem-source-badge-${i}`}
+                                    style={{
+                                      fontSize: 9.5,
+                                      padding: '2px 6px',
+                                      borderRadius: 3,
+                                      background:
+                                        d.source === 'ML Playground checks'
+                                          ? 'rgba(201, 162, 75, 0.2)'
+                                          : d.source === 'runtime'
+                                          ? 'rgba(239,68,68,0.15)'
+                                          : 'rgba(107,92,166,0.2)',
+                                      color:
+                                        d.source === 'ML Playground checks'
+                                          ? BB.gold
+                                          : d.source === 'runtime'
+                                          ? '#EF4444'
+                                          : BB.primaryLight,
+                                      fontWeight: d.source === 'ML Playground checks' ? 700 : 500,
+                                      border: d.source === 'ML Playground checks' ? `1px solid rgba(201, 162, 75, 0.4)` : 'none',
+                                      flexShrink: 0,
+                                    }}
+                                  >
+                                    {d.source === 'ML Playground checks' ? '🎓 ML Playground checks' : d.source}
                                   </span>
+
+                                  {/* 5.5 Copilot Explain & Fix Actions */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                                    <button
+                                      data-testid={`copilot-explain-btn-${i}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCopilotExplainDiagnostic(d);
+                                      }}
+                                      title="Ask AI Copilot to explain this diagnostic"
+                                      style={{
+                                        padding: '2px 7px',
+                                        fontSize: 10,
+                                        borderRadius: 3,
+                                        background: 'rgba(124, 107, 174, 0.25)',
+                                        border: `1px solid ${BB.border}`,
+                                        color: BB.primaryLight,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 3,
+                                      }}
+                                    >
+                                      <Sparkles style={{ width: 10, height: 10 }} />
+                                      <span>Explain</span>
+                                    </button>
+                                    <button
+                                      data-testid={`copilot-fix-btn-${i}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCopilotFixDiagnostic(d);
+                                      }}
+                                      title="Ask AI Copilot to propose a fix with side-by-side diff review"
+                                      style={{
+                                        padding: '2px 7px',
+                                        fontSize: 10,
+                                        borderRadius: 3,
+                                        background: 'rgba(201, 162, 75, 0.2)',
+                                        border: `1px solid ${BB.gold}`,
+                                        color: BB.gold,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 3,
+                                      }}
+                                    >
+                                      <span>Fix</span>
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -3413,7 +3709,7 @@ export function ViewAsCodeStudio({
       {/* ── RIGHT: AI COPILOT DOCKED PANEL (Unified Shared Component, docked right) ── */}
       <AICopilotDrawer
         isOpen={isCopilotOpen}
-        onToggle={onToggleCopilot || (() => {})}
+        onToggle={propOnToggleCopilot || (() => setInternalCopilotOpen((prev) => !prev))}
         messages={copilotMessages}
         chatMessages={copilotChat}
         onSendMessage={handleSendCopilotMessage}

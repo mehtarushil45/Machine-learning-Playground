@@ -133,6 +133,18 @@ class CopilotService:
         """Generate real-time AI response using configured LLM provider."""
         provider, api_key, model, base_url = cls.get_provider_and_key()
 
+        if policy == "off":
+            return {
+                "reply": (
+                    "⚠️ **[Copilot Policy Restricted]**\n\n"
+                    "AI Copilot is disabled by the instructor classroom policy for this session."
+                ),
+                "provider": provider,
+                "model": model,
+                "allowed": False,
+                "configured": True,
+            }
+
         if not api_key and provider != "ollama":
             return {
                 "reply": (

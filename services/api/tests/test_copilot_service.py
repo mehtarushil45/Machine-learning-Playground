@@ -13,6 +13,7 @@ from httpx import AsyncClient, ASGITransport
 
 from app.main import app
 from app.services.copilot_service import CopilotService
+from app.config import settings
 
 
 @pytest.mark.asyncio
@@ -22,6 +23,10 @@ async def test_copilot_status_unconfigured(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AI_COPILOT_API_KEY", raising=False)
+    monkeypatch.setattr(settings, "gemini_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "groq_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "ai_copilot_api_key", None, raising=False)
     monkeypatch.setenv("AI_COPILOT_PROVIDER", "gemini")
 
     status = CopilotService.get_status()
@@ -37,6 +42,10 @@ async def test_copilot_generate_response_unconfigured_instructions(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AI_COPILOT_API_KEY", raising=False)
+    monkeypatch.setattr(settings, "gemini_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "groq_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "ai_copilot_api_key", None, raising=False)
     monkeypatch.setenv("AI_COPILOT_PROVIDER", "gemini")
 
     res = await CopilotService.generate_response(prompt="How do I tune hyperparameters?")
@@ -96,6 +105,10 @@ async def test_copilot_api_router_endpoints(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AI_COPILOT_API_KEY", raising=False)
+    monkeypatch.setattr(settings, "gemini_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "groq_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "openai_api_key", None, raising=False)
+    monkeypatch.setattr(settings, "ai_copilot_api_key", None, raising=False)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -115,3 +128,48 @@ async def test_copilot_api_router_endpoints(monkeypatch):
         chat_data = chat_resp.json()
         assert "reply" in chat_data
         assert "configured" in chat_data
+
+
+@pytest.mark.asyncio
+async def test_copilot_policy_enforcement_off():
+    """When policy is 'off', Copilot immediately rejects the request with allowed=False without calling LLM."""
+    res = await CopilotService.generate_response(
+        prompt="Write a random forest pipeline for me",
+        policy="off",
+    )
+    assert res["allowed"] is False
+    assert "Copilot Policy Restricted" in res["reply"]
+    assert "disabled by the instructor classroom policy" in res["reply"]
+
+
+@pytest.mark.asyncio
+async def test_copilot_policy_enforcement_explain_only(monkeypatch):
+    """When policy is 'explain-only', system instruction restricts code generation."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("AI_COPILOT_PROVIDER", "gemini")
+
+    mock_json_reply = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [
+                        {"text": "A Random Forest is an ensemble of decision trees..."}
+                    ]
+                }
+            }
+        ]
+    }
+
+    with patch("app.services.copilot_service._sync_http_post", return_value=(200, mock_json_reply, "")) as mock_post:
+        res = await CopilotService.generate_response(
+            prompt="Explain how random forests work",
+            policy="explain-only",
+        )
+        assert res["allowed"] is True
+        assert mock_post.called
+
+        req_json = mock_post.call_args[0][1]
+        sys_obj = req_json.get("systemInstruction") or req_json.get("system_instruction") or {}
+        sys_instruction = sys_obj.get("parts", [{}])[0].get("text", "")
+        assert "Explain-Only Mode" in sys_instruction
+        assert "DO NOT provide full copy-paste solutions" in sys_instruction
