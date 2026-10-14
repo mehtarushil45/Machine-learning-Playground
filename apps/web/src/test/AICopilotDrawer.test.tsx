@@ -61,4 +61,59 @@ describe('AICopilotDrawer Component', () => {
     const input = screen.getByPlaceholderText(/ai copilot is responding/i);
     expect(input).toBeDisabled();
   });
+
+  it('renders code block with Review Diff & Apply action and triggers onReviewDiff', () => {
+    const handleReviewDiff = vi.fn();
+    const chatMessages = [
+      {
+        id: 'msg-1',
+        role: 'assistant' as const,
+        text: 'Here is the proposed fix for missing values:\n\n```python\nfrom sklearn.impute import SimpleImputer\nimputer = SimpleImputer(strategy="median")\nX = imputer.fit_transform(X)\n```\n\nThis will replace NaNs with the median value.',
+      },
+    ];
+
+    render(
+      <AICopilotDrawer
+        isOpen={true}
+        onToggle={() => {}}
+        chatMessages={chatMessages}
+        onReviewDiff={handleReviewDiff}
+      />
+    );
+
+    // Verify code block is rendered
+    expect(screen.getByText(/from sklearn.impute import SimpleImputer/i)).toBeInTheDocument();
+
+    // Verify Review Diff & Apply button is present
+    const diffButton = screen.getByTestId('copilot-apply-diff-btn');
+    expect(diffButton).toBeInTheDocument();
+    expect(diffButton).toHaveTextContent(/review diff & apply/i);
+
+    // Click the button and assert callback receives code snippet
+    fireEvent.click(diffButton);
+    expect(handleReviewDiff).toHaveBeenCalledWith(
+      expect.stringContaining('from sklearn.impute import SimpleImputer')
+    );
+  });
+
+  it('renders bold markdown and inline code styling cleanly', () => {
+    const chatMessages = [
+      {
+        id: 'msg-2',
+        role: 'assistant' as const,
+        text: 'Use **RandomForestClassifier** with `n_estimators=100` for best results.',
+      },
+    ];
+
+    render(
+      <AICopilotDrawer
+        isOpen={true}
+        onToggle={() => {}}
+        chatMessages={chatMessages}
+      />
+    );
+
+    expect(screen.getByText('RandomForestClassifier')).toBeInTheDocument();
+    expect(screen.getByText('n_estimators=100')).toBeInTheDocument();
+  });
 });

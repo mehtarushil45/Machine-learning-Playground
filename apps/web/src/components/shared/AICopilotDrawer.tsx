@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useRef } from 'react';
-import { Sparkles, X, Send } from 'lucide-react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Sparkles, X, Send, Copy, Check, SplitSquareVertical } from 'lucide-react';
 
 export interface CopilotMsg {
   id: string;
@@ -19,6 +19,7 @@ export interface AICopilotDrawerProps {
   messages?: CopilotMsg[];
   chatMessages?: ChatMessage[];
   onSendMessage?: (msg: string) => void;
+  onReviewDiff?: (code: string) => void;
   isLoading?: boolean;
   placeholder?: string;
   initialWidth?: number;
@@ -50,12 +51,162 @@ const BB = {
   error: '#EF4444',
 } as const;
 
+interface MessagePart {
+  type: 'text' | 'code';
+  content: string;
+  language?: string;
+}
+
+function parseMessageParts(text: string): MessagePart[] {
+  const parts: MessagePart[] = [];
+  const regex = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', content: text.slice(lastIndex, match.index) });
+    }
+    parts.push({
+      type: 'code',
+      language: match[1] || 'python',
+      content: match[2].trim(),
+    });
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', content: text.slice(lastIndex) });
+  }
+
+  return parts;
+}
+
+function FormattedText({ text }: { text: string }) {
+  const html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#C9A24B">$1</strong>')
+    .replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.4);padding:1px 5px;border-radius:3px;color:#E2BD68;font-family:monospace;font-size:10.5px">$1</code>');
+
+  return <span dangerouslySetInnerHTML={{ __html: html }} style={{ whiteSpace: 'pre-wrap' }} />;
+}
+
+function CodeBlockCard({
+  code,
+  language,
+  onReviewDiff,
+}: {
+  code: string;
+  language?: string;
+  onReviewDiff?: (code: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    try {
+      navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div
+      style={{
+        margin: '8px 0',
+        borderRadius: 6,
+        overflow: 'hidden',
+        border: `1px solid ${BB.border}`,
+        background: '#07050E',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '4px 8px',
+          background: 'rgba(21, 16, 38, 0.95)',
+          borderBottom: `1px solid ${BB.border}`,
+          fontSize: 10,
+          color: BB.muted,
+        }}
+      >
+        <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {language || 'python'}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {onReviewDiff && (
+            <button
+              data-testid="copilot-apply-diff-btn"
+              onClick={() => onReviewDiff(code)}
+              title="Review code diff side-by-side before applying"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 7px',
+                borderRadius: 4,
+                background: 'rgba(201, 162, 75, 0.2)',
+                border: `1px solid ${BB.gold}`,
+                color: BB.gold,
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <SplitSquareVertical style={{ width: 11, height: 11 }} />
+              <span>Review Diff & Apply</span>
+            </button>
+          )}
+          <button
+            onClick={handleCopy}
+            title="Copy code to clipboard"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              padding: '2px 6px',
+              borderRadius: 4,
+              background: 'none',
+              border: `1px solid ${BB.border}`,
+              color: BB.muted,
+              fontSize: 10,
+              cursor: 'pointer',
+            }}
+          >
+            {copied ? <Check style={{ width: 11, height: 11, color: BB.success }} /> : <Copy style={{ width: 11, height: 11 }} />}
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+        </div>
+      </div>
+      <pre
+        style={{
+          margin: 0,
+          padding: '8px 10px',
+          fontSize: 11,
+          lineHeight: 1.45,
+          fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+          color: '#E0DBF5',
+          overflowX: 'auto',
+          whiteSpace: 'pre',
+        }}
+      >
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 export function AICopilotDrawer({
   isOpen,
   onToggle,
   messages = [],
   chatMessages = [],
   onSendMessage,
+  onReviewDiff,
   isLoading = false,
   placeholder = 'Ask AI Copilot…',
   initialWidth = 340,
@@ -79,6 +230,11 @@ export function AICopilotDrawer({
   const [isDragging, setIsDragging] = useState(false);
   const startXRef = useRef<number>(0);
   const startWidthRef = useRef<number>(copilotWidth);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+  }, [chatMessages, isLoading]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -255,25 +411,73 @@ export function AICopilotDrawer({
         ))}
 
         {/* Chat Thread */}
-        {chatMessages.map((chat) => (
-          <div
-            key={chat.id}
-            style={{
-              alignSelf: chat.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '90%',
-              padding: '8px 11px',
-              borderRadius: 8,
-              background: chat.role === 'user' ? BB.primary : BB.elevated,
-              color: BB.text,
-              fontSize: 11.5,
-              lineHeight: 1.5,
-              border: `1px solid ${chat.role === 'user' ? BB.primaryLight : BB.border}`,
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {chat.text}
-          </div>
-        ))}
+        {chatMessages.map((chat) => {
+          if (chat.role === 'user') {
+            return (
+              <div
+                key={chat.id}
+                style={{
+                  alignSelf: 'flex-end',
+                  maxWidth: '90%',
+                  padding: '8px 11px',
+                  borderRadius: 8,
+                  background: BB.primary,
+                  color: BB.text,
+                  fontSize: 11.5,
+                  lineHeight: 1.5,
+                  border: `1px solid ${BB.primaryLight}`,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {chat.text}
+              </div>
+            );
+          }
+
+          const isError = chat.text.startsWith('❌') || chat.text.includes('[Copilot Connection Error]');
+          const isWarning = chat.text.startsWith('⚠️') || chat.text.includes('[AI Copilot Not Configured]');
+          const parts = parseMessageParts(chat.text);
+
+          return (
+            <div
+              key={chat.id}
+              style={{
+                alignSelf: 'flex-start',
+                maxWidth: '95%',
+                padding: '9px 12px',
+                borderRadius: 8,
+                background: isError
+                  ? 'rgba(239, 68, 68, 0.08)'
+                  : isWarning
+                  ? 'rgba(245, 158, 11, 0.08)'
+                  : BB.elevated,
+                color: BB.text,
+                fontSize: 11.5,
+                lineHeight: 1.55,
+                border: `1px solid ${
+                  isError
+                    ? 'rgba(239, 68, 68, 0.35)'
+                    : isWarning
+                    ? 'rgba(245, 158, 11, 0.35)'
+                    : BB.border
+                }`,
+              }}
+            >
+              {parts.map((p, idx) =>
+                p.type === 'code' ? (
+                  <CodeBlockCard
+                    key={idx}
+                    code={p.content}
+                    language={p.language}
+                    onReviewDiff={onReviewDiff}
+                  />
+                ) : (
+                  <FormattedText key={idx} text={p.content} />
+                )
+              )}
+            </div>
+          );
+        })}
 
         {/* AI Reasoning Loading Indicator */}
         {isLoading && (
@@ -295,6 +499,7 @@ export function AICopilotDrawer({
             <span>AI Copilot is reasoning...</span>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       {/* Input Prompt Box */}

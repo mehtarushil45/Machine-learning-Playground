@@ -3806,6 +3806,13 @@ export function ViewAsCodeStudio({
         messages={copilotMessages}
         chatMessages={copilotChat}
         onSendMessage={handleSendCopilotMessage}
+        onReviewDiff={(proposedCode) => {
+          setDiffModalState({
+            isOpen: true,
+            filename: currentFile,
+            candidateCode: proposedCode,
+          });
+        }}
         isLoading={isCopilotThinking}
         placeholder="Ask AI Copilot about this pipeline, model, or errors..."
         title="AI Copilot"

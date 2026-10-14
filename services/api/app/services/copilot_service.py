@@ -75,6 +75,26 @@ class CopilotService:
         model = os.environ.get("AI_COPILOT_MODEL") or getattr(settings, "ai_copilot_model", "")
         base_url = os.environ.get("AI_COPILOT_BASE_URL") or getattr(settings, "ai_copilot_base_url", "")
 
+        # Fallback check for root .env if keys were not loaded in current process environment
+        if not (gemini_key or groq_key or openai_key or custom_key):
+            try:
+                from pathlib import Path
+                from dotenv import load_dotenv
+                for env_candidate in (
+                    Path.cwd() / ".env",
+                    Path(__file__).resolve().parents[3] / ".env",
+                    Path(__file__).resolve().parents[2] / ".env",
+                ):
+                    if env_candidate.exists():
+                        load_dotenv(env_candidate)
+                        break
+                gemini_key = os.environ.get("GEMINI_API_KEY") or getattr(settings, "gemini_api_key", "")
+                groq_key = os.environ.get("GROQ_API_KEY") or getattr(settings, "groq_api_key", "")
+                openai_key = os.environ.get("OPENAI_API_KEY") or getattr(settings, "openai_api_key", "")
+                custom_key = os.environ.get("AI_COPILOT_API_KEY") or getattr(settings, "ai_copilot_api_key", "")
+            except Exception:
+                pass
+
         # Auto-detect if provider not explicitly set
         if not provider:
             if gemini_key:
@@ -92,7 +112,7 @@ class CopilotService:
         api_key = custom_key
         if provider == "gemini":
             api_key = api_key or gemini_key
-            model = model or "gemini-flash-latest"
+            model = model or "gemini-flash-lite-latest"
         elif provider == "groq":
             api_key = api_key or groq_key
             model = model or "llama-3.3-70b-versatile"
@@ -217,6 +237,14 @@ class CopilotService:
                 "error": str(exc),
             }
 
+    _GEMINI_FALLBACK_MODELS = (
+        "gemini-flash-lite-latest",
+        "gemini-flash-latest",
+        "gemini-pro-latest",
+        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
+    )
+
     @classmethod
     async def _call_gemini(
         cls,
@@ -226,9 +254,7 @@ class CopilotService:
         prompt: str,
         chat_history: Optional[List[Dict[str, str]]],
     ) -> Dict[str, Any]:
-        """Invoke Google Gemini REST API."""
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-
+        """Invoke Google Gemini REST API with automated fallback across stable models."""
         contents: List[Dict[str, Any]] = []
 
         # Add past turns if available
@@ -251,29 +277,46 @@ class CopilotService:
             },
         }
 
-        status, data, err_msg = await asyncio.to_thread(_sync_http_post, url, payload)
-        if status != 200:
-            raise RuntimeError(f"Gemini API returned HTTP {status}: {err_msg}")
+        # Candidate models to try in sequence
+        models_to_try = [model]
+        for fb in cls._GEMINI_FALLBACK_MODELS:
+            if fb not in models_to_try:
+                models_to_try.append(fb)
 
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return {
-                "reply": "No response returned from Gemini.",
-                "provider": "gemini",
-                "model": model,
-                "allowed": True,
-                "configured": True,
-            }
+        last_err = ""
+        for m in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            status, data, err_msg = await asyncio.to_thread(_sync_http_post, url, payload)
+            if status == 200:
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    return {
+                        "reply": "No response returned from Gemini.",
+                        "provider": "gemini",
+                        "model": m,
+                        "allowed": True,
+                        "configured": True,
+                    }
 
-        text_parts = candidates[0].get("content", {}).get("parts", [])
-        reply = "".join(p.get("text", "") for p in text_parts)
-        return {
-            "reply": reply or "Received empty response from Gemini.",
-            "provider": "gemini",
-            "model": model,
-            "allowed": True,
-            "configured": True,
-        }
+                text_parts = candidates[0].get("content", {}).get("parts", [])
+                reply = "".join(p.get("text", "") for p in text_parts)
+                return {
+                    "reply": reply or "Received empty response from Gemini.",
+                    "provider": "gemini",
+                    "model": m,
+                    "allowed": True,
+                    "configured": True,
+                }
+
+            last_err = f"HTTP {status}: {err_msg}"
+            # Immediate fail if API key itself is invalid
+            if status == 400 and ("API_KEY_INVALID" in err_msg.upper() or "INVALID_ARGUMENT" in err_msg.upper() and "KEY" in err_msg.upper()):
+                raise RuntimeError(f"Invalid Gemini API key: {err_msg}")
+
+            # For 503 (demand spike), 404 (model deprecated), or 429, try next model in fallback list
+            logger.warning("Gemini model '%s' failed (%s). Retrying with next available model...", m, last_err)
+
+        raise RuntimeError(f"Gemini API returned {last_err}")
 
     @classmethod
     async def _call_openai_compatible(

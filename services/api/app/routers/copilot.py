@@ -21,6 +21,7 @@ router = APIRouter(prefix="/copilot", tags=["AI Copilot"])
 class CopilotChatRequest(BaseModel):
     prompt: str = Field(..., description="User question or coding prompt")
     code: Optional[str] = Field(None, description="Active Python code in editor")
+    code_context: Optional[str] = Field(None, description="Active Python code in editor (alias)")
     dataset_name: Optional[str] = Field(None, description="Currently loaded dataset name")
     dataset_schema: Optional[Dict[str, Any]] = Field(None, description="Features and column metadata")
     error_traceback: Optional[str] = Field(None, description="Recent execution error traceback")
@@ -56,9 +57,10 @@ async def chat_with_copilot(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> CopilotChatResponse:
     """Generate real-time AI response with dynamic code & dataset context."""
+    active_code = payload.code if payload.code is not None else payload.code_context
     res = await CopilotService.generate_response(
         prompt=payload.prompt,
-        code_context=payload.code,
+        code_context=active_code,
         dataset_name=payload.dataset_name,
         dataset_schema=payload.dataset_schema,
         error_traceback=payload.error_traceback,
