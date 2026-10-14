@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { parsePipelineTargetAndConfig } from '../utils/codeParser';
+import { fastCheckPythonCode } from '../utils/clientPythonLinter';
 import { RegenerateDiffModal } from '../features/pipelines/RegenerateDiffModal';
 
 describe('Code Studio — Diagnostics & Safe Regeneration', () => {
@@ -83,17 +84,19 @@ print("custom script")
   describe('Mutation Matrix Verification (AST & Pyflakes Diagnostics)', () => {
     it('demonstrates that random trailing words are caught as syntax errors or undefined names', () => {
       // In Phase 0 regex analyzer, typing 'hello world' below valid code reported 0 errors.
-      // Under truthful Python AST parsing:
+      // Under truthful Python AST & Pyflakes diagnostics:
       const sampleWithRandomWords = `import pandas as pd\nimport numpy as np\nhello world`;
-      expect(sampleWithRandomWords).toContain('hello world');
-      // AST check: invalid syntax
-      let syntaxErrorFound = false;
-      try {
-        // Python ast parser equivalent check: 'hello world' is invalid syntax in Python
-        // In our backend AST + pyflakes service, this generates E999 / SyntaxError on line 3.
-        syntaxErrorFound = true;
-      } catch {}
-      expect(syntaxErrorFound).toBe(true);
+      const diags = fastCheckPythonCode(sampleWithRandomWords);
+      expect(diags.length).toBeGreaterThan(0);
+      expect(diags[0].message).toContain("invalid syntax 'world'");
+      expect(diags[0].line).toBe(3);
+
+      // Undefined single variable name typed at bottom
+      const sampleWithBareK = `import pandas as pd\ntarget = 'churn'\nk`;
+      const kDiags = fastCheckPythonCode(sampleWithBareK);
+      expect(kDiags.length).toBeGreaterThan(0);
+      expect(kDiags[0].message).toContain("undefined name 'k'");
+      expect(kDiags[0].code).toBe('F821');
     });
   });
 });

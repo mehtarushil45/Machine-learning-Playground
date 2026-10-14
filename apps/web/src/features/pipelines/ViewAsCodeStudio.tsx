@@ -33,6 +33,7 @@ import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
 import { isColumnIdentifier } from '../../components/shared/FeatureTargetSelector';
 import { MonacoCodeStudioEditor } from './MonacoCodeStudioEditor';
 import { RegenerateDiffModal } from './RegenerateDiffModal';
+import { PipelineGuardianModal } from './PipelineGuardianModal';
 import { usePythonLanguageClient } from './usePythonLanguageClient';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
 import { PanelLearningCollapsible, HeadsUpCardsContainer, useLearning } from '../learning';
@@ -696,6 +697,7 @@ export function ViewAsCodeStudio({
   const { learningMode, logSignal } = useLearning();
   const [mlPlaygroundChecks, setMlPlaygroundChecks] = useState<Diagnostic[]>([]);
   const [isSnippetsDropdownOpen, setIsSnippetsDropdownOpen] = useState(false);
+  const [isPipelineGuardianOpen, setIsPipelineGuardianOpen] = useState(false);
 
   /* ── 5.4 Learning-Layer Static AST Checks (Data Leakage & Preprocessing Rules) ─ */
   useEffect(() => {
@@ -1946,6 +1948,17 @@ export function ViewAsCodeStudio({
         onReject={handleRejectDiff}
       />
 
+      {/* ── Pipeline Guardian ML Impact & Cause-and-Effect Analysis Modal ── */}
+      <PipelineGuardianModal
+        isOpen={isPipelineGuardianOpen}
+        filename={currentFile}
+        currentCode={displayedCode}
+        baselineCode={builderCodeByFile[currentFile] || generatedCode || ''}
+        baselineConfig={trainingConfig}
+        onClose={() => setIsPipelineGuardianOpen(false)}
+        onRunExperiment={handleRunCode}
+      />
+
       {/* ── Scikit-Learn ML Snippets Modal Dialog ── */}
       {isSnippetsDropdownOpen && (
         <div
@@ -2244,8 +2257,8 @@ export function ViewAsCodeStudio({
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', flexShrink: 0 }}>
           {/* Preview Impact / Pipeline Guardian Button */}
           <button
-            onClick={() => safeGeneratePipelineCode(currentFile)}
-            disabled={isGenerating || !isConfigValid}
+            onClick={() => setIsPipelineGuardianOpen(true)}
+            disabled={!displayedCode}
             aria-label="Preview impact"
             title="Review ML cause & effect vs visual pipeline baseline"
             style={{
@@ -2259,7 +2272,7 @@ export function ViewAsCodeStudio({
               color: isFileModified(currentFile) ? BB.gold : BB.muted,
               fontSize: 11,
               fontWeight: 600,
-              cursor: isGenerating || !isConfigValid ? 'not-allowed' : 'pointer',
+              cursor: !displayedCode ? 'not-allowed' : 'pointer',
               transition: 'all 120ms ease',
             }}
           >

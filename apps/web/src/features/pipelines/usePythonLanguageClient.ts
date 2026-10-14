@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { CodeExecutionService, type RuntimeInfoResponse } from '../../services/api';
+import { fastCheckPythonCode } from '../../utils/clientPythonLinter';
 
 export interface CodeDiagnostic {
   line: number;
@@ -56,6 +57,7 @@ const isTestEnv =
     Boolean((window as any).__vitest_worker__) ||
     process.env.NODE_ENV === 'test');
 
+const DEBOUNCE_DELAY_MS = 500;
 
 export function usePythonLanguageClient({
   code,
@@ -88,16 +90,15 @@ export function usePythonLanguageClient({
       }
       return;
     }
+
+    // Fast client-side syntax checks
+    const clientDiags = fastCheckPythonCode(codeToLint);
+
     try {
-      if (typeof CodeExecutionService?.lintCode !== 'function') {
-        if (isMountedRef.current) {
-          setIsAnalyzing(false);
-        }
-        return;
-      }
-      const res = await CodeExecutionService.lintCode(codeToLint, fileToLint);
-      if (isMountedRef.current) {
-        const mapped: CodeDiagnostic[] = (res.diagnostics || []).map((d) => ({
+      let serverDiags: CodeDiagnostic[] = [];
+      if (typeof CodeExecutionService?.lintCode === 'function') {
+        const res = await CodeExecutionService.lintCode(codeToLint, fileToLint);
+        serverDiags = (res.diagnostics || []).map((d) => ({
           line: d.line,
           col: d.col,
           end_line: d.end_line,
@@ -107,12 +108,28 @@ export function usePythonLanguageClient({
           source: (d.source as any) || 'syntax',
           code: d.code,
         }));
-        setDiagnostics(mapped);
+      }
+
+      if (isMountedRef.current) {
+        // Merge server and client diagnostics without duplicates
+        const seen = new Set<string>();
+        const merged: CodeDiagnostic[] = [];
+        [...serverDiags, ...clientDiags].forEach((d) => {
+          const key = `${d.line}:${d.message}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            merged.push(d);
+          }
+        });
+
+        setDiagnostics(merged);
         setStatus('connected');
       }
     } catch {
       if (isMountedRef.current) {
-        setStatus('unavailable');
+        // If HTTP failed, at least keep fast client diagnostics
+        setDiagnostics(clientDiags);
+        setStatus('connected');
       }
     } finally {
       if (isMountedRef.current) {
@@ -186,7 +203,20 @@ export function usePythonLanguageClient({
               source: d.source || 'syntax',
               code: d.code,
             }));
-            setDiagnostics(mapped);
+
+            // Merge with client syntax checks
+            const clientDiags = fastCheckPythonCode(code);
+            const seen = new Set<string>();
+            const merged: CodeDiagnostic[] = [];
+            [...mapped, ...clientDiags].forEach((d) => {
+              const key = `${d.line}:${d.message}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                merged.push(d);
+              }
+            });
+
+            setDiagnostics(merged);
           }
         } catch {
           // ignore malformed message
@@ -262,15 +292,21 @@ export function usePythonLanguageClient({
     };
   }, [connectWebSocket]);
 
-  // Debounced code buffer dispatch on edit, deletion, or buffer change
+  // 500ms Debounced code buffer dispatch on edit, deletion, or buffer change
   useEffect(() => {
-    if (!enabled || isTestEnv) return;
+    if (!enabled) return;
 
     // Empty or blank buffer handling: clear immediately
     if (!code || !code.trim()) {
       setDiagnostics([]);
       setIsAnalyzing(false);
       return;
+    }
+
+    // Immediately evaluate fast client-side AST and syntax checks
+    const immediateDiags = fastCheckPythonCode(code);
+    if (immediateDiags.length > 0) {
+      setDiagnostics(immediateDiags);
     }
 
     setIsAnalyzing(true);
@@ -284,10 +320,10 @@ export function usePythonLanguageClient({
         const id = `req-${++reqIdCounterRef.current}`;
         ws.send(JSON.stringify({ type: 'lint', code, filename, id }));
       } else {
-        // If WebSocket is not currently connected, lint via HTTP endpoint
+        // If WebSocket is not connected (or in test environment), lint via HTTP fallback
         runHttpFallbackLint(code, filename);
       }
-    }, 280);
+    }, DEBOUNCE_DELAY_MS);
 
     return () => {
       if (debounceTimerRef.current) {

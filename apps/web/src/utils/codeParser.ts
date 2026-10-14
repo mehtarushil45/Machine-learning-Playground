@@ -12,12 +12,14 @@ export interface ParsedPipelineConfig {
   imputer?: string;
   testSplit?: number;
   seed?: number;
+  cvFolds?: number;
+  hyperparameters?: Record<string, any>;
   isSynced: boolean;
   parseError?: string;
 }
 
 export function parsePipelineTargetAndConfig(code: string): ParsedPipelineConfig {
-  const result: ParsedPipelineConfig = { isSynced: false };
+  const result: ParsedPipelineConfig = { isSynced: false, hyperparameters: {} };
   if (!code || typeof code !== 'string') {
     result.parseError = 'Empty code buffer';
     return result;
@@ -97,6 +99,37 @@ export function parsePipelineTargetAndConfig(code: string): ParsedPipelineConfig
     const s = parseInt(seedMatch[1], 10);
     if (!isNaN(s)) result.seed = s;
   }
+
+  // 8. Cross-validation folds extraction
+  const cvMatch = code.match(/(?:cv|cv_folds|n_splits)\s*=\s*([0-9]+)/i);
+  if (cvMatch && cvMatch[1]) {
+    const cv = parseInt(cvMatch[1], 10);
+    if (!isNaN(cv) && cv >= 2) result.cvFolds = cv;
+  }
+
+  // 9. Hyperparameters extraction
+  const hyp: Record<string, any> = {};
+  const nEstMatch = code.match(/n_estimators\s*=\s*([0-9]+)/i);
+  if (nEstMatch) hyp.n_estimators = parseInt(nEstMatch[1], 10);
+
+  const maxDepthMatch = code.match(/max_depth\s*=\s*([0-9]+|None)/i);
+  if (maxDepthMatch) {
+    hyp.max_depth = maxDepthMatch[1].toLowerCase() === 'none' ? null : parseInt(maxDepthMatch[1], 10);
+  }
+
+  const lrMatch = code.match(/learning_rate\s*=\s*([0-9.]+)/i);
+  if (lrMatch) hyp.learning_rate = parseFloat(lrMatch[1]);
+
+  const cMatch = code.match(/\bC\s*=\s*([0-9.]+)/);
+  if (cMatch) hyp.C = parseFloat(cMatch[1]);
+
+  const penaltyMatch = code.match(/penalty\s*=\s*['"]([^'"]+)['"]/i);
+  if (penaltyMatch) hyp.penalty = penaltyMatch[1];
+
+  const criterionMatch = code.match(/criterion\s*=\s*['"]([^'"]+)['"]/i);
+  if (criterionMatch) hyp.criterion = criterionMatch[1];
+
+  result.hyperparameters = hyp;
 
   if (result.target) {
     result.isSynced = true;
