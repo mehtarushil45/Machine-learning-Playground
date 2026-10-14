@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { JobEntity } from '../../types/job';
 import { fetchJobs } from '../../services/jobService';
+import { ModelRegistryService } from '../../services/modelRegistryService';
 
 interface ExperimentLeaderboardProps {
   currentJob: JobEntity;
@@ -17,6 +18,7 @@ interface ExperimentLeaderboardProps {
   activeExperimentFile?: string;
   onSelectJob: (job: JobEntity, fileName?: string) => void;
   onDeployJob: (job: JobEntity) => void;
+  onPromoteChampion?: (job: JobEntity) => void;
   targetColumn?: string;
 }
 
@@ -71,11 +73,21 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
   activeExperimentFile,
   onSelectJob,
   onDeployJob,
+  onPromoteChampion,
   targetColumn,
 }) => {
   const [remoteJobs, setRemoteJobs] = useState<JobEntity[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([currentJob.job_id]);
+  const [promotedJobId, setPromotedJobId] = useState<string | null>(null);
+
+  const handlePromoteChampion = (job: JobEntity) => {
+    setPromotedJobId(job.job_id);
+    onPromoteChampion?.(job);
+    if (job.job_id) {
+      ModelRegistryService.promoteModel(job.job_id).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -127,8 +139,16 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
       return 0;
     });
 
+    if (promotedJobId) {
+      const pIdx = list.findIndex((r) => r.job.job_id === promotedJobId);
+      if (pIdx > 0) {
+        const [promoted] = list.splice(pIdx, 1);
+        list.unshift(promoted);
+      }
+    }
+
     return list;
-  }, [currentJob, fileJobs, activeExperimentFile, remoteJobs]);
+  }, [currentJob, fileJobs, activeExperimentFile, remoteJobs, promotedJobId]);
 
   const filteredRuns = useMemo(() => {
     if (!searchQuery.trim()) return allRuns;
@@ -583,6 +603,47 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
                         >
                           <Eye size={12} /> Inspect
                         </button>
+                        {job.status === 'COMPLETED' && !isChampion && (
+                          <button
+                            data-testid={`set-champion-${job.job_id}`}
+                            onClick={() => handlePromoteChampion(job)}
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: 6,
+                              background: 'rgba(245, 158, 11, 0.18)',
+                              border: '1px solid rgba(245, 158, 11, 0.45)',
+                              color: BB.goldLight,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title="Promote this candidate model to Champion"
+                          >
+                            <Crown size={12} /> Set as Champion
+                          </button>
+                        )}
+                        {job.status === 'COMPLETED' && isChampion && (
+                          <span
+                            data-testid="champion-badge"
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: 6,
+                              background: 'rgba(245, 158, 11, 0.15)',
+                              border: '1px solid rgba(245, 158, 11, 0.4)',
+                              color: BB.gold,
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                          >
+                            <Crown size={11} /> Champion
+                          </span>
+                        )}
                         {job.status === 'COMPLETED' && (
                           <button
                             onClick={() => onDeployJob(job)}

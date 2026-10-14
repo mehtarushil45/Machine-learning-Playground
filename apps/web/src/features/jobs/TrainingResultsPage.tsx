@@ -843,6 +843,15 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
               setActiveView('overview');
             }}
             onDeployJob={handleDeployModel}
+            onPromoteChampion={(promoted) => {
+              setJob(promoted);
+              setActiveJob(promoted);
+              onShowToast?.(
+                'Champion Promoted',
+                `${promoted.algorithm ? promoted.algorithm.replace(/_/g, ' ') : 'Model'} is now the active Champion model.`,
+                'success'
+              );
+            }}
             targetColumn={job.target_column || trainingConfig?.target_column}
           />
         ) : (

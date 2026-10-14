@@ -219,5 +219,29 @@ describe('Experiment Tracking & Model Diagnostics', () => {
       fireEvent.click(deployBtn);
       expect(onDeployJob).toHaveBeenCalledWith(job1);
     });
+
+    it('promotes candidate model to champion when 1-click Set as Champion is clicked', () => {
+      const job1 = createMockJob({ job_id: 'job-1', algorithm: 'random_forest_classifier', metadata: { metrics: { accuracy: 0.88 } } });
+      const job2 = createMockJob({ job_id: 'job-2', algorithm: 'logistic_regression', metadata: { metrics: { accuracy: 0.75 } } });
+      const onPromoteChampion = vi.fn();
+
+      render(
+        <ExperimentLeaderboard
+          currentJob={job1}
+          fileJobs={{ 'exp_1.py': job1, 'exp_2.py': job2 }}
+          onSelectJob={vi.fn()}
+          onDeployJob={vi.fn()}
+          onPromoteChampion={onPromoteChampion}
+          targetColumn="course"
+        />
+      );
+
+      // Job 1 is champion (#1), Job 2 is candidate with "Set as Champion" button
+      const setChampBtn = screen.getByTestId('set-champion-job-2');
+      expect(setChampBtn).toBeInTheDocument();
+      fireEvent.click(setChampBtn);
+
+      expect(onPromoteChampion).toHaveBeenCalledWith(job2);
+    });
   });
 });

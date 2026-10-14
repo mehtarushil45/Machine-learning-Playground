@@ -38,6 +38,10 @@ import { usePythonLanguageClient } from './usePythonLanguageClient';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
 import { PanelLearningCollapsible, HeadsUpCardsContainer, useLearning } from '../learning';
 import { ML_SNIPPETS, type MLSnippetDefinition } from './mlCodeIntelligence';
+import type { JobEntity } from '../../types/job';
+import { ModelRegistryService } from '../../services/modelRegistryService';
+import { extractExecutionMetrics, type ExtractedMetrics } from '../../utils/metricExtractor';
+import { PostRunExperimentCard } from './PostRunExperimentCard';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -565,6 +569,7 @@ export function ViewAsCodeStudio({
     selectedTarget,
     selectedFeatures,
     activeJob,
+    fileJobs,
     setLifecycleStage,
     activeExperimentFile,
     experimentFiles,
@@ -651,6 +656,8 @@ export function ViewAsCodeStudio({
   const [builderCodeByFile, setBuilderCodeByFile] = useState<Record<string, string>>({});
   const [savedCodeByFile, setSavedCodeByFile] = useState<Record<string, string>>({});
   const [serverWorkspaceFiles, setServerWorkspaceFiles] = useState<WorkspaceFileItem[]>([]);
+  const [postRunMetrics, setPostRunMetrics] = useState<ExtractedMetrics | null>(null);
+  const [isPostRunCardVisible, setIsPostRunCardVisible] = useState<boolean>(false);
   const [isAutosaving, setIsAutosaving] = useState(false);
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [diffModalState, setDiffModalState] = useState<{
@@ -1347,6 +1354,8 @@ export function ViewAsCodeStudio({
     setExecModelId(null);
     setIsDeployingArtifact(false);
     setRuntimeDiagnostics([]);
+    setPostRunMetrics(null);
+    setIsPostRunCardVisible(false);
     setLogEntries([
       makeLog('system', `Execution started: '${currentFile}'`),
       ...(dataset?.fileName ? [makeLog('info', `Dataset context: ${dataset.fileName}`)] : []),
@@ -1459,6 +1468,36 @@ export function ViewAsCodeStudio({
             // Parse traceback → inline error markers (keep terminal tab active)
             if (exitCode === 0) {
               setRuntimeDiagnostics([]);
+              const extracted = extractExecutionMetrics(allOutputRef);
+              setPostRunMetrics(extracted);
+              setIsPostRunCardVisible(true);
+              const parsed = parsePipelineTargetAndConfig(displayedCode);
+              const createdJob: JobEntity = {
+                job_id: res.exec_id,
+                dataset_id: dataset?.datasetId || trainingConfig?.dataset_id || 'dataset',
+                status: 'COMPLETED',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                job_type: 'training',
+                algorithm: parsed.algorithm || trainingConfig?.algorithm || 'code_studio_pipeline',
+                target_column: parsed.target || selectedTarget || trainingConfig?.target_column || 'target',
+                feature_columns: (parsed.features && parsed.features.length > 0) ? parsed.features : (trainingConfig?.feature_columns || []),
+                progress: 100,
+                current_stage: 'Completed',
+                retry_count: 0,
+                metadata: {
+                  metrics: extracted.metrics,
+                  scaler: parsed.scaler || trainingConfig?.scaler || 'standard_scaler',
+                  imputer: parsed.imputer || trainingConfig?.imputer || 'median',
+                  train_test_split: parsed.testSplit != null ? (1 - parsed.testSplit) : (trainingConfig?.train_test_split || 0.8),
+                  cross_validation: parsed.cvFolds || trainingConfig?.cv_folds || 5,
+                  hyperparameters: parsed.hyperparameters,
+                },
+              };
+              setFileJob(currentFile, createdJob);
+              if (!activeJob) {
+                setActiveJob(createdJob);
+              }
             } else {
               const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
               setRuntimeDiagnostics(errDiags);
@@ -1556,6 +1595,36 @@ export function ViewAsCodeStudio({
             if (finalRes.model_id) setExecModelId(finalRes.model_id);
             if (finalRes.exit_code === 0 || finalRes.status === 'completed') {
               setRuntimeDiagnostics([]);
+              const extracted = extractExecutionMetrics(allOutputRef);
+              setPostRunMetrics(extracted);
+              setIsPostRunCardVisible(true);
+              const parsed = parsePipelineTargetAndConfig(displayedCode);
+              const createdJob: JobEntity = {
+                job_id: res.exec_id,
+                dataset_id: dataset?.datasetId || trainingConfig?.dataset_id || 'dataset',
+                status: 'COMPLETED',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                job_type: 'training',
+                algorithm: parsed.algorithm || trainingConfig?.algorithm || 'code_studio_pipeline',
+                target_column: parsed.target || selectedTarget || trainingConfig?.target_column || 'target',
+                feature_columns: (parsed.features && parsed.features.length > 0) ? parsed.features : (trainingConfig?.feature_columns || []),
+                progress: 100,
+                current_stage: 'Completed',
+                retry_count: 0,
+                metadata: {
+                  metrics: extracted.metrics,
+                  scaler: parsed.scaler || trainingConfig?.scaler || 'standard_scaler',
+                  imputer: parsed.imputer || trainingConfig?.imputer || 'median',
+                  train_test_split: parsed.testSplit != null ? (1 - parsed.testSplit) : (trainingConfig?.train_test_split || 0.8),
+                  cross_validation: parsed.cvFolds || trainingConfig?.cv_folds || 5,
+                  hyperparameters: parsed.hyperparameters,
+                },
+              };
+              setFileJob(currentFile, createdJob);
+              if (!activeJob) {
+                setActiveJob(createdJob);
+              }
             } else {
               const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
               setRuntimeDiagnostics(errDiags);
@@ -1715,6 +1784,27 @@ export function ViewAsCodeStudio({
     ]);
     onShowToast?.('Jumped to Traceback', `${baseName}:${lineNum}`, 'info');
   }, [openTabs, experimentFiles, setOpenTabs, setActiveExperimentFile, onShowToast]);
+
+  /* ── Champion Baseline Lookup & Post-Run Promotion ────────────────── */
+  const championJob = activeJob || (fileJobs && Object.values(fileJobs).length > 0 ? Object.values(fileJobs)[0] : null);
+  const championMetrics = (championJob?.metadata?.metrics || {}) as Record<string, any>;
+  const championAlgorithm = championJob?.algorithm;
+  const isCurrentChampion = championJob?.job_id === execId;
+
+  const handlePromotePostRunChampion = useCallback(async () => {
+    if (!execId) return;
+    try {
+      await ModelRegistryService.promoteModel(execId).catch(() => {});
+    } catch {}
+    if (fileJobs && fileJobs[currentFile]) {
+      setActiveJob(fileJobs[currentFile]);
+    }
+    onShowToast?.(
+      'Promoted to Champion',
+      `${currentFile} model is now the active Champion model baseline.`,
+      'success'
+    );
+  }, [execId, fileJobs, currentFile, setActiveJob, onShowToast]);
 
   /* ── AI Copilot Context Cards ────────────────────────────────────── */
   const copilotMessages = useMemo<CopilotMsg[]>(() => {
@@ -3199,6 +3289,25 @@ export function ViewAsCodeStudio({
               >
                 {bottomTab === 'output' && (
                   <>
+                    {/* Post-Run Model Evaluation Card */}
+                    {postRunMetrics && isPostRunCardVisible && execStatus === 'completed' && (
+                      <PostRunExperimentCard
+                        execId={execId || 'exec-run'}
+                        filename={currentFile}
+                        durationSeconds={execDuration}
+                        exitCode={execExitCode ?? 0}
+                        extractedMetrics={postRunMetrics}
+                        championMetrics={championMetrics}
+                        championAlgorithm={championAlgorithm}
+                        algorithmName={trainingConfig?.algorithm?.replace(/_/g, ' ') || 'Code Studio Pipeline'}
+                        scalerName={trainingConfig?.scaler?.replace(/_/g, ' ')}
+                        isChampion={isCurrentChampion}
+                        onPromoteChampion={handlePromotePostRunChampion}
+                        onViewInResults={() => onNavigate?.('results')}
+                        onDismiss={() => setIsPostRunCardVisible(false)}
+                      />
+                    )}
+
                     {/* Truncation Notice Banner */}
                     {isOutputTruncated && (
                       <div

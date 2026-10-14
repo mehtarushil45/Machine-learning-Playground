@@ -376,4 +376,62 @@ describe('Phase 3: Execution Sandbox & Output Streaming Integration', () => {
       expect(screen.getByText(/Execution backend unavailable \(404 Not Found\)/i)).toBeDefined();
     });
   });
+
+  it('renders Post-Run Experiment Card with true metrics upon successful execution', async () => {
+    (CodeExecutionService.execute as any).mockResolvedValueOnce({
+      exec_id: 'exec-success-metrics',
+      status: 'running',
+    });
+
+    render(
+      <ProjectProvider>
+        <ExecutionTestHarness />
+      </ProjectProvider>
+    );
+
+    const runBtn = await screen.findByRole('button', { name: /run code/i });
+    await waitFor(() => {
+      expect(runBtn).not.toBeDisabled();
+    });
+
+    await act(async () => {
+      fireEvent.click(runBtn);
+    });
+
+    await waitFor(() => {
+      expect(createdEventSources.length).toBeGreaterThan(0);
+    });
+    const es = createdEventSources[0];
+
+    // Stream stdout with Test Accuracy metric and completion
+    await act(async () => {
+      es.onmessage?.({
+        data: JSON.stringify({
+          type: 'stdout',
+          data: 'Test Accuracy: 0.9125',
+        }),
+      });
+      es.onmessage?.({
+        data: JSON.stringify({
+          type: 'stdout',
+          data: 'Classification Report:\n              precision    recall  f1-score   support\nweighted avg       0.91      0.91      0.91        80',
+        }),
+      });
+      es.onmessage?.({
+        data: JSON.stringify({
+          type: 'exit',
+          exit_code: 0,
+          status: 'completed',
+          duration_seconds: 1.85,
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('post-run-experiment-card')).toBeInTheDocument();
+      expect(screen.getByText(/Post-Run Model Evaluation/i)).toBeInTheDocument();
+      expect(screen.getByText('91.25%')).toBeInTheDocument();
+      expect(screen.getByTestId('post-run-set-champion')).toBeInTheDocument();
+    });
+  });
 });
