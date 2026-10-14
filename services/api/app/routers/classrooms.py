@@ -2081,7 +2081,7 @@ async def get_exam_lobby(
     if classroom.exam_start_time:
         is_open = classroom.is_exam_started or (now >= classroom.exam_start_time)
     else:
-        is_open = True
+        is_open = classroom.is_exam_started
 
     if classroom.exam_end_time:
         effective_end = classroom.exam_end_time + timedelta(minutes=member.time_extension_minutes)
@@ -2162,7 +2162,7 @@ async def enter_exam_workspace(
     if classroom.exam_start_time:
         is_open = classroom.is_exam_started or (now >= classroom.exam_start_time)
     else:
-        is_open = True
+        is_open = classroom.is_exam_started
     if not is_open:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

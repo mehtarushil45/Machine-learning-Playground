@@ -9,6 +9,7 @@ import {
   Rocket,
   Search,
   FolderOpen,
+  GraduationCap,
   User,
   LogIn,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ import { ProjectGatekeeper } from './features/datasets/ProjectGatekeeper';
 import { ViewAsCodeStudio } from './features/pipelines/ViewAsCodeStudio';
 import { TrainingResultsPage } from './features/jobs/TrainingResultsPage';
 import { DeploymentsHub } from './features/deployments/DeploymentsHub';
+import { ClassroomHub } from './features/classrooms/ClassroomHub';
 import { LoginPage } from './features/auth';
 import { UserGuidePage } from './features/guide/UserGuidePage';
 import {
@@ -34,6 +36,7 @@ export type PlatformTab =
   | 'code-studio'
   | 'training-results'
   | 'deployments'
+  | 'classroom'
   | 'login'
   | 'guide';
 
@@ -80,6 +83,9 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<PlatformTab>(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (hash === 'classroom' || window.location.pathname.includes('classroom')) {
+        return 'classroom';
+      }
       if (hash === 'login' || window.location.pathname.includes('login')) {
         return 'login';
       }
@@ -88,6 +94,7 @@ function AppContent() {
       }
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
+      if (tabParam === 'classroom') return 'classroom';
       if (tabParam === 'login') return 'login';
       if (tabParam === 'guide') return 'guide';
     }
@@ -103,7 +110,9 @@ function AppContent() {
     if (typeof window === 'undefined') return;
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (hash === 'login') {
+      if (hash === 'classroom') {
+        setActiveTab('classroom');
+      } else if (hash === 'login') {
         setActiveTab('login');
       } else if (hash === 'guide' || hash === 'user-guide') {
         setActiveTab('guide');
@@ -162,6 +171,7 @@ function AppContent() {
     else if (tab === '/studio' || tab === '/pipelines' || tab === 'code-studio') resolvedTab = 'code-studio';
     else if (tab === '/results' || tab === '/explainability' || tab === 'training-results') resolvedTab = 'training-results';
     else if (tab === '/deployments' || tab === 'deployments') resolvedTab = 'deployments';
+    else if (tab === '/classroom' || tab === 'classroom') resolvedTab = 'classroom';
     else if (tab === '/login' || tab === 'login') resolvedTab = 'login';
     else if (tab === '/guide' || tab === 'guide' || tab === 'user-guide') resolvedTab = 'guide';
     else if (tab.startsWith('/')) resolvedTab = 'workspace';
@@ -189,6 +199,7 @@ function AppContent() {
     { id: 'code-studio',      label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />     },
     { id: 'training-results', label: 'Training & Experiments',    icon: <BarChart2 className="w-5 h-5" /> },
     { id: 'deployments',      label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />    },
+    { id: 'classroom',        label: 'Classroom (Lab Exam)',      icon: <GraduationCap className="w-5 h-5" /> },
   ];
 
   if (activeTab === 'guide') {
@@ -325,9 +336,20 @@ function AppContent() {
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             const isHovered = hoveredNav === item.id;
+            const isClassroom = item.id === 'classroom';
 
             return (
               <React.Fragment key={item.id}>
+                {isClassroom && (
+                  <div
+                    style={{
+                      width: 24,
+                      height: 1,
+                      backgroundColor: 'rgba(107,92,166,0.3)',
+                      margin: '4px 0',
+                    }}
+                  />
+                )}
                 <div
                   style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}
                   onMouseEnter={() => setHoveredNav(item.id)}
@@ -344,19 +366,35 @@ function AppContent() {
                       justifyContent: 'center',
                       borderRadius: 8,
                       background: isActive
-                        ? 'rgba(107,92,166,0.18)'
+                        ? isClassroom
+                          ? 'rgba(0,212,255,0.18)'
+                          : 'rgba(107,92,166,0.18)'
                         : isHovered
-                        ? 'rgba(107,92,166,0.10)'
+                        ? isClassroom
+                          ? 'rgba(0,212,255,0.12)'
+                          : 'rgba(107,92,166,0.10)'
+                        : isClassroom
+                        ? 'rgba(0,212,255,0.06)'
                         : 'transparent',
                       border: `1px solid ${
                         isActive
-                          ? BB.primaryLight
+                          ? isClassroom
+                            ? '#00D4FF'
+                            : BB.primaryLight
+                          : isClassroom
+                          ? 'rgba(0,212,255,0.25)'
                           : 'transparent'
                       }`,
                       color: isActive
-                        ? BB.text
+                        ? isClassroom
+                          ? '#00D4FF'
+                          : BB.text
                         : isHovered
-                        ? BB.text
+                        ? isClassroom
+                          ? '#00D4FF'
+                          : BB.text
+                        : isClassroom
+                        ? '#00D4FF'
                         : BB.muted,
                       cursor: 'pointer',
                       transition: 'all 150ms ease',
@@ -373,7 +411,7 @@ function AppContent() {
                           bottom: 8,
                           width: 3,
                           borderRadius: '0 3px 3px 0',
-                          background: BB.maroon,
+                          background: isClassroom ? '#00D4FF' : BB.maroon,
                         }}
                       />
                     )}
@@ -765,7 +803,13 @@ function AppContent() {
                Once initializeProject() is called, isProjectInitialized becomes
                true and we drop through to the studio pages below.
           ─────────────────────────────────────────────────────────────────── */}
-          {!isProjectInitialized ? (
+          {activeTab === 'classroom' ? (
+            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '10px 16px', width: '100%' }}>
+              <ErrorBoundary key="classroom" onReset={() => handleNavigate('classroom')}>
+                <ClassroomHub onShowToast={showToast} />
+              </ErrorBoundary>
+            </div>
+          ) : !isProjectInitialized ? (
             <ProjectGatekeeper />
           ) : (
             <>

@@ -186,6 +186,511 @@ export const ExplainabilityService = {
 };
 
 // ---------------------------------------------------------------------------
+
+export interface LabExamInfo {
+  id: string;
+  title: string;
+  course_code: string;
+  duration_minutes: number;
+  problem_type: string;
+  dataset_name: string;
+  dataset_id: string;
+  target_column: string;
+  feature_columns: string[];
+  description: string;
+  rubric: {
+    min_accuracy?: number;
+    min_f1?: number;
+    min_r2?: number;
+    max_latency_ms?: number;
+    max_score?: number;
+  };
+  starter_code: string;
+  copilot_policy?: string;
+  open_time?: string | null;
+  close_time?: string | null;
+  is_closed?: boolean;
+  protected_regions?: string[];
+  learning_aids_enabled?: boolean;
+}
+
+export interface LabExamSession {
+  exam_id: string;
+  student_id: string;
+  active_deployment_id?: string | null;
+  code_draft?: string | null;
+  version_count: number;
+  status: string;
+  grade_score?: number | null;
+  submitted_at?: string | null;
+  is_locked?: boolean;
+  submission_receipt?: any;
+}
+
+export interface LabDeployResponse {
+  deployment_id: string;
+  model_id: string;
+  model_version: string;
+  is_updated_in_place: boolean;
+  status: string;
+  endpoint_path: string;
+  sample_inputs: Record<string, any>;
+  input_schema: Record<string, any>;
+  metrics: Record<string, number>;
+  version_count: number;
+  logs: Array<{ ts: string; msg: string; event: string; severity?: string }>;
+}
+
+export interface RubricCriterionResult {
+  criterion: string;
+  description: string;
+  target: string;
+  actual: string;
+  passed: boolean;
+  points_awarded: number;
+  max_points: number;
+  hint?: string | null;
+}
+
+export interface LabEvaluateResponse {
+  score: number;
+  max_score: number;
+  percentage: number;
+  passed: boolean;
+  criteria_results: RubricCriterionResult[];
+  summary: string;
+  guardrail_warnings?: string[];
+  latency_method?: string;
+}
+
+export interface LabSubmitResponse {
+  submission_id: string;
+  status: string;
+  grade_score: number;
+  percentage: number;
+  passed: boolean;
+  submitted_at: string;
+  code_sha256?: string;
+  model_sha256?: string;
+  rubric_snapshot?: any;
+  reproducibility_verified?: boolean;
+  guardrail_flags?: string[];
+  message: string;
+}
+
+export interface ClassroomRosterMember {
+  user_id: string;
+  email: string;
+  full_name?: string | null;
+  role: string;
+  joined_at: string;
+}
+
+export interface SubmissionDashboardItem {
+  submission_id: string;
+  learner_id: string;
+  learner_name: string;
+  learner_email: string;
+  status: string;
+  grade_score?: number | null;
+  submitted_at?: string | null;
+  reproducibility_verified: boolean;
+  code_sha256?: string | null;
+  model_sha256?: string | null;
+  guardrail_flags: string[];
+  code_snippet?: string | null;
+}
+
+export interface ReproduceAuditResponse {
+  submission_id: string;
+  original_score: number;
+  reproduced_score: number;
+  tolerance: number;
+  verified: boolean;
+  reproduced_metrics: Record<string, any>;
+  details: string;
+}
+
+export interface ClassroomSummary {
+  id: string;
+  name: string;
+  course_id?: string | null;
+  description?: string | null;
+  role: 'owner' | 'student' | 'member';
+  status: string;
+  join_code?: string | null;
+  join_code_active?: boolean;
+  member_count: number;
+  created_at: string;
+  exam_start_time?: string | null;
+  exam_end_time?: string | null;
+  is_exam_started?: boolean;
+  is_archived?: boolean;
+  user_score?: number | null;
+}
+
+export interface MyClassroomsResponse {
+  owned: ClassroomSummary[];
+  joined: ClassroomSummary[];
+  active_exam_resume?: {
+    classroom_id: string;
+    classroom_name: string;
+    assignment_id: string;
+    status: string;
+  } | null;
+}
+
+export interface ClassroomCreateEnhanced {
+  name: string;
+  course_id?: string;
+  description?: string;
+  assignment_title?: string;
+  instructions?: string;
+  starter_code?: string;
+  rubric_json?: any;
+  allowed_divisions?: string[];
+  allowed_batches?: string[];
+  enrollment_format_hint?: string;
+  enrollment_pattern?: string;
+  require_approval?: boolean;
+  exam_start_time?: string;
+  exam_end_time?: string;
+}
+
+export interface JoinPreviewResponse {
+  id: string;
+  name: string;
+  course_id?: string | null;
+  description?: string | null;
+  owner_name: string;
+  require_approval: boolean;
+}
+
+export interface JoinClassroomResponse {
+  classroom_id: string;
+  classroom_name: string;
+  status: string;
+  require_approval: boolean;
+  message: string;
+}
+
+export interface MemberDetailsResponse {
+  classroom_id: string;
+  classroom_name: string;
+  full_name: string;
+  enrollment_number?: string | null;
+  division?: string | null;
+  batch?: string | null;
+  status: string;
+  allowed_divisions: string[];
+  allowed_batches: string[];
+  enrollment_format_hint?: string | null;
+  is_exam_started: boolean;
+  can_edit: boolean;
+}
+
+export interface SaveMemberDetailsRequest {
+  full_name: string;
+  enrollment_number: string;
+  division?: string;
+  batch?: string;
+}
+
+export interface ExamLobbyResponse {
+  classroom_id: string;
+  classroom_name: string;
+  status: string;
+  is_exam_started: boolean;
+  exam_start_time?: string | null;
+  exam_end_time?: string | null;
+  server_time: string;
+  countdown_seconds: number;
+  can_enter_workspace: boolean;
+  message: string;
+}
+
+export interface RosterMemberItem {
+  user_id: string;
+  full_name: string;
+  enrollment_number?: string | null;
+  division?: string | null;
+  batch?: string | null;
+  status: string;
+  score?: number | null;
+  submission_time?: string | null;
+  last_activity?: string | null;
+  joined_at: string;
+  time_extension_minutes: number;
+  is_reopened: boolean;
+}
+
+export interface RosterPaginationResponse {
+  items: RosterMemberItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface ParticipantInspectionResponse {
+  classroom_id: string;
+  user_id: string;
+  full_name: string;
+  enrollment_number?: string | null;
+  division?: string | null;
+  batch?: string | null;
+  status: string;
+  starter_code: string;
+  final_code: string;
+  rubric_breakdown: Record<string, any>;
+  metrics_and_summary: Record<string, any>;
+  event_timeline: Array<{ event: string; timestamp: string; details?: any }>;
+  reproducibility_verified?: boolean | null;
+  reproduced_score?: number | null;
+  score?: number | null;
+  feedback?: string | null;
+}
+
+export const ClassroomService = {
+  // Student Lab Exam Methods
+  listExams: () => request<LabExamInfo[]>('/classrooms/exams'),
+
+  getExam: (examId: string) => request<LabExamInfo>(`/classrooms/exams/${examId}`),
+
+  getSession: (examId: string) => request<LabExamSession>(`/classrooms/exams/${examId}/session`),
+
+  saveDraft: (examId: string, code: string) =>
+    request<{ saved_at: string; message: string }>(`/classrooms/exams/${examId}/draft`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  copilotAsk: (examId: string, prompt: string, codeContext?: string) =>
+    request<{ reply: string; policy: string; allowed: boolean }>(`/classrooms/exams/${examId}/copilot`, {
+      method: 'POST',
+      body: JSON.stringify({ prompt, code_context: codeContext }),
+    }),
+
+  stopLabSlot: (examId: string) =>
+    request<{ status: string; message: string }>(`/classrooms/exams/${examId}/stop`, {
+      method: 'POST',
+    }),
+
+  resetSession: (examId: string) =>
+    request<{ status: string; message: string }>(`/classrooms/exams/${examId}/reset`, {
+      method: 'POST',
+    }),
+
+  deployModel: (examId: string, modelId?: string, code?: string) =>
+    request<LabDeployResponse>(`/classrooms/exams/${examId}/deploy`, {
+      method: 'POST',
+      body: JSON.stringify({ model_id: modelId, code }),
+    }),
+
+  evaluateModel: (examId: string, deploymentId: string) =>
+    request<LabEvaluateResponse>(`/classrooms/exams/${examId}/evaluate`, {
+      method: 'POST',
+      body: JSON.stringify({ deployment_id: deploymentId }),
+    }),
+
+  submitExam: (examId: string, code: string, deploymentId?: string) =>
+    request<LabSubmitResponse>(`/classrooms/exams/${examId}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ code, deployment_id: deploymentId }),
+    }),
+
+  // Enhanced Classroom Entry & Management Methods (Parts B-I)
+  listMyClassrooms: () => request<MyClassroomsResponse>('/classrooms/my'),
+
+  createClassroomEnhanced: (data: ClassroomCreateEnhanced) =>
+    request<any>('/classrooms/enhanced', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  previewJoinCode: (code: string) =>
+    request<JoinPreviewResponse>(`/classrooms/join-preview?code=${encodeURIComponent(code)}`),
+
+  joinClassroom: (code: string) =>
+    request<JoinClassroomResponse>('/classrooms/join', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  getMyDetails: (classroomId: string) =>
+    request<MemberDetailsResponse>(`/classrooms/${classroomId}/my-details`),
+
+  saveMyDetails: (classroomId: string, data: SaveMemberDetailsRequest) =>
+    request<MemberDetailsResponse>(`/classrooms/${classroomId}/my-details`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  getExamLobby: (classroomId: string) =>
+    request<ExamLobbyResponse>(`/classrooms/${classroomId}/lobby`),
+
+  startClassroomExam: (classroomId: string) =>
+    request<any>(`/classrooms/${classroomId}/start-exam`, {
+      method: 'POST',
+    }),
+
+  enterExamWorkspace: (classroomId: string) =>
+    request<any>(`/classrooms/${classroomId}/enter-workspace`, {
+      method: 'POST',
+    }),
+
+  getRosterPaginated: (
+    classroomId: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      search?: string;
+      division?: string;
+      batch?: string;
+      status?: string;
+      sort_by?: string;
+      sort_order?: string;
+    } = {}
+  ) => {
+    const q = new URLSearchParams();
+    if (params.page) q.set('page', String(params.page));
+    if (params.page_size) q.set('page_size', String(params.page_size));
+    if (params.search) q.set('search', params.search);
+    if (params.division) q.set('division', params.division);
+    if (params.batch) q.set('batch', params.batch);
+    if (params.status) q.set('status', params.status);
+    if (params.sort_by) q.set('sort_by', params.sort_by);
+    if (params.sort_order) q.set('sort_order', params.sort_order);
+    return request<RosterPaginationResponse>(`/classrooms/${classroomId}/roster-paginated?${q.toString()}`);
+  },
+
+  getRosterExportCsvUrl: (classroomId: string) => `/api/v1/classrooms/${classroomId}/roster/export.csv`,
+
+  inspectParticipant: (classroomId: string, userId: string) =>
+    request<ParticipantInspectionResponse>(`/classrooms/${classroomId}/participants/${userId}/inspect`),
+
+  resetJoinCode: (classroomId: string) =>
+    request<{ join_code: string; message: string }>(`/classrooms/${classroomId}/reset-code`, {
+      method: 'POST',
+    }),
+
+  toggleJoinCode: (classroomId: string, active: boolean) =>
+    request<any>(`/classrooms/${classroomId}/toggle-join-code`, {
+      method: 'POST',
+      body: JSON.stringify({ active }),
+    }),
+
+  setMemberApproval: (classroomId: string, userId: string, approve: boolean) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}/approval`, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: approve ? 'approve' : 'decline',
+        approve,
+      }),
+    }),
+
+  grantTimeExtension: (classroomId: string, userId: string, minutes: number) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}/extension`, {
+      method: 'POST',
+      body: JSON.stringify({
+        extension_minutes: minutes,
+        minutes,
+      }),
+    }),
+
+  reopenSubmission: (classroomId: string, userId: string, reopen: boolean) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({
+        reason: 'Instructor reopened submission',
+        reopen,
+      }),
+    }),
+
+  removeMember: (classroomId: string, userId: string) =>
+    request<any>(`/classrooms/${classroomId}/members/${userId}`, {
+      method: 'DELETE',
+    }),
+
+  archiveClassroom: (classroomId: string, isArchived: boolean) =>
+    request<any>(`/classrooms/${classroomId}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ is_archived: isArchived }),
+    }),
+
+  // Legacy Instructor Management Methods (Parts B1-B6)
+  listClassrooms: () => request<any[]>('/classrooms'),
+
+  createClassroom: (data: { course_id: string; name: string; code: string; term?: string }) =>
+    request<any>('/classrooms', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getRoster: (classroomId: string) => request<ClassroomRosterMember[]>(`/classrooms/${classroomId}/roster`),
+
+  inviteStudent: (classroomId: string, data: { email?: string; invite_code?: string; role?: string }) =>
+    request<any>(`/classrooms/${classroomId}/invite`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listAssignments: (classroomId?: string) =>
+    request<any[]>(classroomId ? `/classrooms/assignments?classroom_id=${classroomId}` : '/classrooms/assignments'),
+
+  createAssignment: (data: any) =>
+    request<any>('/classrooms/assignments', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getSubmissions: (assignmentId: string) =>
+    request<SubmissionDashboardItem[]>(`/classrooms/assignments/${assignmentId}/submissions`),
+
+  getGradesCsvUrl: (assignmentId: string) => `/api/v1/classrooms/assignments/${assignmentId}/grades.csv`,
+
+  auditReproducibility: (submissionId: string) =>
+    request<ReproduceAuditResponse>(`/classrooms/submissions/${submissionId}/reproduce`, {
+      method: 'POST',
+    }),
+
+  gradeSubmission: (submissionId: string, data: { score: number; comments: string }) =>
+    request<any>(`/classrooms/submissions/${submissionId}/grade`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  listTemplates: () => request<any[]>('/classrooms/templates'),
+
+  saveTemplate: (data: any) =>
+    request<any>('/classrooms/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getCurriculumInstructorSummary: async () => {
+    const summary = await request<{ total_students_active: number; lesson_completion_counts: Record<string, number> }>(
+      '/learning/progress/instructor-summary'
+    ).catch(() => ({ total_students_active: 0, lesson_completion_counts: {} as Record<string, number> }));
+
+    const lessons = await request<any[]>('/learning/lessons').catch(() => []);
+
+    return {
+      total_students_active: summary?.total_students_active || 0,
+      lessons: (lessons || []).map((l: any) => ({
+        lesson_id: l.id,
+        lesson_number: l.number,
+        lesson_title: l.title,
+        completed_count: summary?.lesson_completion_counts?.[l.id] || 0,
+        page_route: l.page_route,
+        goal: l.goal,
+      })),
+    };
+  },
+};
+
+
+// ---------------------------------------------------------------------------
 // 3. Deployment Studio & Web Widget API
 // ---------------------------------------------------------------------------
 
@@ -507,11 +1012,12 @@ export interface CopilotStatusResult {
 }
 
 export const CopilotApiService = {
-  chat: (payload: CopilotChatPayload) =>
+  chat: (payload: CopilotChatPayload, timeoutMs: number = 60000) =>
     request<CopilotChatResult>('/copilot/chat', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }),
+      timeoutMs,
+    } as any),
   getStatus: () => request<CopilotStatusResult>('/copilot/status'),
 };
 

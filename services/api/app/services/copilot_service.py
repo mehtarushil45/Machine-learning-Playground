@@ -20,12 +20,28 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Ensure workspace root .env is loaded on module import
+try:
+    from pathlib import Path
+    from dotenv import load_dotenv
+    for _env_path in (
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parents[4] / ".env",
+        Path(__file__).resolve().parents[3] / ".env",
+        Path(__file__).resolve().parents[2] / ".env",
+    ):
+        if _env_path.exists():
+            load_dotenv(_env_path)
+            break
+except Exception:
+    pass
+
 
 def _sync_http_post(
     url: str,
     payload: Dict[str, Any],
     headers: Optional[Dict[str, str]] = None,
-    timeout: float = 40.0,
+    timeout: float = 15.0,
 ) -> tuple[int, Dict[str, Any], str]:
     """Execute synchronous JSON HTTP POST using Python's standard library.
     
@@ -75,25 +91,6 @@ class CopilotService:
         model = os.environ.get("AI_COPILOT_MODEL") or getattr(settings, "ai_copilot_model", "")
         base_url = os.environ.get("AI_COPILOT_BASE_URL") or getattr(settings, "ai_copilot_base_url", "")
 
-        # Fallback check for root .env if keys were not loaded in current process environment
-        if not (gemini_key or groq_key or openai_key or custom_key):
-            try:
-                from pathlib import Path
-                from dotenv import load_dotenv
-                for env_candidate in (
-                    Path.cwd() / ".env",
-                    Path(__file__).resolve().parents[3] / ".env",
-                    Path(__file__).resolve().parents[2] / ".env",
-                ):
-                    if env_candidate.exists():
-                        load_dotenv(env_candidate)
-                        break
-                gemini_key = os.environ.get("GEMINI_API_KEY") or getattr(settings, "gemini_api_key", "")
-                groq_key = os.environ.get("GROQ_API_KEY") or getattr(settings, "groq_api_key", "")
-                openai_key = os.environ.get("OPENAI_API_KEY") or getattr(settings, "openai_api_key", "")
-                custom_key = os.environ.get("AI_COPILOT_API_KEY") or getattr(settings, "ai_copilot_api_key", "")
-            except Exception:
-                pass
 
         # Auto-detect if provider not explicitly set
         if not provider:
@@ -239,10 +236,10 @@ class CopilotService:
 
     _GEMINI_FALLBACK_MODELS = (
         "gemini-flash-lite-latest",
-        "gemini-flash-latest",
-        "gemini-pro-latest",
         "gemini-3.5-flash-lite",
+        "gemini-flash-latest",
         "gemini-3.8-flash",
+        "gemini-pro-latest",
     )
 
     @classmethod
@@ -310,12 +307,16 @@ class CopilotService:
 
             last_err = f"HTTP {status}: {err_msg}"
             # Immediate fail if API key itself is invalid
-            if status == 400 and ("API_KEY_INVALID" in err_msg.upper() or "INVALID_ARGUMENT" in err_msg.upper() and "KEY" in err_msg.upper()):
-                raise RuntimeError(f"Invalid Gemini API key: {err_msg}")
+            if status == 400 and ("API_KEY_INVALID" in err_msg.upper() or ("INVALID_ARGUMENT" in err_msg.upper() and "KEY" in err_msg.upper())):
+                raise RuntimeError(f"Invalid Gemini API key configured: {err_msg}")
 
             # For 503 (demand spike), 404 (model deprecated), or 429, try next model in fallback list
             logger.warning("Gemini model '%s' failed (%s). Retrying with next available model...", m, last_err)
 
+        if "429" in last_err or "QUOTA" in last_err.upper():
+            raise RuntimeError(f"Gemini Free Tier Rate Limit reached. Please wait a minute before retrying, or configure an alternative key (Groq / OpenAI) in .env.")
+        if "503" in last_err or "DEMAND" in last_err.upper():
+            raise RuntimeError(f"Google Gemini is temporarily experiencing high server demand. Please try sending your query again in a few moments.")
         raise RuntimeError(f"Gemini API returned {last_err}")
 
     @classmethod

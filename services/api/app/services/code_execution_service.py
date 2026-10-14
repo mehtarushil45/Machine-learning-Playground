@@ -54,6 +54,7 @@ def is_redis_available(host: Optional[str] = None, port: Optional[int] = None, t
 _ALLOWED_ENV_VARS: frozenset[str] = frozenset({
     "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "HOME", "USER",
     "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT",
+    "APPDATA", "LOCALAPPDATA", "USERPROFILE", "PYTHONPATH",
 })
 
 

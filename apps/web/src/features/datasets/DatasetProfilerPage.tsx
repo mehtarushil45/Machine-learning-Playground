@@ -31,7 +31,8 @@ import { useProject, type ActiveTrainingConfiguration } from '../../providers/Pr
 import { DataUpload } from './DataUpload';
 import { DataGovernanceCard } from './DataGovernanceCard';
 import { AlgorithmRecommendationPanel } from './AlgorithmRecommendationPanel';
-import { AICopilotDrawer } from '../../components/shared/AICopilotDrawer';
+import { AICopilotDrawer, type ChatMessage } from '../../components/shared/AICopilotDrawer';
+import { CopilotApiService } from '../../services/api';
 import { FeatureTargetSelector } from '../../components/shared/FeatureTargetSelector';
 import { PanelLearningCollapsible, HeadsUpCardsContainer } from '../learning';
 import { Select } from '../../components/ui/Select';
@@ -759,19 +760,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   }, [setSelectedFeatures]);
 
   /* ── Calculations & Data Derived ────────────────────────────────── */
-  const qualityBreakdown = useMemo(() => {
-    return profile ? computeDetailedQualityScore(profile) : null;
-  }, [profile]);
-
-  const allColumns = dataset?.columns || [];
-  const numericSet = useMemo(
-    () => (dataset ? new Set(getNumericColumns(dataset.columns, dataset.rows)) : new Set<string>()),
-    [dataset],
-  );
-
-  const copilotMsgs = useMemo(() => {
-    return generateCopilotMessages(profile, recommendations, qualityBreakdown);
-  }, [profile, recommendations, qualityBreakdown]);
 
   const issueCount = (health?.issues || []).filter((i) => i.severity !== 'info').length;
 
@@ -802,6 +790,74 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   useEffect(() => {
     setInferredTaskType(selectedTaskType);
   }, [selectedTaskType, setInferredTaskType]);
+
+  const qualityBreakdown = useMemo(() => {
+    return profile ? computeDetailedQualityScore(profile) : null;
+  }, [profile]);
+
+  const allColumns = dataset?.columns || [];
+  const numericSet = useMemo(
+    () => (dataset ? new Set(getNumericColumns(dataset.columns, dataset.rows)) : new Set<string>()),
+    [dataset],
+  );
+
+  const copilotMsgs = useMemo(() => {
+    return generateCopilotMessages(profile, recommendations, qualityBreakdown);
+  }, [profile, recommendations, qualityBreakdown]);
+
+  /* ── AI Copilot Real-time Chat State ────────────────────────────── */
+  const [copilotChat, setCopilotChat] = useState<ChatMessage[]>([]);
+  const [isCopilotThinking, setIsCopilotThinking] = useState(false);
+
+  const handleSendCopilotMessage = useCallback(
+    async (promptText: string) => {
+      const textToSend = promptText.trim();
+      if (!textToSend || isCopilotThinking) return;
+
+      const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', text: textToSend };
+      setCopilotChat((prev) => [...prev, userMsg]);
+      setIsCopilotThinking(true);
+
+      try {
+        const chatHistory = copilotChat.slice(-6).map((m) => ({
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content: m.text,
+        }));
+
+        const res = await CopilotApiService.chat({
+          prompt: textToSend,
+          dataset_name: dataset?.fileName || undefined,
+          dataset_schema: dataset
+            ? {
+                columns: dataset.columns,
+                rowCount: dataset.rowCount ?? dataset.rows?.length,
+                target: selectedTarget,
+                selectedFeatures: selectedFeatures,
+                recommendedTask: selectedTaskType,
+              }
+            : undefined,
+          chat_history: chatHistory,
+        });
+
+        setCopilotChat((prev) => [
+          ...prev,
+          { id: `a-${Date.now()}`, role: 'assistant', text: res.reply },
+        ]);
+      } catch (err: any) {
+        setCopilotChat((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: 'assistant',
+            text: `❌ **[Copilot Request Failed]**\n\n${err?.message || 'Unable to connect to AI Copilot service.'}`,
+          },
+        ]);
+      } finally {
+        setIsCopilotThinking(false);
+      }
+    },
+    [copilotChat, isCopilotThinking, dataset, selectedTarget, selectedFeatures, selectedTaskType],
+  );
 
   /* ── Live-sync: write canonical trainingConfig whenever local config changes ──────
    * Fires on every algorithm/scaler/imputer/split/cv change when prerequisites exist.
@@ -2673,7 +2729,12 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
           isOpen={isCopilotOpen}
           onToggle={onToggleCopilot || (() => {})}
           messages={copilotMsgs}
-          placeholder="Ask about this dataset…"
+          chatMessages={copilotChat}
+          onSendMessage={handleSendCopilotMessage}
+          isLoading={isCopilotThinking}
+          placeholder="Ask AI Copilot about this dataset, features, or ML strategy…"
+          title="Dataset AI Copilot"
+          badge={isCopilotThinking ? 'THINKING' : 'DATASET'}
         />
       </div>
 

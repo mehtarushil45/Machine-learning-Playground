@@ -116,4 +116,46 @@ describe('AICopilotDrawer Component', () => {
     expect(screen.getByText('RandomForestClassifier')).toBeInTheDocument();
     expect(screen.getByText('n_estimators=100')).toBeInTheDocument();
   });
+
+  it('renders error messages with high-visibility error styling', () => {
+    const chatMessages = [
+      {
+        id: 'msg-err',
+        role: 'assistant' as const,
+        text: '❌ **[Copilot Connection Error]**\n\nGoogle Gemini API returned error: models/gemini-flash-latest not found.',
+      },
+    ];
+
+    render(
+      <AICopilotDrawer
+        isOpen={true}
+        onToggle={() => {}}
+        chatMessages={chatMessages}
+      />
+    );
+
+    expect(screen.getByText(/\[Copilot Connection Error\]/i)).toBeInTheDocument();
+    expect(screen.getByText(/gemini-flash-latest not found/i)).toBeInTheDocument();
+  });
+
+  it('renders warning banner when AI Copilot is not configured with an API key', () => {
+    const chatMessages = [
+      {
+        id: 'msg-warn',
+        role: 'assistant' as const,
+        text: '⚠️ **[AI Copilot Not Configured]**\n\nNo LLM provider key detected. Please add `GEMINI_API_KEY` to your `.env` file.',
+      },
+    ];
+
+    render(
+      <AICopilotDrawer
+        isOpen={true}
+        onToggle={() => {}}
+        chatMessages={chatMessages}
+      />
+    );
+
+    expect(screen.getByText(/\[AI Copilot Not Configured\]/i)).toBeInTheDocument();
+    expect(screen.getByText(/GEMINI_API_KEY/i)).toBeInTheDocument();
+  });
 });

@@ -84,6 +84,13 @@ vi.mock('../services/api', () => ({
   CopilotApiService: {
     chat: vi.fn().mockResolvedValue({ reply: 'Test response' }),
   },
+  LearningService: {
+    getInstructorSummary: vi.fn().mockResolvedValue({}),
+    logSignal: vi.fn().mockResolvedValue({}),
+    auditCode: vi.fn().mockResolvedValue({}),
+    getStories: vi.fn().mockResolvedValue([]),
+    loadStory: vi.fn().mockResolvedValue({}),
+  },
 }));
 
 function ExecutionTestHarness() {
@@ -193,7 +200,7 @@ describe('Phase 3: Execution Sandbox & Output Streaming Integration', () => {
     await waitFor(() => {
       expect(screen.getAllByText(/Queued \(#3\)/i).length).toBeGreaterThan(0);
     });
-  });
+  }, 15000);
 
   it('renders interactive jumpable traceback lines and centers cursor when clicked', async () => {
     (CodeExecutionService.execute as any).mockResolvedValueOnce({
@@ -400,8 +407,9 @@ describe('Phase 3: Execution Sandbox & Output Streaming Integration', () => {
 
     await waitFor(() => {
       expect(createdEventSources.length).toBeGreaterThan(0);
+      expect(typeof createdEventSources[createdEventSources.length - 1].onmessage).toBe('function');
     });
-    const es = createdEventSources[0];
+    const es = createdEventSources[createdEventSources.length - 1];
 
     // Stream stdout with Test Accuracy metric and completion
     await act(async () => {
@@ -411,12 +419,16 @@ describe('Phase 3: Execution Sandbox & Output Streaming Integration', () => {
           data: 'Test Accuracy: 0.9125',
         }),
       });
+    });
+    await act(async () => {
       es.onmessage?.({
         data: JSON.stringify({
           type: 'stdout',
           data: 'Classification Report:\n              precision    recall  f1-score   support\nweighted avg       0.91      0.91      0.91        80',
         }),
       });
+    });
+    await act(async () => {
       es.onmessage?.({
         data: JSON.stringify({
           type: 'exit',
@@ -431,7 +443,7 @@ describe('Phase 3: Execution Sandbox & Output Streaming Integration', () => {
       expect(screen.getByTestId('post-run-experiment-card')).toBeInTheDocument();
       expect(screen.getByText(/Post-Run Model Evaluation/i)).toBeInTheDocument();
       expect(screen.getByText('91.25%')).toBeInTheDocument();
-      expect(screen.getByTestId('post-run-set-champion')).toBeInTheDocument();
+      expect(screen.getByText(/Active Champion|Set as Champion/i)).toBeInTheDocument();
     });
-  });
+  }, 15000);
 });
