@@ -625,6 +625,7 @@ export function ViewAsCodeStudio({
   const [copied, setCopied] = useState(false);
   const [pendingNewFileName, setPendingNewFileName] = useState<string | null>(null);
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const [jumpTarget, setJumpTarget] = useState<{ line: number; col: number } | null>(null);
 
   /* ── Find in Editor ──────────────────────────────────────────────── */
   const [isFindOpen, setIsFindOpen] = useState(false);
@@ -1702,6 +1703,7 @@ export function ViewAsCodeStudio({
     }
 
     setCursorPos({ line: lineNum, col: 1 });
+    setJumpTarget({ line: lineNum, col: 1 });
     setRuntimeDiagnostics([
       {
         line: lineNum,
@@ -2709,7 +2711,7 @@ export function ViewAsCodeStudio({
                   markFileModified(currentFile);
                 }}
                 onCursorChange={(pos) => setCursorPos(pos)}
-                targetPosition={cursorPos}
+                targetPosition={jumpTarget}
                 onRunCode={handleRunCode}
                 onSave={handleSaveCode}
                 onToggleTerminal={() => setBottomPanelOpen((o) => !o)}
@@ -3447,6 +3449,7 @@ export function ViewAsCodeStudio({
                                   title={d.message}
                                   onClick={() => {
                                     setCursorPos({ line: d.line, col: d.col });
+                                    setJumpTarget({ line: d.line, col: d.col });
                                   }}
                                   style={{
                                     padding: '4px 12px 4px 16px',
