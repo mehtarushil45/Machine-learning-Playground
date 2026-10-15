@@ -20,9 +20,6 @@ _WORKFLOW_STAGES = [
     "governance",
     "deployment",
     "monitoring",
-    "explainability",
-    "portfolio",
-    "verification",
     "administration",
 ]
 

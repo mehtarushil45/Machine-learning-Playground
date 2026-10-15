@@ -42,19 +42,6 @@ from app.schemas.dataset import (
     NumericStatistics,
     TargetSuggestion,
 )
-from app.schemas.explainability import (
-    FairnessAuditRequest,
-    FairnessAuditResponse,
-    FairnessMetricItem,
-    FeatureContribution,
-    FeatureImpact,
-    GlobalExplainabilityRequest,
-    GlobalExplainabilityResponse,
-    LocalExplainabilityRequest,
-    LocalExplainabilityResponse,
-    WhatIfRequest,
-    WhatIfResponse,
-)
 from app.schemas.job import (
     JobCancelResponse,
     JobListResponse,
