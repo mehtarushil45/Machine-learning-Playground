@@ -39,9 +39,7 @@ import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
 import { PanelLearningCollapsible, HeadsUpCardsContainer, useLearning } from '../learning';
 import { ML_SNIPPETS, type MLSnippetDefinition } from './mlCodeIntelligence';
 import type { JobEntity } from '../../types/job';
-import { ModelRegistryService } from '../../services/modelRegistryService';
-import { extractExecutionMetrics, type ExtractedMetrics } from '../../utils/metricExtractor';
-import { PostRunExperimentCard } from './PostRunExperimentCard';
+import { extractExecutionMetrics } from '../../utils/metricExtractor';
 
 /* ── BB Brand Tokens & High-Contrast Design Tokens ────────────────────── */
 const BB = {
@@ -569,7 +567,6 @@ export function ViewAsCodeStudio({
     selectedTarget,
     selectedFeatures,
     activeJob,
-    fileJobs,
     setLifecycleStage,
     activeExperimentFile,
     experimentFiles,
@@ -656,8 +653,6 @@ export function ViewAsCodeStudio({
   const [builderCodeByFile, setBuilderCodeByFile] = useState<Record<string, string>>({});
   const [savedCodeByFile, setSavedCodeByFile] = useState<Record<string, string>>({});
   const [serverWorkspaceFiles, setServerWorkspaceFiles] = useState<WorkspaceFileItem[]>([]);
-  const [postRunMetrics, setPostRunMetrics] = useState<ExtractedMetrics | null>(null);
-  const [isPostRunCardVisible, setIsPostRunCardVisible] = useState<boolean>(false);
   const [isAutosaving, setIsAutosaving] = useState(false);
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [diffModalState, setDiffModalState] = useState<{
@@ -680,6 +675,7 @@ export function ViewAsCodeStudio({
   const eventSourceRef = useRef<EventSource | null>(null);
   const webSocketRef = useRef<WebSocket | null>(null);
   const lastJobIdRef = useRef<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   /* ── Canonical Pipeline Config Derivations ────────────────────────── */
   const activeDatasetName = dataset?.fileName || trainingConfig?.dataset_name || 'dataset.csv';
@@ -1342,6 +1338,17 @@ export function ViewAsCodeStudio({
       message,
     });
 
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (eventSourceRef.current) {
+      try {
+        eventSourceRef.current.close();
+      } catch { }
+      eventSourceRef.current = null;
+    }
+
     setBottomPanelOpen(true);
     setBottomTab('output');
     setOutputLines([`[ML Playground] Submitting ${currentFile} for sandboxed execution...`]);
@@ -1354,8 +1361,6 @@ export function ViewAsCodeStudio({
     setExecModelId(null);
     setIsDeployingArtifact(false);
     setRuntimeDiagnostics([]);
-    setPostRunMetrics(null);
-    setIsPostRunCardVisible(false);
     setLogEntries([
       makeLog('system', `Execution started: '${currentFile}'`),
       ...(dataset?.fileName ? [makeLog('info', `Dataset context: ${dataset.fileName}`)] : []),
@@ -1418,17 +1423,25 @@ export function ViewAsCodeStudio({
             }
 
           } else if (data.type === 'stdout' && data.data) {
+            setExecStatus((curr) => (curr === 'queued' ? 'running' : curr));
+            setQueuePosition(null);
             setOutputLines((p) => [...p, data.data]);
             allOutputRef.push(data.data);
             setLogEntries(prev => [...prev, makeLog('debug', data.data.slice(0, 120))]);
 
           } else if (data.type === 'stderr' && data.data) {
+            setExecStatus((curr) => (curr === 'queued' ? 'running' : curr));
+            setQueuePosition(null);
             const line = `[stderr] ${data.data}`;
             setOutputLines((p) => [...p, line]);
             allOutputRef.push(line);
             setLogEntries(prev => [...prev, makeLog('warn', data.data.slice(0, 120))]);
 
           } else if (data.type === 'system' && data.data) {
+            if (!data.data.toLowerCase().includes('queued')) {
+              setExecStatus((curr) => (curr === 'queued' ? 'running' : curr));
+              setQueuePosition(null);
+            }
             setOutputLines((p) => [...p, data.data]);
             allOutputRef.push(data.data);
             setLogEntries(prev => [...prev, makeLog('system', data.data)]);
@@ -1469,8 +1482,6 @@ export function ViewAsCodeStudio({
             if (exitCode === 0) {
               setRuntimeDiagnostics([]);
               const extracted = extractExecutionMetrics(allOutputRef);
-              setPostRunMetrics(extracted);
-              setIsPostRunCardVisible(true);
               const parsed = parsePipelineTargetAndConfig(displayedCode);
               const createdJob: JobEntity = {
                 job_id: res.exec_id,
@@ -1567,80 +1578,124 @@ export function ViewAsCodeStudio({
         else setLogEntries(prev => [...prev, makeLog('debug', rawData.slice(0, 120))]);
       };
 
-      es.onerror = () => {
-        es.close();
+      const finalizeExecution = (finalRes: any) => {
         if (hasExited) return;
         hasExited = true;
-        CodeExecutionService.getResult(res.exec_id)
-          .then((finalRes) => {
-            if (finalRes.stdout) {
-              const stdLines = finalRes.stdout.split('\n').filter(Boolean);
-              setOutputLines((p) => [...p, ...stdLines]);
-              allOutputRef.push(...stdLines);
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        if (eventSourceRef.current) {
+          try { eventSourceRef.current.close(); } catch { }
+          eventSourceRef.current = null;
+        }
+        if (finalRes.stdout) {
+          const stdLines = finalRes.stdout.split('\n').filter(Boolean);
+          setOutputLines((p) => [...p, ...stdLines]);
+          allOutputRef.push(...stdLines);
+        }
+        if (finalRes.stderr) {
+          const errLines = finalRes.stderr.split('\n').filter(Boolean).map((l: string) => `[stderr] ${l}`);
+          setOutputLines((p) => [...p, ...errLines]);
+          allOutputRef.push(...errLines);
+        }
+        if (finalRes.is_truncated) {
+          setIsOutputTruncated(true);
+        }
+        const st = finalRes.status as any;
+        setExecStatus(st);
+        setQueuePosition(null);
+        setExecExitCode(finalRes.exit_code ?? (finalRes.status === 'completed' ? 0 : null));
+        setExecDuration(finalRes.duration_seconds ?? (Date.now() - startTime) / 1000);
+        if (finalRes.artifacts) setExecArtifacts(finalRes.artifacts);
+        if (finalRes.model_id) setExecModelId(finalRes.model_id);
+        if (finalRes.exit_code === 0 || finalRes.status === 'completed') {
+          setRuntimeDiagnostics([]);
+          const extracted = extractExecutionMetrics(allOutputRef);
+          const parsed = parsePipelineTargetAndConfig(displayedCode);
+          const createdJob: JobEntity = {
+            job_id: res.exec_id,
+            dataset_id: dataset?.datasetId || trainingConfig?.dataset_id || 'dataset',
+            status: 'COMPLETED',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            job_type: 'training',
+            algorithm: parsed.algorithm || trainingConfig?.algorithm || 'code_studio_pipeline',
+            target_column: parsed.target || selectedTarget || trainingConfig?.target_column || 'target',
+            feature_columns: (parsed.features && parsed.features.length > 0) ? parsed.features : (trainingConfig?.feature_columns || []),
+            progress: 100,
+            current_stage: 'Completed',
+            retry_count: 0,
+            metadata: {
+              metrics: extracted.metrics,
+              scaler: parsed.scaler || trainingConfig?.scaler || 'standard_scaler',
+              imputer: parsed.imputer || trainingConfig?.imputer || 'median',
+              train_test_split: parsed.testSplit != null ? (1 - parsed.testSplit) : (trainingConfig?.train_test_split || 0.8),
+              cross_validation: parsed.cvFolds || trainingConfig?.cv_folds || 5,
+              hyperparameters: parsed.hyperparameters,
+            },
+          };
+          setFileJob(currentFile, createdJob);
+          if (!activeJob) {
+            setActiveJob(createdJob);
+          }
+        } else {
+          const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
+          setRuntimeDiagnostics(errDiags);
+        }
+        setLogEntries(prev => [
+          ...prev,
+          makeLog(
+            st === 'completed' ? 'info' : 'error',
+            `Execution finished with status: ${st}${finalRes.exit_code != null ? ` (exit ${finalRes.exit_code})` : ''}`
+          ),
+        ]);
+        refreshWorkspaceFiles();
+      };
+
+      es.onerror = () => {
+        try { es.close(); } catch { }
+        if (hasExited) return;
+
+        // Poll execution status until terminal — never abort a queued or running job on stream disconnect
+        let pollCount = 0;
+        const maxPolls = 120;
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+        }
+        pollIntervalRef.current = setInterval(() => {
+          if (hasExited || pollCount++ >= maxPolls) {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
             }
-            if (finalRes.stderr) {
-              const errLines = finalRes.stderr.split('\n').filter(Boolean).map((l) => `[stderr] ${l}`);
-              setOutputLines((p) => [...p, ...errLines]);
-              allOutputRef.push(...errLines);
+            if (!hasExited) {
+              setExecStatus('failed');
+              setLogEntries(prev => [...prev, makeLog('error', 'Execution polling timed out.')]);
             }
-            if (finalRes.is_truncated) {
-              setIsOutputTruncated(true);
-            }
-            const st = finalRes.status as any;
-            setExecStatus(st);
-            setQueuePosition(null);
-            setExecExitCode(finalRes.exit_code ?? (finalRes.status === 'completed' ? 0 : null));
-            setExecDuration(finalRes.duration_seconds ?? (Date.now() - startTime) / 1000);
-            if (finalRes.artifacts) setExecArtifacts(finalRes.artifacts);
-            if (finalRes.model_id) setExecModelId(finalRes.model_id);
-            if (finalRes.exit_code === 0 || finalRes.status === 'completed') {
-              setRuntimeDiagnostics([]);
-              const extracted = extractExecutionMetrics(allOutputRef);
-              setPostRunMetrics(extracted);
-              setIsPostRunCardVisible(true);
-              const parsed = parsePipelineTargetAndConfig(displayedCode);
-              const createdJob: JobEntity = {
-                job_id: res.exec_id,
-                dataset_id: dataset?.datasetId || trainingConfig?.dataset_id || 'dataset',
-                status: 'COMPLETED',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                job_type: 'training',
-                algorithm: parsed.algorithm || trainingConfig?.algorithm || 'code_studio_pipeline',
-                target_column: parsed.target || selectedTarget || trainingConfig?.target_column || 'target',
-                feature_columns: (parsed.features && parsed.features.length > 0) ? parsed.features : (trainingConfig?.feature_columns || []),
-                progress: 100,
-                current_stage: 'Completed',
-                retry_count: 0,
-                metadata: {
-                  metrics: extracted.metrics,
-                  scaler: parsed.scaler || trainingConfig?.scaler || 'standard_scaler',
-                  imputer: parsed.imputer || trainingConfig?.imputer || 'median',
-                  train_test_split: parsed.testSplit != null ? (1 - parsed.testSplit) : (trainingConfig?.train_test_split || 0.8),
-                  cross_validation: parsed.cvFolds || trainingConfig?.cv_folds || 5,
-                  hyperparameters: parsed.hyperparameters,
-                },
-              };
-              setFileJob(currentFile, createdJob);
-              if (!activeJob) {
-                setActiveJob(createdJob);
+            return;
+          }
+
+          CodeExecutionService.getResult(res.exec_id)
+            .then((pollRes) => {
+              if (pollRes.status === 'queued') {
+                setExecStatus('queued');
+              } else if (pollRes.status === 'running') {
+                setExecStatus('running');
+                setQueuePosition(null);
+              } else {
+                // Reached terminal status (completed, failed, cancelled, timed_out, etc.)
+                if (pollIntervalRef.current) {
+                  clearInterval(pollIntervalRef.current);
+                  pollIntervalRef.current = null;
+                }
+                finalizeExecution(pollRes);
               }
-            } else {
-              const errDiags = parseRuntimeErrors(allOutputRef, currentFile, displayedCode.split('\n').length);
-              setRuntimeDiagnostics(errDiags);
-            }
-            setLogEntries(prev => [...prev,
-            makeLog(st === 'completed' ? 'info' : 'error',
-              `Stream ended — final status: ${st}${finalRes.exit_code != null ? ` (exit ${finalRes.exit_code})` : ''}`),
-            ]);
-          })
-          .catch(() => {
-            setExecStatus('completed');
-            setLogEntries(prev => [...prev, makeLog('warn', 'Stream ended (status unknown)')]);
-          })
-          .finally(() => {
-            refreshWorkspaceFiles();
-          });
+            })
+            .catch(() => {
+              // Retry on next tick
+            });
+        }, 1000);
       };
     } catch (err: any) {
       setExecStatus('failed');
@@ -1784,27 +1839,6 @@ export function ViewAsCodeStudio({
     ]);
     onShowToast?.('Jumped to Traceback', `${baseName}:${lineNum}`, 'info');
   }, [openTabs, experimentFiles, setOpenTabs, setActiveExperimentFile, onShowToast]);
-
-  /* ── Champion Baseline Lookup & Post-Run Promotion ────────────────── */
-  const championJob = activeJob || (fileJobs && Object.values(fileJobs).length > 0 ? Object.values(fileJobs)[0] : null);
-  const championMetrics = (championJob?.metadata?.metrics || {}) as Record<string, any>;
-  const championAlgorithm = championJob?.algorithm;
-  const isCurrentChampion = championJob?.job_id === execId;
-
-  const handlePromotePostRunChampion = useCallback(async () => {
-    if (!execId) return;
-    try {
-      await ModelRegistryService.promoteModel(execId).catch(() => { });
-    } catch { }
-    if (fileJobs && fileJobs[currentFile]) {
-      setActiveJob(fileJobs[currentFile]);
-    }
-    onShowToast?.(
-      'Promoted to Champion',
-      `${currentFile} model is now the active Champion model baseline.`,
-      'success'
-    );
-  }, [execId, fileJobs, currentFile, setActiveJob, onShowToast]);
 
   /* ── AI Copilot Context Cards ────────────────────────────────────── */
   const copilotMessages = useMemo<CopilotMsg[]>(() => {
@@ -2525,38 +2559,6 @@ export function ViewAsCodeStudio({
               >
                 <Play style={{ width: 12, height: 12, fill: BB.success }} />
                 <span>Run Experiment</span>
-              </button>
-            )}
-
-            {/* Quick Deploy Button when artifact is ready */}
-            {execArtifacts.some((a) => a.endsWith('.joblib') || a.endsWith('.pkl')) && (
-              <button
-                onClick={handleDeployFromCodeStudio}
-                disabled={isDeployingArtifact}
-                aria-label="Deploy model from Code Studio"
-                title="Deploy trained model artifact to a serving endpoint"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '4px 12px',
-                  borderRadius: 5,
-                  border: '1px solid rgba(0, 245, 160, 0.5)',
-                  background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18), rgba(0, 245, 160, 0.22))',
-                  color: '#00F5A0',
-                  fontSize: 11.5,
-                  fontWeight: 700,
-                  cursor: isDeployingArtifact ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 0 10px rgba(0, 245, 160, 0.2)',
-                  transition: 'all 120ms ease',
-                }}
-              >
-                {isDeployingArtifact ? (
-                  <RefreshCw style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />
-                ) : (
-                  <Rocket style={{ width: 12, height: 12 }} />
-                )}
-                <span>{isDeployingArtifact ? 'Deploying...' : 'Deploy Model'}</span>
               </button>
             )}
           </div>
@@ -3302,24 +3304,7 @@ export function ViewAsCodeStudio({
                 >
                   {bottomTab === 'output' && (
                     <>
-                      {/* Post-Run Model Evaluation Card */}
-                      {postRunMetrics && isPostRunCardVisible && execStatus === 'completed' && (
-                        <PostRunExperimentCard
-                          execId={execId || 'exec-run'}
-                          filename={currentFile}
-                          durationSeconds={execDuration}
-                          exitCode={execExitCode ?? 0}
-                          extractedMetrics={postRunMetrics}
-                          championMetrics={championMetrics}
-                          championAlgorithm={championAlgorithm}
-                          algorithmName={trainingConfig?.algorithm?.replace(/_/g, ' ') || 'Code Studio Pipeline'}
-                          scalerName={trainingConfig?.scaler?.replace(/_/g, ' ')}
-                          isChampion={isCurrentChampion}
-                          onPromoteChampion={handlePromotePostRunChampion}
-                          onViewInResults={() => onNavigate?.('results')}
-                          onDismiss={() => setIsPostRunCardVisible(false)}
-                        />
-                      )}
+
 
                       {/* Truncation Notice Banner */}
                       {isOutputTruncated && (

@@ -440,10 +440,8 @@ describe('Phase 3: Execution Sandbox & Output Streaming Integration', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('post-run-experiment-card')).toBeInTheDocument();
-      expect(screen.getByText(/Post-Run Model Evaluation/i)).toBeInTheDocument();
-      expect(screen.getByText('91.25%')).toBeInTheDocument();
-      expect(screen.getByText(/Active Champion|Set as Champion/i)).toBeInTheDocument();
+      expect(screen.queryByTestId('post-run-experiment-card')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Post-Run Model Evaluation/i)).not.toBeInTheDocument();
     });
   }, 15000);
 });

@@ -173,6 +173,7 @@ def execute_code_sandbox(
         except Exception:
             pass
 
+    _publish_event(redis_client, exec_id, {"type": "status", "status": "running"})
     _publish_event(redis_client, exec_id, {
         "type": "system",
         "data": f"[ML Playground Worker] Starting execution in Celery sandbox: {filename}",
@@ -257,6 +258,15 @@ def execute_code_sandbox(
                 "category": np.random.choice(["A", "B", "C"], size=n_samples),
                 "target": np.random.choice([0, 1], size=n_samples),
             })
+            # Ensure target column names parsed from code exist in synthetic dataset
+            code_targets = re.findall(r'(?:target_col|target)\s*=\s*[\'"]([^\'"]+)[\'"]', code)
+            for t_col in code_targets:
+                col_name = str(t_col)
+                if col_name not in demo_df.columns:
+                    demo_df[col_name] = list(np.random.choice([0, 1], size=n_samples))
+            if "loan_status" in code and "loan_status" not in demo_df.columns:
+                demo_df["loan_status"] = list(np.random.choice([0, 1], size=n_samples))
+
             demo_df.to_csv(dest_canonical, index=False)
             csv_refs = re.findall(r'[\'"]([^\'"]+\.csv)[\'"]', code)
             for ref in csv_refs:
@@ -269,10 +279,18 @@ def execute_code_sandbox(
         try:
             import pandas as pd
             df_chk = pd.read_csv(dest_canonical)
+            code_targets = re.findall(r'(?:target_col|target)\s*=\s*[\'"]([^\'"]+)[\'"]', code)
+            for t_col in code_targets:
+                if t_col not in df_chk.columns:
+                    import numpy as np
+                    df_chk[t_col] = list(np.random.choice([0, 1], size=len(df_chk)))
             if "target" not in df_chk.columns and "'target'" in code:
                 import numpy as np
                 df_chk["target"] = list(np.random.choice([0, 1], size=len(df_chk)))
-                df_chk.to_csv(dest_canonical, index=False)
+            if "loan_status" in code and "loan_status" not in df_chk.columns:
+                import numpy as np
+                df_chk["loan_status"] = list(np.random.choice([0, 1], size=len(df_chk)))
+            df_chk.to_csv(dest_canonical, index=False)
         except Exception:
             pass
 
@@ -289,6 +307,11 @@ def execute_code_sandbox(
     env["PYTHONUNBUFFERED"] = "1"
     env["MLPG_SANDBOX"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # Cap worker math thread pools to 2 to prevent thread exhaustion / pthread_create failures
+    env["OPENBLAS_NUM_THREADS"] = "2"
+    env["OMP_NUM_THREADS"] = "2"
+    env["MKL_NUM_THREADS"] = "2"
+    env["NUMEXPR_NUM_THREADS"] = "2"
 
     stdout_lines: List[str] = []
     stderr_lines: List[str] = []
@@ -305,7 +328,9 @@ def execute_code_sandbox(
             os.setsid()
             try:
                 import resource
-                limit_bytes = 512 * 1024 * 1024
+                # 4GB virtual address space (RLIMIT_AS) gives scikit-learn/numpy/xgboost
+                # sufficient space to map thread pools without hitting pthread_create errors
+                limit_bytes = 4096 * 1024 * 1024
                 resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
             except Exception:
                 pass

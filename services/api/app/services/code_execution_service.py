@@ -68,6 +68,7 @@ class ExecutionRecord:
     project_id:          Optional[str]     = "default_project"
     started_at:          Optional[float]   = None
     finished_at:         Optional[float]   = None
+    duration_seconds:    Optional[float]   = None
     exit_code:           Optional[int]     = None
     stdout:              str               = ""
     stderr:              str               = ""
@@ -124,6 +125,39 @@ async def _kill_process_tree(proc: Optional[asyncio.subprocess.Process], sig: in
                 pass
 
 
+async def _watch_celery_execution(rec: ExecutionRecord) -> None:
+    """Monitor Celery worker progress in Redis, sync local record, and auto-dispatch queued runs."""
+    import json
+    proj_key = rec.project_id or "default_project"
+    start_time = time.monotonic()
+    max_wait = rec.timeout + 20
+
+    while time.monotonic() - start_time < max_wait:
+        await asyncio.sleep(0.5)
+        try:
+            from app.redis_client import get_redis
+            redis_client = await get_redis()
+            raw = await redis_client.get(f"mlpg:exec:record:{rec.exec_id}")
+            if raw:
+                data = json.loads(raw)
+                st = data.get("status")
+                rec.status = st or rec.status
+                rec.exit_code = data.get("exit_code", rec.exit_code)
+                rec.stdout = data.get("stdout", rec.stdout)
+                rec.stderr = data.get("stderr", rec.stderr)
+                rec.artifacts = data.get("artifacts", rec.artifacts)
+                rec.registered_model_id = data.get("registered_model_id", rec.registered_model_id)
+                rec.error = data.get("error", rec.error)
+                rec.duration_seconds = data.get("duration_seconds")
+                if st in ("completed", "failed", "stopped", "cancelled", "timed_out", "out_of_memory"):
+                    rec.finished_at = time.monotonic()
+                    break
+        except Exception as poll_exc:
+            logger.debug("Error watching Celery execution %s: %s", rec.exec_id, poll_exc)
+
+    _finish_project_execution(proj_key, rec.exec_id)
+
+
 def _finish_project_execution(project_id: str, finished_exec_id: str) -> None:
     """Release active project execution slot and auto-dispatch next queued run."""
     if _ACTIVE_PROJECT_RUNS.get(project_id) == finished_exec_id:
@@ -132,12 +166,35 @@ def _finish_project_execution(project_id: str, finished_exec_id: str) -> None:
     q = _PROJECT_QUEUES.get(project_id, [])
     while q:
         next_id = q.pop(0)
-        next_rec = _EXECUTIONS.get(next_id)
+        next_rec = get_execution(next_id)
         if next_rec and next_rec.status == "queued":
             _ACTIVE_PROJECT_RUNS[project_id] = next_id
             next_rec.queue_position = None
             next_rec.status = "running"
+            next_rec.started_at = time.monotonic()
             logger.info("Dequeued and starting execution %s for project %s", next_id, project_id)
+
+            should_use_celery = (
+                os.environ.get("USE_CELERY", "1").lower() not in ("false", "0", "no")
+                and is_redis_available()
+            )
+            if should_use_celery:
+                try:
+                    from services.worker.tasks.code_execution_task import execute_code_sandbox
+                    next_rec.is_celery = True
+                    execute_code_sandbox.delay(
+                        exec_id=next_rec.exec_id,
+                        code=next_rec.code,
+                        filename=next_rec.filename,
+                        dataset_id=next_rec.dataset_id,
+                        timeout=next_rec.timeout,
+                    )
+                    asyncio.create_task(_watch_celery_execution(next_rec))
+                    break
+                except Exception as exc:
+                    logger.warning("Celery dispatch for queued job failed: %s", exc)
+                    next_rec.is_celery = False
+
             asyncio.create_task(_run_execution(next_rec, timeout=next_rec.timeout, extra_env=next_rec.extra_env))
             break
 
@@ -196,8 +253,12 @@ async def start_execution(
 
     active_id = _ACTIVE_PROJECT_RUNS.get(proj_key)
     if active_id:
-        active_rec = _EXECUTIONS.get(active_id)
-        if active_rec and active_rec.status not in ("running", "queued"):
+        active_rec = get_execution(active_id)
+        if active_rec is None or active_rec.status not in ("running", "queued"):
+            _ACTIVE_PROJECT_RUNS.pop(proj_key, None)
+            active_id = None
+        elif active_rec.started_at and (time.monotonic() - active_rec.started_at > active_rec.timeout + 10):
+            logger.warning("Active run %s for project %s timed out/stale. Clearing.", active_id, proj_key)
             _ACTIVE_PROJECT_RUNS.pop(proj_key, None)
             active_id = None
 
@@ -223,6 +284,8 @@ async def start_execution(
         return rec
 
     _ACTIVE_PROJECT_RUNS[proj_key] = exec_id
+    rec.status = "running"
+    rec.started_at = time.monotonic()
 
     # Check Celery dispatch availability
     should_use_celery = prefer_celery if prefer_celery is not None else (
@@ -233,7 +296,6 @@ async def start_execution(
         try:
             from services.worker.tasks.code_execution_task import execute_code_sandbox
             rec.is_celery = True
-            rec.status = "running"
             execute_code_sandbox.delay(
                 exec_id=exec_id,
                 code=code,
@@ -241,6 +303,7 @@ async def start_execution(
                 dataset_id=dataset_id,
                 timeout=timeout,
             )
+            asyncio.create_task(_watch_celery_execution(rec))
             logger.info("Dispatched code execution %s to Celery worker sandbox.", exec_id)
             return rec
         except Exception as exc:
@@ -360,6 +423,15 @@ async def _run_execution(
                 "category": np.random.choice(["A", "B", "C"], size=n_samples),
                 "target": np.random.choice([0, 1], size=n_samples),
             })
+            # Ensure target column names parsed from code exist in synthetic dataset
+            code_targets = re.findall(r'(?:target_col|target)\s*=\s*[\'"]([^\'"]+)[\'"]', rec.code)
+            for t_col in code_targets:
+                col_name = str(t_col)
+                if col_name not in demo_df.columns:
+                    demo_df[col_name] = list(np.random.choice([0, 1], size=n_samples))
+            if "loan_status" in rec.code and "loan_status" not in demo_df.columns:
+                demo_df["loan_status"] = list(np.random.choice([0, 1], size=n_samples))
+
             demo_df.to_csv(dest_canonical, index=False)
             csv_refs = re.findall(r'[\'"]([^\'"]+\.csv)[\'"]', rec.code)
             for ref in csv_refs:
@@ -372,10 +444,18 @@ async def _run_execution(
         try:
             import pandas as pd
             df_chk = pd.read_csv(dest_canonical)
+            code_targets = re.findall(r'(?:target_col|target)\s*=\s*[\'"]([^\'"]+)[\'"]', rec.code)
+            for t_col in code_targets:
+                if t_col not in df_chk.columns:
+                    import numpy as np
+                    df_chk[t_col] = list(np.random.choice([0, 1], size=len(df_chk)))
             if "target" not in df_chk.columns and "'target'" in rec.code:
                 import numpy as np
                 df_chk["target"] = list(np.random.choice([0, 1], size=len(df_chk)))
-                df_chk.to_csv(dest_canonical, index=False)
+            if "loan_status" in rec.code and "loan_status" not in df_chk.columns:
+                import numpy as np
+                df_chk["loan_status"] = list(np.random.choice([0, 1], size=len(df_chk)))
+            df_chk.to_csv(dest_canonical, index=False)
         except Exception:
             pass
 
@@ -389,6 +469,10 @@ async def _run_execution(
     env["PYTHONUNBUFFERED"] = "1"
     env["MLPG_SANDBOX"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["OPENBLAS_NUM_THREADS"] = "2"
+    env["OMP_NUM_THREADS"] = "2"
+    env["MKL_NUM_THREADS"] = "2"
+    env["NUMEXPR_NUM_THREADS"] = "2"
 
     stdout_lines: List[str] = []
     stderr_lines: List[str] = []
@@ -400,7 +484,7 @@ async def _run_execution(
                 os.setsid()
                 try:
                     import resource
-                    limit_bytes = rec.memory_limit_mb * 1024 * 1024
+                    limit_bytes = max(rec.memory_limit_mb, 4096) * 1024 * 1024
                     resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
                 except Exception:
                     pass
@@ -702,6 +786,21 @@ async def stream_execution_events(exec_id: str) -> AsyncGenerator[Dict[str, Any]
                                 break
                     except Exception:
                         pass
+
+                    if rec.status in ("completed", "failed", "stopped", "cancelled", "timed_out", "out_of_memory"):
+                        duration = None
+                        if rec.started_at and rec.finished_at:
+                            duration = round(rec.finished_at - rec.started_at, 2)
+                        yield {
+                            "type": "exit",
+                            "exit_code": rec.exit_code,
+                            "status": rec.status,
+                            "duration_seconds": duration,
+                            "artifacts": rec.artifacts,
+                            "model_id": rec.registered_model_id,
+                            "is_truncated": rec.is_truncated,
+                        }
+                        break
 
                     if idle_ticks % 4 == 0:
                         yield {"type": "heartbeat"}
