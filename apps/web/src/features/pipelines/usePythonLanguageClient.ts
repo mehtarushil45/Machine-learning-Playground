@@ -111,10 +111,16 @@ export function usePythonLanguageClient({
       }
 
       if (isMountedRef.current) {
+        // Authoritative server AST result takes precedence over client syntax heuristics
+        const serverHasSyntaxError = serverDiags.some((d) => d.source === 'syntax');
+        const effectiveClientDiags = serverHasSyntaxError || serverDiags.length === 0
+          ? clientDiags
+          : clientDiags.filter((d) => d.source !== 'syntax');
+
         // Merge server and client diagnostics without duplicates
         const seen = new Set<string>();
         const merged: CodeDiagnostic[] = [];
-        [...serverDiags, ...clientDiags].forEach((d) => {
+        [...serverDiags, ...effectiveClientDiags].forEach((d) => {
           const key = `${d.line}:${d.message}`;
           if (!seen.has(key)) {
             seen.add(key);
@@ -204,11 +210,16 @@ export function usePythonLanguageClient({
               code: d.code,
             }));
 
-            // Merge with client syntax checks
+            // Merge with client syntax checks (authoritative server syntax takes precedence)
             const clientDiags = fastCheckPythonCode(code);
+            const serverHasSyntaxError = mapped.some((d) => d.source === 'syntax');
+            const effectiveClientDiags = serverHasSyntaxError
+              ? clientDiags
+              : clientDiags.filter((d) => d.source !== 'syntax');
+
             const seen = new Set<string>();
             const merged: CodeDiagnostic[] = [];
-            [...mapped, ...clientDiags].forEach((d) => {
+            [...mapped, ...effectiveClientDiags].forEach((d) => {
               const key = `${d.line}:${d.message}`;
               if (!seen.has(key)) {
                 seen.add(key);

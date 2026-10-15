@@ -82,11 +82,19 @@ export function fastCheckPythonCode(code: string): FastDiagnostic[] {
       continue;
     }
 
-    if (trimmed.startsWith('"""') && !trimmed.slice(3).includes('"""')) {
+    // Single-line docstrings or multi-line quotes closed on same line
+    if (
+      (trimmed.startsWith('"""') && trimmed.slice(3).includes('"""')) ||
+      (trimmed.startsWith("'''") && trimmed.slice(3).includes("'''"))
+    ) {
+      continue;
+    }
+
+    if (trimmed.startsWith('"""')) {
       inTripleDouble = true;
       continue;
     }
-    if (trimmed.startsWith("'''") && !trimmed.slice(3).includes("'''")) {
+    if (trimmed.startsWith("'''")) {
       inTripleSingle = true;
       continue;
     }
@@ -104,10 +112,15 @@ export function fastCheckPythonCode(code: string): FastDiagnostic[] {
       importedNames.forEach((name) => knownIdentifiers.add(name));
     }
 
-    // Extract assignments to populate known identifiers (e.g. x = ..., target_column = ...)
-    const assignMatch = trimmed.match(/^([a-zA-Z_]\w*)\s*(?:=|:=|\+=|-=|\*=|\/=)/);
+    // Extract assignments to populate known identifiers (single and tuple, e.g. x = ..., X_train, X_test = ...)
+    const assignMatch = trimmed.match(/^([a-zA-Z_][\w,\s]*)\s*(?:=|:=|\+=|-=|\*=|\/=)/);
     if (assignMatch && assignMatch[1]) {
-      knownIdentifiers.add(assignMatch[1]);
+      assignMatch[1].split(',').forEach((name) => {
+        const clean = name.trim();
+        if (/^[a-zA-Z_]\w*$/.test(clean)) {
+          knownIdentifiers.add(clean);
+        }
+      });
     }
 
     // Extract function/class definitions
@@ -116,60 +129,27 @@ export function fastCheckPythonCode(code: string): FastDiagnostic[] {
       knownIdentifiers.add(defMatch[1]);
     }
 
-    // 1. Check for invalid consecutive bare words (e.g. "hello world", "foo bar baz")
-    // If a line is just words without operators, colons, or calls, it's a syntax error
-    if (
-      !trimmed.includes('=') &&
-      !trimmed.includes('(') &&
-      !trimmed.includes('[') &&
-      !trimmed.includes('{') &&
-      !trimmed.includes(':') &&
-      !trimmed.includes('#') &&
-      !trimmed.startsWith('import ') &&
-      !trimmed.startsWith('from ') &&
-      !trimmed.startsWith('return ') &&
-      !trimmed.startsWith('raise ') &&
-      !trimmed.startsWith('del ') &&
-      !trimmed.startsWith('pass') &&
-      !trimmed.startsWith('break') &&
-      !trimmed.startsWith('continue') &&
-      !trimmed.startsWith('global ') &&
-      !trimmed.startsWith('nonlocal ')
-    ) {
-      const words = trimmed.split(/\s+/);
-      if (words.length > 1) {
-        // Multi-word sequence without operators or punctuation: definite SyntaxError
-        const col = rawLine.indexOf(words[1]) + 1;
-        diagnostics.push({
-          line: lineNum,
-          col: Math.max(1, col),
-          end_line: lineNum,
-          end_col: col + words[1].length,
-          severity: 'error',
-          message: `SyntaxError: invalid syntax '${words[1]}'`,
-          source: 'syntax',
-          code: 'E999',
-        });
-      } else if (words.length === 1 && /^[a-zA-Z_]\w*$/.test(words[0])) {
-        // Single bare identifier on a line (e.g. user typed "k" at the bottom of the script)
-        const word = words[0];
-        if (!PYTHON_KEYWORDS.has(word) && !knownIdentifiers.has(word)) {
-          const col = rawLine.indexOf(word) + 1;
-          diagnostics.push({
-            line: lineNum,
-            col: Math.max(1, col),
-            end_line: lineNum,
-            end_col: col + word.length,
-            severity: 'error',
-            message: `undefined name '${word}'`,
-            source: 'pyflakes',
-            code: 'F821',
-          });
+    // Extract for-loop targets (e.g. for col in feature_cols:)
+    const forMatch = trimmed.match(/^for\s+([a-zA-Z_][\w,\s]*)\s+in\s+/);
+    if (forMatch && forMatch[1]) {
+      forMatch[1].split(',').forEach((name) => {
+        const clean = name.trim();
+        if (/^[a-zA-Z_]\w*$/.test(clean)) {
+          knownIdentifiers.add(clean);
         }
-      }
+      });
     }
 
-    // 2. Bracket and parenthesis balancing check
+    // Extract with ... as <var>
+    const withMatch = trimmed.match(/\bas\s+([a-zA-Z_]\w*)/);
+    if (withMatch && withMatch[1]) {
+      knownIdentifiers.add(withMatch[1].trim());
+    }
+
+    // State before scanning this line
+    const wasInsideBrackets = bracketStack.length > 0;
+
+    // 1. Bracket and parenthesis balancing check
     let inDoubleQuote = false;
     let inSingleQuote = false;
     let isEscaped = false;
@@ -188,7 +168,7 @@ export function fastCheckPythonCode(code: string): FastDiagnostic[] {
         continue;
       }
 
-      // Check comment
+      // Check comment outside of quotes
       if (char === '#' && !inDoubleQuote && !inSingleQuote) {
         break; // Ignore rest of line
       }
@@ -260,7 +240,7 @@ export function fastCheckPythonCode(code: string): FastDiagnostic[] {
       });
     }
 
-    // 3. Structural checks: missing colons on compound statements
+    // 2. Structural checks: missing colons on compound statements
     const compoundMatch = trimmed.match(/^(def\s+\w+\s*\(.*?\)|class\s+\w+(?:\(.*?\))?|if\s+.+|elif\s+.+|else|for\s+.+\s+in\s+.+|while\s+.+|try|except(?:\s+.*)?|finally|with\s+.+)\s*$/);
     if (compoundMatch && !trimmed.endsWith(':')) {
       diagnostics.push({
@@ -273,6 +253,88 @@ export function fastCheckPythonCode(code: string): FastDiagnostic[] {
         source: 'syntax',
         code: 'E999',
       });
+    }
+
+    // 3. Check for invalid consecutive bare words (e.g. "hello world", "foo bar baz")
+    // ONLY check if we are NOT inside brackets, not inside quotes, not a line continuation,
+    // and line does not contain operators, commas, or statement keywords
+    const isInsideBrackets = wasInsideBrackets || bracketStack.length > 0;
+    if (
+      !isInsideBrackets &&
+      !inDoubleQuote &&
+      !inSingleQuote &&
+      !trimmed.endsWith('\\') &&
+      !trimmed.includes(',') &&
+      !trimmed.includes('"') &&
+      !trimmed.includes("'") &&
+      !trimmed.includes('=') &&
+      !trimmed.includes('+') &&
+      !trimmed.includes('-') &&
+      !trimmed.includes('*') &&
+      !trimmed.includes('/') &&
+      !trimmed.includes('%') &&
+      !trimmed.includes('<') &&
+      !trimmed.includes('>') &&
+      !trimmed.includes(':') &&
+      !trimmed.includes(';') &&
+      !trimmed.includes('!') &&
+      !trimmed.startsWith('import ') &&
+      !trimmed.startsWith('from ') &&
+      !trimmed.startsWith('return ') &&
+      !trimmed.startsWith('raise ') &&
+      !trimmed.startsWith('del ') &&
+      !trimmed.startsWith('pass') &&
+      !trimmed.startsWith('break') &&
+      !trimmed.startsWith('continue') &&
+      !trimmed.startsWith('global ') &&
+      !trimmed.startsWith('nonlocal ') &&
+      !trimmed.startsWith('assert ') &&
+      !trimmed.startsWith('yield') &&
+      !trimmed.startsWith('def ') &&
+      !trimmed.startsWith('class ') &&
+      !trimmed.startsWith('if ') &&
+      !trimmed.startsWith('elif ') &&
+      !trimmed.startsWith('else') &&
+      !trimmed.startsWith('for ') &&
+      !trimmed.startsWith('while ') &&
+      !trimmed.startsWith('try') &&
+      !trimmed.startsWith('except') &&
+      !trimmed.startsWith('finally') &&
+      !trimmed.startsWith('with ') &&
+      !trimmed.startsWith('async ') &&
+      !trimmed.startsWith('await ')
+    ) {
+      const words = trimmed.split(/\s+/);
+      if (words.length > 1 && words.every((w) => /^[a-zA-Z_]\w*$/.test(w))) {
+        // Multi-word sequence of bare identifiers without operators or punctuation: definite SyntaxError
+        const col = rawLine.indexOf(words[1]) + 1;
+        diagnostics.push({
+          line: lineNum,
+          col: Math.max(1, col),
+          end_line: lineNum,
+          end_col: col + words[1].length,
+          severity: 'error',
+          message: `SyntaxError: invalid syntax '${words[1]}'`,
+          source: 'syntax',
+          code: 'E999',
+        });
+      } else if (words.length === 1 && /^[a-zA-Z_]\w*$/.test(words[0])) {
+        // Single bare identifier on a line (e.g. user typed "k" at the bottom of the script)
+        const word = words[0];
+        if (!PYTHON_KEYWORDS.has(word) && !knownIdentifiers.has(word)) {
+          const col = rawLine.indexOf(word) + 1;
+          diagnostics.push({
+            line: lineNum,
+            col: Math.max(1, col),
+            end_line: lineNum,
+            end_col: col + word.length,
+            severity: 'error',
+            message: `undefined name '${word}'`,
+            source: 'pyflakes',
+            code: 'F821',
+          });
+        }
+      }
     }
   }
 

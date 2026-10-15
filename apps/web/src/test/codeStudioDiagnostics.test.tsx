@@ -98,5 +98,34 @@ print("custom script")
       expect(kDiags[0].message).toContain("undefined name 'k'");
       expect(kDiags[0].code).toBe('F821');
     });
+
+    it('produces 0 false-positive syntax errors on multi-line feature lists and list comprehensions in generated code', () => {
+      const generatedPipelineCode = `
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+
+"""Auto-generated production pipeline"""
+
+# Separate input features and target column
+feature_cols = [
+    'sepal_length', 'sepal_width', 'petal_length', 'petal_width',
+]
+feature_cols = [c for c in feature_cols if c in df.columns and c != target_col]
+
+numeric_features = [
+    col for col in feature_cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])
+]
+
+X = df[feature_cols]
+y = df[target_col]
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+clf = RandomForestClassifier(random_state=42)
+clf.fit(X_train, y_train)
+`;
+      const diags = fastCheckPythonCode(generatedPipelineCode);
+      expect(diags).toEqual([]);
+    });
   });
 });
