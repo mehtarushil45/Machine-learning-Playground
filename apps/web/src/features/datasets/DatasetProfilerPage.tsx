@@ -1449,7 +1449,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                     )}
                   </div>
 
-                  {/* Student Learning Layer: Educational Guidance & Mistake Cards */}
+                  {/* Interactive Learning Layer: Educational Guidance & Mistake Cards */}
                   <PanelLearningCollapsible
                     title="Dataset Profiling & Feature Governance"
                     concept="Out-of-core streaming profiling checks distribution statistics, missingness patterns, and flags target leakage or identifier keys."

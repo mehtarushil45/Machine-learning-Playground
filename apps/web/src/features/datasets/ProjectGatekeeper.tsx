@@ -22,10 +22,12 @@ import {
   Clock,
   BookOpen,
   FileText,
+  Layers,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { parseCsvFile } from '../../services/csvService';
 import { validateCsvFile } from '../../utils/validation';
+import { computeClientProfile } from '../../services/profilerService';
 import { apiClient } from '../../services/apiClient';
 import type { Dataset, DatasetProfile } from '../../types/dataset';
 
@@ -260,66 +262,147 @@ function Step2CreateFile({
 }: {
   dataset: Dataset;
   onBack: () => void;
-  onConfirm: (n: string) => void;
+  onConfirm: (n: string, targetTab?: 'workspace' | 'code-studio') => void;
 }) {
   const [fileName, setFileName] = useState('experiment_1.py');
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = () => {
+  const handleSubmit = (targetTab: 'workspace' | 'code-studio' = 'code-studio') => {
     const e = validateFileName(fileName);
     if (e) {
       setError(e);
       return;
     }
-    onConfirm(sanitizeFileName(fileName));
+    onConfirm(sanitizeFileName(fileName), targetTab);
   };
 
+  const rowCount = dataset.rowCount || dataset.rows.length;
+  const colCount = dataset.columns.length;
+  const gov = dataset.profile?.governance;
+  const hasLeakage = Boolean(gov?.has_leakage && gov.leaked_features && gov.leaked_features.length > 0);
+  const constantCols = gov?.constant_columns || [];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Dataset Overview & Live DuckDB Health Banner */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '10px 14px',
+          flexDirection: 'column',
+          gap: 8,
+          padding: '12px 14px',
           borderRadius: 8,
-          background: 'rgba(16,185,129,0.08)',
-          border: '1px solid rgba(16,185,129,0.25)',
+          background: 'rgba(18, 14, 34, 0.75)',
+          border: '1px solid ' + BB.borderLight,
         }}
       >
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: BB.success,
-            boxShadow: '0 0 8px ' + BB.success,
-            flexShrink: 0,
-          }}
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: BB.success,
+                boxShadow: '0 0 8px ' + BB.success,
+                flexShrink: 0,
+              }}
+            />
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: BB.text,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={dataset.fileName}
+            >
+              {dataset.fileName}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <span
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: 'rgba(138, 121, 202, 0.2)',
+                color: BB.primaryLight,
+                fontWeight: 600,
+              }}
+            >
+              {dataset.profile?.engine === 'duckdb' ? '⚡ DuckDB Profiler' : '⚡ Streaming Engine'}
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: 'rgba(201, 162, 75, 0.15)',
+                color: BB.gold,
+                fontWeight: 600,
+              }}
+            >
+              {rowCount} rows • {colCount} cols
+            </span>
+          </div>
+        </div>
+
+        {/* Live Data Health & Leakage Summary Banner */}
+        {hasLeakage ? (
           <div
             style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: BB.text,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11,
+              color: '#F87171',
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              padding: '5px 8px',
+              borderRadius: 5,
             }}
           >
-            {dataset.fileName}
+            <AlertCircle style={{ width: 13, height: 13, flexShrink: 0 }} />
+            <span>
+              Target leakage detected in &quot;{gov?.leaked_features[0].feature}&quot; (r = {gov?.leaked_features[0].correlation.toFixed(2)})
+            </span>
           </div>
-          <div style={{ fontSize: 11, color: BB.success }}>✓ Dataset ready for pipeline initialization</div>
-        </div>
+        ) : constantCols.length > 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              fontSize: 11,
+              color: '#F59E0B',
+              background: 'rgba(245, 158, 11, 0.12)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              padding: '5px 8px',
+              borderRadius: 5,
+            }}
+          >
+            <AlertCircle style={{ width: 13, height: 13, flexShrink: 0 }} />
+            <span>
+              Constant column detected: {constantCols.join(', ')} (zero variance)
+            </span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: BB.success }}>
+            <span style={{ fontSize: 12 }}>✓</span>
+            <span>Dataset schema introspected • Zero critical leakage anomalies detected</span>
+          </div>
+        )}
       </div>
 
       <div>
-        <h2 style={{ fontSize: 17, fontWeight: 700, color: BB.text, margin: '0 0 4px' }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: BB.text, margin: '0 0 4px' }}>
           Name Experiment File
         </h2>
         <p style={{ fontSize: 12, color: BB.muted, margin: 0 }}>
-          Specify your Python pipeline file to store model configurations and training scripts.
+          Specify your Python pipeline file to store model configurations, feature transforms, and training code.
         </p>
       </div>
 
@@ -343,7 +426,7 @@ function Step2CreateFile({
               setError(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') handleSubmit();
+              if (e.key === 'Enter') handleSubmit('code-studio');
               if (e.key === 'Escape') onBack();
             }}
             placeholder="experiment_1.py"
@@ -364,48 +447,76 @@ function Step2CreateFile({
         {error && <p style={{ fontSize: 11, color: BB.error, margin: '4px 0 0' }}>{error}</p>}
       </div>
 
-      <div style={{ display: 'flex', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => handleSubmit('code-studio')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              padding: '10px 14px',
+              borderRadius: 6,
+              border: '1px solid ' + BB.primaryLight,
+              background: 'linear-gradient(135deg,rgba(138,121,202,0.25),rgba(75,59,124,0.45))',
+              color: BB.text,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />
+            Create File & Enter Studio
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSubmit('workspace')}
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7,
+              padding: '10px 14px',
+              borderRadius: 6,
+              border: '1px solid ' + BB.borderLight,
+              background: 'rgba(24, 19, 46, 0.7)',
+              color: BB.text,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <Layers style={{ width: 14, height: 14, color: BB.primaryLight }} />
+            Launch Visual Pipeline
+          </button>
+        </div>
+
         <button
           type="button"
           onClick={onBack}
           style={{
-            flexShrink: 0,
+            alignSelf: 'center',
             display: 'flex',
             alignItems: 'center',
-            gap: 6,
-            padding: '9px 14px',
-            borderRadius: 6,
-            border: '1px solid ' + BB.border,
+            gap: 5,
+            padding: '4px 8px',
+            borderRadius: 5,
+            border: 'none',
             background: 'transparent',
             color: BB.muted,
-            fontSize: 12,
-            fontWeight: 600,
+            fontSize: 11.5,
+            fontWeight: 500,
             cursor: 'pointer',
           }}
         >
-          <ArrowLeft style={{ width: 13, height: 13 }} /> Change Dataset
-        </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            padding: '9px 18px',
-            borderRadius: 6,
-            border: '1px solid ' + BB.primaryLight,
-            background: 'linear-gradient(135deg,rgba(138,121,202,0.25),rgba(75,59,124,0.4))',
-            color: BB.text,
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />
-          Create File & Enter Studio
+          <ArrowLeft style={{ width: 12, height: 12 }} /> Choose a different dataset
         </button>
       </div>
     </div>
@@ -413,7 +524,11 @@ function Step2CreateFile({
 }
 
 /* ── MAIN GATEKEEPER COMPONENT ──────────────────────────────────────── */
-export function ProjectGatekeeper() {
+export function ProjectGatekeeper({
+  onNavigate,
+}: {
+  onNavigate?: (tab: 'workspace' | 'code-studio' | 'training-results' | 'deployments' | string) => void;
+} = {}) {
   const { initializeProject, staleDatasetWarning, clearStaleDatasetWarning, isValidatingDataset } = useProject();
   const [pendingDataset, setPendingDataset] = useState<Dataset | null>(null);
 
@@ -461,15 +576,19 @@ export function ProjectGatekeeper() {
       setIsProcessing(true);
       setProgress(25);
       const dataset = await parseCsvFile(file);
-      setProgress(60);
+      setProgress(50);
 
       let datasetId: string | null = null;
+      let serverProfile: DatasetProfile | null = null;
       try {
         const fd = new FormData();
         fd.append('file', file);
         const r = await apiClient.upload<{ dataset_id: string }>('/datasets/upload', fd);
         datasetId = r.dataset_id;
-        setProgress(90);
+        setProgress(85);
+        if (datasetId) {
+          serverProfile = await apiClient.get<DatasetProfile>(`/datasets/${datasetId}/profile`).catch(() => null);
+        }
       } catch {
         // Attempt quick auto-auth retry
         try {
@@ -490,7 +609,10 @@ export function ProjectGatekeeper() {
               fd2.append('file', file);
               const r2 = await apiClient.upload<{ dataset_id: string }>('/datasets/upload', fd2);
               datasetId = r2.dataset_id;
-              setProgress(90);
+              setProgress(85);
+              if (datasetId) {
+                serverProfile = await apiClient.get<DatasetProfile>(`/datasets/${datasetId}/profile`).catch(() => null);
+              }
             }
           }
         } catch {
@@ -514,11 +636,15 @@ export function ProjectGatekeeper() {
         setPreviousUploads(updated.slice(0, MAX_PREVIOUS_UPLOADS));
       }
 
+      const clientProfile = computeClientProfile(dataset);
+      const resolvedProfile = serverProfile || clientProfile;
+
       setProgress(100);
       setPendingDataset({
         ...dataset,
         datasetId: datasetId || 'local-' + Date.now(),
-        rowCount: dataset.rows.length,
+        rowCount: resolvedProfile.row_count || dataset.rows.length,
+        profile: resolvedProfile,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not parse the CSV file.');
@@ -543,6 +669,7 @@ export function ProjectGatekeeper() {
           rows: [],
           columns: cols,
           rowCount: profile?.row_count || 100,
+          profile: profile || undefined,
         });
       } catch (err: any) {
         setError(err?.message || 'Could not load dataset from server.');
@@ -1033,7 +1160,7 @@ export function ProjectGatekeeper() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
               <p style={{ fontSize: 12, color: BB.textSecondary, margin: 0, lineHeight: 1.45 }}>
-                New to machine learning? Open our comprehensive student guide to learn how each page works from data profiling to code writing, training, and production deployment.
+                New to ML Playground? Open our comprehensive interactive user guide to learn how each page works from data profiling to code writing, training, and production deployment.
               </p>
 
               <div>
@@ -1092,7 +1219,7 @@ export function ProjectGatekeeper() {
           <div
             style={{
               width: '100%',
-              maxWidth: 440,
+              maxWidth: 480,
               background: 'rgba(18, 14, 34, 0.96)',
               backdropFilter: 'blur(24px)',
               border: '1px solid ' + BB.borderLight,
@@ -1104,14 +1231,18 @@ export function ProjectGatekeeper() {
             <Step2CreateFile
               dataset={pendingDataset}
               onBack={() => setPendingDataset(null)}
-              onConfirm={(name) => {
+              onConfirm={(name, targetTab = 'code-studio') => {
                 initializeProject(pendingDataset, name);
+                if (onNavigate) {
+                  onNavigate(targetTab);
+                } else if (typeof window !== 'undefined') {
+                  window.location.hash = targetTab === 'code-studio' ? '#code-studio' : '';
+                }
               }}
             />
           </div>
         </div>
-      )
-      }
+      )}
     </div >
   );
 }

@@ -1,4 +1,11 @@
-import type { Dataset, DatasetProfile, ColumnProfile } from '../types/dataset'
+import type {
+  Dataset,
+  DatasetProfile,
+  ColumnProfile,
+  DataGovernanceReport,
+  DataLeakageFinding,
+  MulticollinearityFinding,
+} from '../types/dataset'
 
 import { apiClient } from './apiClient'
 
@@ -151,6 +158,104 @@ export function computeClientProfile(dataset: Dataset): DatasetProfile {
     }
   })
 
+  // 4. Governance & Data Leakage Guardrails (Client-side DuckDB-compatible fallback)
+  const constantColumns: string[] = columnsProfile.filter((c) => c.unique <= 1).map((c) => c.name)
+  const identifierColumns: string[] = columnsProfile.filter((c) => c.type === 'identifier').map((c) => c.name)
+  const imputationStrategies: Record<string, string> = {}
+  columnsProfile.forEach((c) => {
+    if (c.missing > 0) {
+      if (c.missing_percentage > 60) {
+        imputationStrategies[c.name] = 'drop_feature'
+      } else if (c.type === 'numeric') {
+        imputationStrategies[c.name] = 'median'
+      } else {
+        imputationStrategies[c.name] = 'most_frequent'
+      }
+    }
+  })
+
+  const targetCandidates = new Set([
+    'target', 'label', 'class', 'churn', 'y', 'outcome', 'survived',
+    'is_churn', 'default', 'price', 'status', 'fraud', 'churn_risk'
+  ])
+  const targetCol = dataset.columns.find((c) => targetCandidates.has(c.toLowerCase())) ||
+    (dataset.columns.length > 1 ? dataset.columns[dataset.columns.length - 1] : undefined)
+
+  const leakedFeatures: DataLeakageFinding[] = []
+  const multicollinearPairs: MulticollinearityFinding[] = []
+
+  const numericCols = columnsProfile.filter((c) => c.type === 'numeric' && c.unique > 1)
+  const numericNames = numericCols.map((c) => c.name)
+
+  const numericArrays: Record<string, number[]> = {}
+  for (const name of numericNames) {
+    numericArrays[name] = dataset.rows.map((r) => {
+      const v = Number(r[name])
+      return isNaN(v) ? 0 : v
+    })
+  }
+
+  function computeCorrelation(x: number[], y: number[]): number {
+    const n = Math.min(x.length, y.length)
+    if (n < 2) return 0
+    let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, sumXY = 0
+    for (let i = 0; i < n; i++) {
+      sumX += x[i]
+      sumY += y[i]
+      sumX2 += x[i] * x[i]
+      sumY2 += y[i] * y[i]
+      sumXY += x[i] * y[i]
+    }
+    const numerator = n * sumXY - sumX * sumY
+    const denom = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY))
+    if (!denom || isNaN(denom)) return 0
+    return Math.abs(numerator / denom)
+  }
+
+  if (targetCol && numericNames.includes(targetCol)) {
+    const targetArr = numericArrays[targetCol]
+    for (const feat of numericNames) {
+      if (feat !== targetCol) {
+        const r = computeCorrelation(numericArrays[feat], targetArr)
+        if (r >= 0.90) {
+          leakedFeatures.push({
+            feature: feat,
+            target: targetCol,
+            correlation: Number(r.toFixed(4)),
+            severity: r >= 0.98 ? 'critical' : 'high',
+            recommendation: `High correlation (${(r * 100).toFixed(1)}%) with target '${targetCol}'. Risk of train/test contamination. Recommend dropping before model training.`,
+          })
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < numericNames.length; i++) {
+    for (let j = i + 1; j < numericNames.length; j++) {
+      const fA = numericNames[i]
+      const fB = numericNames[j]
+      if (fA === targetCol || fB === targetCol) continue
+      const r = computeCorrelation(numericArrays[fA], numericArrays[fB])
+      if (r >= 0.95) {
+        multicollinearPairs.push({
+          feature_a: fA,
+          feature_b: fB,
+          correlation: Number(r.toFixed(4)),
+          recommendation: `Redundant Collinear Pair: '${fA}' and '${fB}' have ${(r * 100).toFixed(1)}% collinearity. Keep one to prevent weight instability.`,
+        })
+      }
+    }
+  }
+
+  const governance: DataGovernanceReport = {
+    has_leakage: leakedFeatures.length > 0,
+    leaked_features: leakedFeatures,
+    multicollinear_pairs: multicollinearPairs,
+    constant_columns: constantColumns,
+    identifier_columns: identifierColumns,
+    imputation_strategies: imputationStrategies,
+  }
+
   // Estimate memory usage
   const approxBytes = dataset.rows.reduce(
     (acc, row) => acc + JSON.stringify(row).length,
@@ -162,12 +267,17 @@ export function computeClientProfile(dataset: Dataset): DatasetProfile {
     filename: dataset.fileName,
     row_count: rowCount,
     column_count: colCount,
+    file_format: dataset.fileFormat || 'csv',
+    engine: 'client-stream',
+    version: dataset.version || 'v1',
+    content_hash: dataset.contentHash || null,
     memory_usage_bytes: approxBytes,
     duplicate_rows: duplicateRows,
     duplicate_columns: duplicateColumns,
     empty_columns: emptyColumns,
     total_missing_values: totalMissing,
     columns: columnsProfile,
+    governance,
   }
 }
 

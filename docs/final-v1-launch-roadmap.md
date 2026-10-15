@@ -259,9 +259,9 @@ User types in Monaco Editor
   - **Launch Code Studio**: Open pre-generated Python pipeline script directly in Monaco.
 
 #### Checklist
-- [ ] Remove all exam/classroom modal code.
-- [ ] Wire DuckDB profiler to display live data health metrics.
-- [ ] Seed active dataset context and route cleanly to chosen workbench.
+- [x] Remove all exam/classroom modal code.
+- [x] Wire DuckDB profiler to display live data health metrics.
+- [x] Seed active dataset context and route cleanly to chosen workbench.
 
 ---
 
@@ -438,9 +438,11 @@ User types in Monaco Editor
   - Resolved Gemini API integration with Google REST API using `gemini-flash-lite-latest` and multi-model fallback.
   - Verified with 6/6 Python backend tests and 18/18 React Vitest tests.
 
-* **Day 11: Project Gatekeeper & Ingestion Polish**
-  - Clean up dataset onboarding: instant DuckDB profiling, health checks, target leakage warnings.
-  - Polish 1-click project initialization.
+* **Day 11: Project Gatekeeper & Ingestion Polish** [COMPLETED & VERIFIED]
+  - Cleaned up dataset onboarding: instant DuckDB & streaming profiling, live data health checks, target leakage & multicollinearity warnings.
+  - Replaced student performance exam benchmarks with enterprise Customer Churn (Telco) benchmark.
+  - Implemented dual immediate launch paths: "Create File & Enter Studio" (Monaco IDE) and "Launch Visual Pipeline" (Profiler & Recommendations).
+  - Verified with 9/9 backend DuckDB profiler tests and 7/7 Vitest React tests.
 
 * **Day 12: Deployment Studio & Bulk Batch CSV Scoring**
   - Verify local model serving endpoints (`POST /api/v1/deployments/{id}/predict`).

@@ -85,7 +85,13 @@ describe('ProjectGatekeeper Component', () => {
     });
 
     expect(screen.getByPlaceholderText('experiment_1.py')).toBeInTheDocument();
+    // Dual immediate launch paths: Code Studio & Visual Pipeline
     expect(screen.getByRole('button', { name: /Create File & Enter Studio/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Launch Visual Pipeline/i })).toBeInTheDocument();
+
+    // Verify live DuckDB / streaming profiling telemetry in Step 2
+    expect(screen.getByText(/⚡/)).toBeInTheDocument();
+    expect(screen.getByText(/rows • \d+ cols/i)).toBeInTheDocument();
   });
 
   it('renders user guide launcher and opens #guide in a new window', () => {
@@ -96,7 +102,7 @@ describe('ProjectGatekeeper Component', () => {
     renderGatekeeper();
 
     expect(screen.getByRole('heading', { name: /User Guide/i })).toBeInTheDocument();
-    expect(screen.getByText(/New to machine learning\? Open our comprehensive student guide/i)).toBeInTheDocument();
+    expect(screen.getByText(/New to (?:machine learning|ML Playground)\? Open our comprehensive (?:student|interactive user) guide/i)).toBeInTheDocument();
 
     const guideBtn = screen.getByTestId('gatekeeper-open-guide-btn');
     expect(guideBtn).toBeInTheDocument();
@@ -106,6 +112,26 @@ describe('ProjectGatekeeper Component', () => {
     expect(mockOpen).toHaveBeenCalledWith(expect.stringContaining('#guide'), '_blank');
 
     window.open = originalOpen;
+  });
+
+  it('supports dual immediate launch paths with onNavigate routing', async () => {
+    const mockNavigate = vi.fn();
+    render(
+      <ProjectProvider>
+        <ProjectGatekeeper onNavigate={mockNavigate} />
+      </ProjectProvider>
+    );
+
+    const tryButtons = screen.getAllByRole('button', { name: /Try/i });
+    fireEvent.click(tryButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Launch Visual Pipeline/i })).toBeInTheDocument();
+    });
+
+    // Clicking Launch Visual Pipeline routes to workspace
+    fireEvent.click(screen.getByRole('button', { name: /Launch Visual Pipeline/i }));
+    expect(mockNavigate).toHaveBeenCalledWith('workspace');
   });
 
   it('strictly limits previous uploads to a maximum of 5 items and prevents vertical scroll', () => {

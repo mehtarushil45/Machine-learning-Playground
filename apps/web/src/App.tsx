@@ -810,7 +810,7 @@ function AppContent() {
               </ErrorBoundary>
             </div>
           ) : !isProjectInitialized ? (
-            <ProjectGatekeeper />
+            <ProjectGatekeeper onNavigate={handleNavigate} />
           ) : (
             <>
               <div style={{ display: activeTab === 'workspace' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
