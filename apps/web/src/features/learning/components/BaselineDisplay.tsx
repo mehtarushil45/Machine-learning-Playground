@@ -1,3 +1,4 @@
+import { AlertCircle, BarChart2 } from 'lucide-react'
 import { calculateMajorityBaseline, calculateWilsonInterval } from '../rules/registry'
 import { useLearning } from '../context/LearningContext'
 
@@ -72,48 +73,50 @@ export function BaselineDisplay({
   return (
     <div
       data-testid="baseline-metric-display"
-      className={`p-3 rounded-lg border text-xs bg-black/20 ${
+      className={`p-3 rounded-lg border text-xs bg-[#111622] ${
         barelyBeatsBaseline && !isRegression
-          ? 'border-amber-500/30 bg-amber-950/20 text-amber-200'
-          : 'border-white/10 text-foreground/80'
+          ? 'border-slate-600 bg-slate-900/95 text-slate-200'
+          : 'border-slate-800 text-slate-300'
       } ${className}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-muted-foreground">Baseline Reference:</span>
-          <span className="font-mono font-medium text-foreground">
+          <span className="font-semibold text-slate-400">Baseline Reference:</span>
+          <span className="font-mono font-medium text-slate-200">
             {baselineInfo.name}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">{metricName} Score:</span>
-          <span className="font-mono font-bold text-foreground">
+          <span className="text-slate-400">{metricName} Score:</span>
+          <span className="font-mono font-bold text-slate-100">
             {isRegression ? effectiveScore.toFixed(4) : `${(effectiveScore * 100).toFixed(1)}%`}
           </span>
         </div>
       </div>
 
-      <p className="mt-1 text-[11px] text-muted-foreground leading-tight">
+      <p className="mt-1 text-[11px] text-slate-400 leading-tight">
         {baselineInfo.explanation}
       </p>
 
       {/* Wilson Confidence Interval for small test set (B5) */}
       {wilsonInterval && (
-        <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[11px]">
-          <span className="text-sky-300">
-            📊 95% Wilson Score CI (N={effectiveSamples}):
+        <div className="mt-2 pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
+          <span className="text-slate-400 flex items-center gap-1.5">
+            <BarChart2 className="w-3.5 h-3.5 text-slate-400" />
+            <span>95% Wilson Score CI (N={effectiveSamples}):</span>
           </span>
-          <span className="font-mono text-sky-200 font-semibold">
+          <span className="font-mono text-slate-200 font-semibold">
             [{(wilsonInterval[0] * 100).toFixed(1)}%, {(wilsonInterval[1] * 100).toFixed(1)}%]
           </span>
         </div>
       )}
 
       {barelyBeatsBaseline && !isRegression && (
-        <p className="mt-1.5 text-[11px] font-medium text-amber-300 bg-amber-500/10 p-1.5 rounded">
-          ⚠️ Warning: Model accuracy barely beats the majority-class baseline. Evaluate using Precision, Recall, or Balanced Accuracy.
-        </p>
+        <div className="mt-2 text-[11px] font-medium text-slate-200 bg-slate-900 border border-slate-700/80 p-2 rounded flex items-center gap-2">
+          <AlertCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <span>Warning: Model accuracy barely beats the majority-class baseline. Evaluate using Precision, Recall, or Balanced Accuracy.</span>
+        </div>
       )}
     </div>
   )

@@ -1,3 +1,4 @@
+import { Compass } from 'lucide-react'
 import { useLearning } from '../context/LearningContext'
 
 export function LearningModeToggle() {
@@ -10,19 +11,19 @@ export function LearningModeToggle() {
       onClick={toggleLearningMode}
       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
         learningMode
-          ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
-          : 'bg-white/5 border-white/10 text-muted-foreground hover:text-foreground'
+          ? 'bg-slate-800/95 border-slate-600 text-slate-100 shadow-sm'
+          : 'bg-white/5 border-white/10 text-slate-400 hover:text-slate-200 hover:border-slate-700'
       }`}
-      title="Toggle Learning Mode: adds educational guidance, 'What is this?' panels, and metric tooltips"
+      title="Toggle Page Guide: Shows step-by-step guidance on what to do on each page"
       aria-pressed={learningMode}
     >
-      <span className="text-sm" aria-hidden="true">
-        {learningMode ? '🎓' : '⚙️'}
-      </span>
-      <span>Learning Mode:</span>
+      <Compass className="w-3.5 h-3.5 text-slate-300" aria-hidden="true" />
+      <span>Page Guide:</span>
       <span
-        className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider ${
-          learningMode ? 'bg-amber-500/25 text-amber-200' : 'bg-white/10 text-muted-foreground'
+        className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+          learningMode
+            ? 'bg-white/15 text-white border border-white/20'
+            : 'bg-white/5 text-slate-400'
         }`}
       >
         {learningMode ? 'ON' : 'OFF'}

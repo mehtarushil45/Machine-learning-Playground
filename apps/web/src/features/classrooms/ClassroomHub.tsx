@@ -1818,11 +1818,26 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
           {/* Student Learning Layer: Educational Guidance (when aids allowed) */}
           {activeExam && (activeExam.learning_aids_enabled ?? true) && (
             <PanelLearningCollapsible
-              title="Practical Lab Exam Environment"
-              concept="In lab exams, you demonstrate machine learning mastery by structuring clean pipelines, training estimators, and deploying to an isolated serving slot."
-              details="Heads-Up mistake cards and diagnostic hints are active to assist your learning journey. Follow rubric guidelines for minimum accuracy and latency."
-              practicalTip="Ensure all data transformers fit on train splits only, and verify deployment responses using sample record test queries."
-              citation="Lab Exam Curriculum & scikit-learn standard evaluation"
+              title="Lab Exam & Practical Assignment"
+              steps={[
+                {
+                  title: '1. Select & Review Rubric',
+                  action: 'Read the assignment requirements, target metrics, and latency constraints.',
+                },
+                {
+                  title: '2. Code Your Pipeline',
+                  action: 'Write clean preprocessing and estimator training code in the editor without data leakage.',
+                },
+                {
+                  title: '3. Test In Terminal',
+                  action: 'Run your Python script to verify model convergence and check diagnostic warnings.',
+                },
+                {
+                  title: '4. Submit For Grading',
+                  action: 'Click Submit Solution to trigger automated evaluation against teacher test sets.',
+                },
+              ]}
+              quickTip="Fit all scalers and encoders on training data only to avoid data leakage penalties."
             />
           )}
 

@@ -2610,14 +2610,29 @@ export function ViewAsCodeStudio({
             }}
           >
             {/* Student Learning Layer: Educational Guidance & Preprocessing Mistake Cards */}
-            <PanelLearningCollapsible
-              title="Code Studio & Pipeline Construction"
-              concept="Scikit-learn Pipelines encapsulate preprocessing transformers and estimators into a single object, guaranteeing strict isolation between train and test splits."
-              details="Rule B7: Transformers (e.g. StandardScaler, SimpleImputer) must NEVER be fit on the entire dataset before train_test_split. Fitting on all data leaks test distributions into your training parameters."
-              practicalTip="Always wrap transformers in a Pipeline or ColumnTransformer and fit exclusively on X_train."
-              citation="scikit-learn documentation: Common pitfalls and recommended practices"
-            />
-            <div style={{ padding: '0 12px' }}>
+            <div style={{ padding: '8px 12px 0 12px' }}>
+              <PanelLearningCollapsible
+                title="Code Studio Guide"
+                steps={[
+                  {
+                    title: 'Review Python Code',
+                    action: 'Your complete machine learning pipeline is available in the editor with preprocessing and model training.',
+                  },
+                  {
+                    title: 'Check Diagnostics',
+                    action: 'Look at the status bar at the bottom — any syntax or naming issues appear in real time.',
+                  },
+                  {
+                    title: 'Run Experiment',
+                    action: 'Click the Run Experiment button (or press Ctrl + Enter) to train the model on your dataset.',
+                  },
+                  {
+                    title: 'Inspect Terminal & Results',
+                    action: 'Watch live logs in the bottom terminal, then click Training Results at the top to evaluate metrics.',
+                  },
+                ]}
+                quickTip="You can modify parameters like n_estimators directly in code; syntax is verified automatically as you type."
+              />
               <HeadsUpCardsContainer />
             </div>
 

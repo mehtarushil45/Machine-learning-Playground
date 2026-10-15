@@ -857,14 +857,31 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
         ) : (
           <>
             {/* Student Learning Layer: Diagnostic Guidance & Heads-Up Mistake Cards */}
-            <PanelLearningCollapsible
-              title="Model Evaluation & Diagnostic Benchmarking"
-              concept="Evaluating test metrics requires comparison against simple baselines (majority class or mean predictor) and checking for overfitting gaps."
-              details="Rule B4 & B6: A model with 95% accuracy on a 95/5 imbalanced dataset has learned nothing beyond the majority class. If the train-to-test performance gap is large, the model has memorized noise (overfitting)."
-              practicalTip="Always compare accuracy to the majority-class baseline and examine ROC-AUC / PR-AUC for imbalanced targets."
-              citation="scikit-learn documentation: Model evaluation and scoring metrics"
-            />
-            <HeadsUpCardsContainer />
+            <div style={{ width: '100%', flexShrink: 0 }}>
+              <PanelLearningCollapsible
+                title="Training Results & Evaluation Guide"
+                steps={[
+                  {
+                    title: 'Compare Models',
+                    action: 'Check the experiment leaderboard table to see which algorithm achieved the best test score.',
+                  },
+                  {
+                    title: 'Compare Against Baseline',
+                    action: 'Check the baseline reference card to ensure your model beats a trivial majority-class or average guess.',
+                  },
+                  {
+                    title: 'Inspect Confusion Matrix',
+                    action: 'Toggle the confusion matrix to see exactly which categories the model confused or predicted accurately.',
+                  },
+                  {
+                    title: 'Promote Your Champion',
+                    action: 'Click Promote to Champion on your top run to stage it for deployment and live serving.',
+                  },
+                ]}
+                quickTip="Watch out for overfitting: if training accuracy is 99% but test score is much lower, simplify your model."
+              />
+              <HeadsUpCardsContainer />
+            </div>
 
         {/* Live Training In Progress Banner */}
         {isRunning && (
@@ -1196,7 +1213,7 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                   background: BB.card,
                   border: `1px solid ${BB.border}`,
                   borderRadius: 16,
-                  overflow: 'hidden',
+                  overflow: 'visible',
                   boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
                 }}
               >
@@ -1204,6 +1221,8 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                   style={{
                     padding: '14px 20px',
                     borderBottom: `1px solid ${BB.border}`,
+                    borderTopLeftRadius: 15,
+                    borderTopRightRadius: 15,
                     background: BB.elevated,
                     display: 'flex',
                     alignItems: 'center',
@@ -1246,13 +1265,17 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                     gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
                     gap: 1,
                     background: BB.border,
+                    borderBottomLeftRadius: 15,
+                    borderBottomRightRadius: 15,
+                    overflow: 'visible',
                   }}
                 >
-                  {Object.entries(metrics).map(([k, v]) => {
+                  {Object.entries(metrics).map(([k, v], idx, arr) => {
                     const isInvalid = typeof v === 'number' && !Number.isFinite(v);
                     const lk = k.toLowerCase();
                     const isErr = REGRESSION_ERROR_METRICS.has(lk);
                     const isR2 = R2_METRICS.has(lk);
+                    const align = idx === 0 ? 'left' : idx === arr.length - 1 ? 'right' : 'center';
 
                     return (
                       <div
@@ -1265,6 +1288,7 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                           justifyContent: 'space-between',
                           gap: 12,
                           transition: 'all 150ms ease',
+                          position: 'relative',
                         }}
                         onMouseEnter={(e) => {
                           e.currentTarget.style.background = BB.cardHover;
@@ -1284,7 +1308,7 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
                               marginBottom: 8,
                             }}
                           >
-                            <MetricLearningTooltip metricName={k}>
+                            <MetricLearningTooltip metricName={k} align={align}>
                               <span>{fmtKey(k)}</span>
                             </MetricLearningTooltip>
                           </div>

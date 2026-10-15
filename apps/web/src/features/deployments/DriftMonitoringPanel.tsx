@@ -229,11 +229,26 @@ export const DriftMonitoringPanel: React.FC<DriftMonitoringPanelProps> = ({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Student Learning Layer: Educational Guidance */}
       <PanelLearningCollapsible
-        title="Production Telemetry & Data Drift Monitoring"
-        concept="Production data distributions inevitably diverge from training data over time due to seasonal, behavioral, or systemic shifts."
-        details="Kolmogorov-Smirnov (KS) tests and Population Stability Index (PSI) quantify whether feature distributions in inference requests match the training baseline."
-        practicalTip="When high-importance features exhibit statistically significant drift (PSI > 0.25), consider collecting fresh labels and retraining."
-        citation="scikit-learn documentation: Model evaluation and covariate shift"
+        title="Data Drift & Health Guide"
+        steps={[
+          {
+            title: 'Inspect Feature Stability',
+            action: 'Look at the PSI score and drift badges below to see if live inputs match training distributions.',
+          },
+          {
+            title: 'Examine Shifted Features',
+            action: 'Click any feature card to view side-by-side histogram comparisons of baseline vs current traffic.',
+          },
+          {
+            title: 'Run Simulation Tests',
+            action: 'Use the Simulate Influx button to test how the drift detection pipeline responds to sudden spikes.',
+          },
+          {
+            title: 'Decide on Model Retraining',
+            action: 'If high-importance features show significant shift (PSI > 0.25), collect fresh data and retrain.',
+          },
+        ]}
+        quickTip="Data drift naturally occurs when user habits or seasons change. Catching drift early protects prediction quality."
       />
 
       {/* ── D1: Prominent Simulation Mode Banner (When Active) ── */}

@@ -526,72 +526,61 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
       }}
     >
       {/* ── Header ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-        <div>
-          <h1
-            style={{
-              fontSize: 22,
-              fontWeight: 800,
-              color: '#F8FAFC',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              margin: 0,
-            }}
-          >
-            {hubTab === 'endpoints' ? (
-              <>
-                <Rocket size={22} style={{ color: '#00F5A0' }} />
-                Model Deployments & Lifecycle
-              </>
-            ) : (
-              <>
-                <Layers size={22} style={{ color: '#00D4FF' }} />
-                Enterprise Model Registry & Governance
-              </>
-            )}
-          </h1>
-          <p style={{ fontSize: 13, color: '#64748B', margin: '4px 0 0 0' }}>
-            {hubTab === 'endpoints'
-              ? 'Production-grade local endpoints with persistent inference audits, schema validation, and zero-downtime redeployment.'
-              : 'End-to-end lineage tracing from Dataset → Training Job → Model Weights → Active Serving Endpoints with Champion/Challenger promotion.'}
-          </p>
-        </div>
-
-        {/* Student Learning Layer: Educational Guidance */}
-        <div style={{ width: '100%', marginTop: 14 }}>
-          <PanelLearningCollapsible
-            title="Model Serving & Production Endpoints"
-            concept="Deploying a model turns a serialized pipeline artifact into an HTTP microservice exposing an inference API."
-            details="Serving systems validate JSON payloads against the feature schema, enforce input bounds, and log latency telemetry (P50/P95/P99) and data drift."
-            practicalTip="Always test endpoint predictions with representative edge-case inputs before sending live traffic."
-            citation="scikit-learn documentation: Model persistence and FastAPI deployment patterns"
-          />
-        </div>
-
-        <button
-          onClick={hubTab === 'endpoints' ? fetchDeployments : fetchRegistry}
-          disabled={hubTab === 'endpoints' ? loading : registryLoading}
+      <div style={{ marginBottom: 16 }}>
+        <h1
           style={{
-            background: '#0A1424',
-            border: '1px solid #16263F',
-            borderRadius: 8,
-            padding: '8px 14px',
-            color: '#94A3B8',
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: (hubTab === 'endpoints' ? loading : registryLoading) ? 'wait' : 'pointer',
+            fontSize: 22,
+            fontWeight: 800,
+            color: '#F8FAFC',
             display: 'flex',
             alignItems: 'center',
-            gap: 7,
+            gap: 10,
+            margin: 0,
           }}
         >
-          <RefreshCw
-            size={14}
-            className={(hubTab === 'endpoints' ? loading : registryLoading) ? 'animate-spin' : ''}
-          />{' '}
-          {hubTab === 'endpoints' ? 'Refresh Endpoints' : 'Refresh Registry'}
-        </button>
+          {hubTab === 'endpoints' ? (
+            <>
+              <Rocket size={22} style={{ color: '#00F5A0' }} />
+              Model Deployments & Lifecycle
+            </>
+          ) : (
+            <>
+              <Layers size={22} style={{ color: '#00D4FF' }} />
+              Enterprise Model Registry & Governance
+            </>
+          )}
+        </h1>
+        <p style={{ fontSize: 13, color: '#64748B', margin: '4px 0 0 0' }}>
+          {hubTab === 'endpoints'
+            ? 'Production-grade local endpoints with persistent inference audits, schema validation, and zero-downtime redeployment.'
+            : 'End-to-end lineage tracing from Dataset → Training Job → Model Weights → Active Serving Endpoints with Champion/Challenger promotion.'}
+        </p>
+      </div>
+
+      {/* Student Learning Layer: Educational Guidance (Full width below header) */}
+      <div style={{ width: '100%', marginBottom: 16 }}>
+        <PanelLearningCollapsible
+          title="Deployments & Serving Guide"
+          steps={[
+            {
+              title: 'Select an Endpoint',
+              action: 'Choose an active deployed model from the endpoints list to view its API status and details.',
+            },
+            {
+              title: 'Test Live Predictions',
+              action: 'Fill in sample numbers or text into the test form and click Send Prediction to see real-time output.',
+            },
+            {
+              title: 'Batch CSV Scoring',
+              action: 'Switch to the Batch Scoring tab to upload an unlabeled CSV and get predictions for thousands of rows.',
+            },
+            {
+              title: 'Monitor Drift & Telemetry',
+              action: 'Check response latency and data drift alerts to confirm your production model stays reliable over time.',
+            },
+          ]}
+          quickTip="Click the Copy Code button to get authenticated Python, cURL, or TypeScript snippets for your app."
+        />
       </div>
 
       {/* ── Sub-navigation Tabs: Active Endpoints vs Model Registry ── */}
@@ -881,27 +870,56 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
           flexWrap: 'wrap',
         }}
       >
-        <div style={{ position: 'relative', width: 340 }}>
-          <Search
-            size={15}
-            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#475569' }}
-          />
-          <input
-            type="text"
-            placeholder="Search deployments, algorithms, targets…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', width: 340 }}>
+            <Search
+              size={15}
+              style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#475569' }}
+            />
+            <input
+              type="text"
+              placeholder="Search deployments, algorithms, targets…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '9px 12px 9px 36px',
+                borderRadius: 8,
+                background: '#071220',
+                border: '1px solid #172840',
+                color: '#F1F5F9',
+                fontSize: 13,
+                outline: 'none',
+              }}
+            />
+          </div>
+
+          <button
+            onClick={hubTab === 'endpoints' ? fetchDeployments : fetchRegistry}
+            disabled={hubTab === 'endpoints' ? loading : registryLoading}
+            title="Refresh deployments and registry"
             style={{
-              width: '100%',
-              padding: '9px 12px 9px 36px',
+              background: '#0A1424',
+              border: '1px solid #16263F',
               borderRadius: 8,
-              background: '#071220',
-              border: '1px solid #172840',
-              color: '#F1F5F9',
-              fontSize: 13,
-              outline: 'none',
+              padding: '9px 14px',
+              color: '#94A3B8',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: (hubTab === 'endpoints' ? loading : registryLoading) ? 'wait' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              transition: 'all 150ms ease',
             }}
-          />
+          >
+            <RefreshCw
+              size={14}
+              className={(hubTab === 'endpoints' ? loading : registryLoading) ? 'animate-spin' : ''}
+              style={{ color: '#00F5A0' }}
+            />
+            Refresh
+          </button>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

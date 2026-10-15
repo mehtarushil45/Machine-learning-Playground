@@ -1,3 +1,4 @@
+import { AlertCircle, Info, ArrowUpRight } from 'lucide-react'
 import { useLearning } from '../context/LearningContext'
 import { HeadsUpCard } from '../rules/types'
 
@@ -20,36 +21,36 @@ export function HeadsUpCardsContainer({
   return (
     <div
       data-testid="heads-up-cards-container"
-      className={`space-y-3 my-4 ${className}`}
+      className={`space-y-3 my-3 ${className}`}
       role="region"
       aria-label="ML Mistake Feedback Cards"
     >
       {displayCards.map((card) => {
         const isWarning = card.severity === 'warning'
         const borderClass = isWarning
-          ? 'border-amber-500/30 bg-amber-950/20 text-amber-200'
-          : 'border-sky-500/30 bg-sky-950/20 text-sky-200'
+          ? 'border-slate-700 bg-[#121826] text-slate-200'
+          : 'border-slate-800 bg-[#0F1420] text-slate-300'
         const badgeClass = isWarning
-          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-          : 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+          ? 'bg-slate-800 text-slate-200 border-slate-600'
+          : 'bg-slate-800/60 text-slate-400 border-slate-700'
 
         return (
           <div
             key={card.id}
             data-testid={`heads-up-card-${card.rule_id}`}
-            className={`p-4 rounded-xl border backdrop-blur-md shadow-lg transition-all animate-in fade-in duration-200 ${borderClass}`}
+            className={`p-4 rounded-xl border shadow-sm transition-all animate-in fade-in duration-150 ${borderClass}`}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2">
-                <span className="text-lg" aria-hidden="true">
-                  {isWarning ? '⚠️' : 'ℹ️'}
+                <span className="text-slate-400" aria-hidden="true">
+                  {isWarning ? <AlertCircle className="w-4 h-4 text-slate-300" /> : <Info className="w-4 h-4 text-slate-400" />}
                 </span>
                 <span
-                  className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${badgeClass}`}
+                  className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded border ${badgeClass}`}
                 >
-                  {isWarning ? 'Heads-Up Warning' : 'Observation'}
+                  {isWarning ? 'Attention' : 'Note'}
                 </span>
-                <h4 className="font-semibold text-sm text-foreground">{card.title}</h4>
+                <h4 className="font-semibold text-xs text-slate-100">{card.title}</h4>
               </div>
 
               {/* Dismiss button (never blocks user) */}
@@ -57,31 +58,31 @@ export function HeadsUpCardsContainer({
                 type="button"
                 data-testid={`dismiss-card-${card.rule_id}`}
                 onClick={() => dismissCard(card.rule_id)}
-                className="text-xs text-muted-foreground hover:text-foreground px-2 py-0.5 rounded hover:bg-white/10 transition-colors"
-                title="Dismiss this card for this project"
+                className="text-xs text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded hover:bg-slate-800/60 transition-colors"
+                title="Dismiss this card"
                 aria-label={`Dismiss ${card.title}`}
               >
                 ✕ Dismiss
               </button>
             </div>
 
-            <p className="mt-2 text-xs font-medium text-foreground/90 leading-relaxed">
+            <p className="mt-2 text-xs text-slate-300 leading-relaxed">
               {card.message}
             </p>
 
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] pt-2 border-t border-white/5">
-              <div className="bg-black/20 p-2 rounded-lg">
-                <span className="font-semibold text-muted-foreground block mb-0.5">
-                  Why it matters:
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] pt-2 border-t border-slate-800/80">
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                <span className="font-semibold text-slate-400 block mb-0.5">
+                  Why this happens:
                 </span>
-                <p className="text-foreground/80">{card.why_it_matters}</p>
+                <p className="text-slate-300 leading-relaxed">{card.why_it_matters}</p>
               </div>
 
-              <div className="bg-black/20 p-2 rounded-lg">
-                <span className="font-semibold text-muted-foreground block mb-0.5">
-                  How to fix:
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                <span className="font-semibold text-slate-400 block mb-0.5">
+                  Recommended action:
                 </span>
-                <p className="text-foreground/80">{card.how_to_fix}</p>
+                <p className="text-slate-300 leading-relaxed">{card.how_to_fix}</p>
               </div>
             </div>
 
@@ -94,9 +95,10 @@ export function HeadsUpCardsContainer({
                       window.open(`${window.location.origin}${window.location.pathname}#guide`, '_blank')
                     }
                   }}
-                  className="text-[11px] text-sky-400 hover:text-sky-300 font-medium hover:underline inline-flex items-center gap-1"
+                  className="text-[11px] text-slate-400 hover:text-slate-200 font-medium hover:underline inline-flex items-center gap-1"
                 >
-                  Learn concept in User Guide ↗
+                  <span>Learn more in Guide</span>
+                  <ArrowUpRight className="w-3 h-3" />
                 </button>
               </div>
             )}

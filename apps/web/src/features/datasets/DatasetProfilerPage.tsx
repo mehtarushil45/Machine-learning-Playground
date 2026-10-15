@@ -1451,11 +1451,26 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
                   {/* Interactive Learning Layer: Educational Guidance & Mistake Cards */}
                   <PanelLearningCollapsible
-                    title="Dataset Profiling & Feature Governance"
-                    concept="Out-of-core streaming profiling checks distribution statistics, missingness patterns, and flags target leakage or identifier keys."
-                    details="Verify that primary keys (IDs/UUIDs) and features that occur after the outcome event are dropped. High-correlation features (>0.90) or high Cramér's V associations indicate target leakage."
-                    practicalTip="Review flagged columns in the Governance tab (🛡️) before selecting features for training."
-                    citation="scikit-learn documentation: Inspection and Data Preprocessing"
+                    title="Dataset & Features Guide"
+                    steps={[
+                      {
+                        title: 'Select or Upload Data',
+                        action: 'Pick a ready-made example (like Titanic, Churn, or Housing) or upload your own CSV file.',
+                      },
+                      {
+                        title: 'Review Columns & Types',
+                        action: 'Check the summary table below to ensure numbers, text, and dates were identified accurately.',
+                      },
+                      {
+                        title: 'Select Your Target Column',
+                        action: 'Choose what you want the machine learning model to predict (e.g. churn, price, or category).',
+                      },
+                      {
+                        title: 'Proceed to Code Studio',
+                        action: 'Click the Code Studio tab in the top navigation bar to see your model pipeline code.',
+                      },
+                    ]}
+                    quickTip="Exclude ID numbers, names, or columns created after the outcome to prevent data leakage."
                   />
                   <HeadsUpCardsContainer />
 
