@@ -285,6 +285,31 @@ export const LocalDeploymentService = {
     document.body.removeChild(a);
   },
 
+  /** Download generated enriched batch prediction CSV file with authentication. */
+  downloadEnrichedCsv: async (downloadUrl: string, filename = 'enriched_predictions.csv'): Promise<void> => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null;
+    const finalUrl = downloadUrl.startsWith('http') || downloadUrl.startsWith('/api')
+      ? downloadUrl
+      : `/api/v1${downloadUrl.startsWith('/') ? '' : '/'}${downloadUrl}`;
+    const urlWithToken = token && !finalUrl.includes('token=')
+      ? `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
+      : finalUrl;
+
+    const res = await fetch(urlWithToken, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Failed to download enriched CSV (${res.status} ${res.statusText})`);
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+
   /** Retrieve real-time statistical drift report and serving latency telemetry */
   getDriftReport: (deploymentId: string, minSamples = 50): Promise<DeploymentDriftReport> =>
     request<DeploymentDriftReport>(`/local-deployments/${deploymentId}/drift?min_samples=${minSamples}`),

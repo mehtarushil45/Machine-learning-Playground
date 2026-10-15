@@ -1202,31 +1202,37 @@ async def generate_template_csv(
     dep = await _get_deployment(deployment_id, db)
     _assert_owner(dep, owner_id)
 
-    schema, sample_inputs = _build_input_schema(dep.feature_columns or [], {})
+    schema = dep.input_schema or {}
+    sample_inputs: Dict[str, Any] = getattr(dep, "sample_inputs", None) or {}
+    if not schema:
+        schema, fallback_samples = _build_input_schema(dep.feature_columns or [], {})
+        sample_inputs = sample_inputs or fallback_samples
 
     # Generate 3 representative sample rows
     rows: List[Dict[str, Any]] = []
     for i in range(3):
         row: Dict[str, Any] = {}
         for col in (dep.feature_columns or []):
-            base_val = sample_inputs.get(col, "0")
             col_info = schema.get(col, {})
-            if col_info.get("type") == "numeric":
+            col_type = col_info.get("type", "numeric")
+            if col_type == "numeric":
+                min_val = col_info.get("min")
+                base_val = sample_inputs.get(col)
                 try:
-                    num_val = float(base_val)
-                    row[col] = round(num_val + i * (1.0 if num_val >= 0 else -1.0), 2)
+                    num_base = float(base_val) if base_val is not None else (float(min_val) if min_val is not None else 10.0)
+                    row[col] = round(num_base + i * 2.0, 2)
                 except (ValueError, TypeError):
-                    row[col] = base_val
-            elif col_info.get("type") == "categorical":
+                    row[col] = round(10.0 + i * 2.0, 2)
+            elif col_type == "categorical":
                 cats = col_info.get("categories") or []
                 if cats:
                     row[col] = cats[i % len(cats)]
                 else:
-                    row[col] = base_val
-            elif col_info.get("type") == "boolean":
+                    row[col] = f"category_{i + 1}"
+            elif col_type == "boolean":
                 row[col] = i % 2
             else:
-                row[col] = f"{base_val}_{i + 1}"
+                row[col] = f"sample_{i + 1}"
         rows.append(row)
 
     df_sample = pd.DataFrame(rows, columns=dep.feature_columns or [])

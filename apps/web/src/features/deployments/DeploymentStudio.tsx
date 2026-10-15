@@ -270,59 +270,80 @@ function ApiIntegrationTabs({
   const [activeTab, setActiveTab] = useState<'curl' | 'curl-batch' | 'python' | 'python-batch' | 'javascript'>('curl');
   const [copied, setCopied] = useState(false);
 
+  const authToken = useMemo(() => {
+    return (typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null) || 'YOUR_ACCESS_TOKEN';
+  }, []);
+
   const batchUrl = useMemo(() => endpointUrl.replace(/\/predict$/, '/predict-batch'), [endpointUrl]);
 
   const curlSnippet = useMemo(() => {
     return `curl -X POST "${endpointUrl}" \\
+  -H "Authorization: Bearer ${authToken}" \\
   -H "Content-Type: application/json" \\
   -d '${JSON.stringify({ inputs: samplePayload }, null, 2)}'`;
-  }, [endpointUrl, samplePayload]);
+  }, [endpointUrl, samplePayload, authToken]);
 
   const curlBatchSnippet = useMemo(() => {
     return `# High-throughput Batch CSV Scoring (multipart)
 curl -X POST "${batchUrl}" \\
+  -H "Authorization: Bearer ${authToken}" \\
   -F "file=@unseen_records.csv" \\
   -F "batch_size=1000" \\
   -F "return_probabilities=true"`;
-  }, [batchUrl]);
+  }, [batchUrl, authToken]);
 
   const pythonSnippet = useMemo(() => {
     return `import requests
 
 url = "${endpointUrl}"
+headers = {
+    "Authorization": "Bearer ${authToken}",
+    "Content-Type": "application/json"
+}
 payload = {
     "inputs": ${JSON.stringify(samplePayload, null, 4)}
 }
 
-response = requests.post(url, json=payload)
+response = requests.post(url, json=payload, headers=headers)
 result = response.json()
-print("Prediction:", result["prediction"])
+print("Prediction:", result.get("prediction"))
 print("Confidence:", result.get("confidence"))`;
-  }, [endpointUrl, samplePayload]);
+  }, [endpointUrl, samplePayload, authToken]);
 
   const pythonBatchSnippet = useMemo(() => {
     return `import requests
 
 url = "${batchUrl}"
+headers = {
+    "Authorization": "Bearer ${authToken}"
+}
 with open("unseen_records.csv", "rb") as fh:
-    response = requests.post(url, files={"file": fh}, data={"batch_size": 1000})
+    response = requests.post(
+        url,
+        files={"file": ("unseen_records.csv", fh, "text/csv")},
+        data={"batch_size": 1000, "return_probabilities": "true"},
+        headers=headers
+    )
 
 result = response.json()
-print(f"Scored {result['total_samples']} records in {result['latency_ms']:.1f}ms")
-print("Download enriched predictions CSV:", result["download_url"])`;
-  }, [batchUrl]);
+print(f"Scored {result.get('total_samples')} records in {result.get('latency_ms', 0):.1f}ms")
+print("Download enriched predictions CSV:", result.get("download_url"))`;
+  }, [batchUrl, authToken]);
 
   const jsSnippet = useMemo(() => {
     return `const res = await fetch("${endpointUrl}", {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Authorization": "Bearer ${authToken}",
+    "Content-Type": "application/json"
+  },
   body: JSON.stringify({
     inputs: ${JSON.stringify(samplePayload, null, 4)}
   })
 });
 const data = await res.json();
 console.log("Prediction:", data.prediction);`;
-  }, [endpointUrl, samplePayload]);
+  }, [endpointUrl, samplePayload, authToken]);
 
   const activeSnippet =
     activeTab === 'curl'
@@ -836,6 +857,23 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
     setBatchResult(null);
     setBatchError(null);
     setBatchSearchQuery('');
+  };
+
+  const [enrichedDownloading, setEnrichedDownloading] = useState(false);
+  const handleDownloadEnrichedCsv = async () => {
+    if (!batchResult?.download_url) return;
+    setEnrichedDownloading(true);
+    try {
+      await LocalDeploymentService.downloadEnrichedCsv(
+        batchResult.download_url,
+        `${deployment?.algorithm || 'model'}_batch_predictions.csv`
+      );
+      onShowToast?.('CSV Downloaded', 'Enriched batch predictions CSV downloaded successfully.', 'success');
+    } catch (err: any) {
+      onShowToast?.('Download Failed', err?.message || 'Could not download predictions CSV', 'error');
+    } finally {
+      setEnrichedDownloading(false);
+    }
   };
 
 
@@ -2211,26 +2249,31 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                     </div>
 
                     {batchResult.download_url && (
-                      <a
-                        href={batchResult.download_url}
-                        download
+                      <button
+                        onClick={handleDownloadEnrichedCsv}
+                        disabled={enrichedDownloading}
                         style={{
                           display: 'flex',
                           alignItems: 'center',
                           gap: 7,
                           padding: '7px 16px',
                           borderRadius: 8,
+                          border: 'none',
                           background: 'linear-gradient(135deg, #00D4FF, #00F5A0)',
                           color: '#08111E',
                           fontWeight: 800,
                           fontSize: 12,
-                          textDecoration: 'none',
                           boxShadow: '0 0 15px rgba(0, 245, 160, 0.25)',
-                          cursor: 'pointer',
+                          cursor: enrichedDownloading ? 'wait' : 'pointer',
                         }}
                       >
-                        <Download size={14} /> Download Enriched CSV
-                      </a>
+                        {enrichedDownloading ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Download size={14} />
+                        )}
+                        Download Enriched CSV
+                      </button>
                     )}
                   </div>
 

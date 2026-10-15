@@ -343,9 +343,9 @@ User types in Monaco Editor
   - Throughput (req/s), Latency percentiles (P50/P95/P99), and HTTP status codes.
 
 #### Checklist
-- [ ] Verify local pipeline deployment creates active endpoint from `.joblib` weights.
-- [ ] Verify Bulk CSV scoring runs cleanly and exports valid CSV.
-- [ ] Ensure SDK copy buttons provide working code snippets.
+- [x] Verify local pipeline deployment creates active endpoint from `.joblib` weights.
+- [x] Verify Bulk CSV scoring runs cleanly and exports valid CSV.
+- [x] Ensure SDK copy buttons provide working code snippets.
 
 ---
 
@@ -444,9 +444,11 @@ User types in Monaco Editor
   - Implemented dual immediate launch paths: "Create File & Enter Studio" (Monaco IDE) and "Launch Visual Pipeline" (Profiler & Recommendations).
   - Verified with 9/9 backend DuckDB profiler tests and 7/7 Vitest React tests.
 
-* **Day 12: Deployment Studio & Bulk Batch CSV Scoring**
-  - Verify local model serving endpoints (`POST /api/v1/deployments/{id}/predict`).
-  - Verify drag-and-drop Batch CSV scoring with download of predicted CSV.
+* **Day 12: Deployment Studio & Bulk Batch CSV Scoring** [COMPLETED & VERIFIED]
+  - Verified local model serving endpoints (`POST /api/v1/local-deployments/{id}/predict`) with schema validation & audit persistence.
+  - Verified drag-and-drop Batch CSV scoring with in-memory vectorized prediction, class distribution, throughput calculation, and authenticated download of enriched CSV.
+  - Upgraded SDK snippets (cURL, Python, Node.js) with real Bearer authorization tokens and robust multipart options.
+  - Verified with 8/8 backend pytest tests (lifecycle & batch scoring) and 11/11 Vitest React tests.
 
 * **Day 13: Login Page & User Guide Polish**
   - Clean up `LoginPage.tsx`: sleek dark mode, remove student presets, smooth JWT auth.
