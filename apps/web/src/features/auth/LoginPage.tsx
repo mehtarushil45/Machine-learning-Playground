@@ -39,7 +39,7 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
 
   const microsoftAccounts = [
     { name: 'Rushil Mehta', email: 'mehtarushil45@outlook.com', avatarLetter: 'R', color: '#0078D4' },
-    { name: 'University Faculty Lab', email: 'faculty_test@university.edu', avatarLetter: 'F', color: '#5C2D91' },
+    { name: 'Lead ML Engineer', email: 'lead.engineer@apex-ml.internal', avatarLetter: 'L', color: '#5C2D91' },
   ];
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -356,7 +356,7 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
 
   // Quick Demo fill
   const fillDemoAccount = () => {
-    setEmail('faculty_test@university.edu');
+    setEmail('lead.engineer@apex-ml.internal');
     setPassword('DemoPassword123!');
     setErrorMessage(null);
   };

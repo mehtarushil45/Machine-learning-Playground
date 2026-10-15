@@ -123,7 +123,7 @@ describe('LoginPage Component', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /fill demo credentials/i }));
 
-    expect(emailInput).toHaveValue('faculty_test@university.edu');
+    expect(emailInput).toHaveValue('lead.engineer@apex-ml.internal');
     expect(passwordInput).toHaveValue('DemoPassword123!');
   });
 
@@ -134,7 +134,7 @@ describe('LoginPage Component', () => {
     renderWithAuth(<LoginPage onSuccess={handleSuccess} />);
 
     fireEvent.change(screen.getByLabelText(/email address/i), {
-      target: { value: 'faculty_test@university.edu' },
+      target: { value: 'lead.engineer@apex-ml.internal' },
     });
     fireEvent.change(screen.getByLabelText(/^password/i), {
       target: { value: 'DemoPassword123!' },
@@ -144,7 +144,7 @@ describe('LoginPage Component', () => {
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith({
-        username: 'faculty_test@university.edu',
+        username: 'lead.engineer@apex-ml.internal',
         password: 'DemoPassword123!',
       });
       expect(handleSuccess).toHaveBeenCalled();
@@ -196,7 +196,7 @@ describe('LoginPage Component', () => {
     expect(screen.getByRole('dialog', { name: /sign in with microsoft/i })).toBeInTheDocument();
     expect(screen.getByText('Pick an account')).toBeInTheDocument();
     expect(screen.getByText('mehtarushil45@outlook.com')).toBeInTheDocument();
-    expect(screen.getByText('faculty_test@university.edu')).toBeInTheDocument();
+    expect(screen.getByText('lead.engineer@apex-ml.internal')).toBeInTheDocument();
 
     // Close modal
     fireEvent.click(screen.getByTitle(/close dialog/i));

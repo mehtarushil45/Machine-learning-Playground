@@ -363,8 +363,8 @@ User types in Monaco Editor
 - Live interactive diagrams and searchable FAQs.
 
 #### Checklist
-- [ ] Update walkthrough text to match the refined v1 workflows.
-- [ ] Add visual architecture diagrams.
+- [x] Update walkthrough text to match the refined v1 workflows.
+- [x] Add visual architecture diagrams.
 
 ---
 
@@ -450,9 +450,10 @@ User types in Monaco Editor
   - Upgraded SDK snippets (cURL, Python, Node.js) with real Bearer authorization tokens and robust multipart options.
   - Verified with 8/8 backend pytest tests (lifecycle & batch scoring) and 11/11 Vitest React tests.
 
-* **Day 13: Login Page & User Guide Polish**
-  - Clean up `LoginPage.tsx`: sleek dark mode, remove student presets, smooth JWT auth.
-  - Update `UserGuidePage.tsx`: interactive visual walkthrough of the 4-pillar platform.
+* **Day 13: Login Page & User Guide Polish** [COMPLETED & VERIFIED]
+  - Cleaned up `LoginPage.tsx`: Sleek enterprise dark mode, replaced academic/student demo credentials with `lead.engineer@apex-ml.internal`, robust JWT token authentication flow, error states, and Google/Microsoft account chooser integration.
+  - Rebuilt `UserGuidePage.tsx`: Interactive visual walkthrough of the 4 core enterprise pillars (Dataset Engine, Monaco Code Studio, Experiment Tracking & Registry, Model Serving & Batch Scoring) with an interactive SVG architecture topology diagram, deep metric formulas, searchable MLOps glossary, keyboard shortcuts cheatsheet, and FAQs.
+  - Verified with 15/15 passing Vitest tests across `LoginPage.test.tsx` and `UserGuidePage.test.tsx`, clean `npm run typecheck` (`tsc --noEmit`), and 1.19s production build.
 
 * **Day 14: End-to-End Integration, Performance Audit & Launch Freeze**
   - Execute end-to-end smoke test: Login → Upload Dataset → Build Pipeline → Edit in Studio → Run Experiment → Compare Metrics → Deploy Endpoint → Batch Score.
