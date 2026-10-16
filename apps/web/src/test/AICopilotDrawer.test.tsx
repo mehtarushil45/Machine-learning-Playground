@@ -158,4 +158,34 @@ describe('AICopilotDrawer Component', () => {
     expect(screen.getByText(/\[AI Copilot Not Configured\]/i)).toBeInTheDocument();
     expect(screen.getByText(/GEMINI_API_KEY/i)).toBeInTheDocument();
   });
+
+  it('renders code block with Accept Code button and triggers onAcceptCode callback when clicked', () => {
+    const handleAcceptCode = vi.fn();
+    const chatMessages = [
+      {
+        id: 'msg-code-accept',
+        role: 'assistant' as const,
+        text: 'Here is the improved model pipeline:\n\n```python\nfrom sklearn.ensemble import RandomForestClassifier\nclf = RandomForestClassifier(n_estimators=100)\nclf.fit(X_train, y_train)\n```',
+      },
+    ];
+
+    render(
+      <AICopilotDrawer
+        isOpen={true}
+        onToggle={() => {}}
+        chatMessages={chatMessages}
+        onAcceptCode={handleAcceptCode}
+      />
+    );
+
+    const acceptBtn = screen.getByTestId('copilot-accept-code-btn');
+    expect(acceptBtn).toBeInTheDocument();
+    expect(acceptBtn).toHaveTextContent(/accept code/i);
+
+    fireEvent.click(acceptBtn);
+    expect(handleAcceptCode).toHaveBeenCalledWith(
+      expect.stringContaining('RandomForestClassifier')
+    );
+    expect(acceptBtn).toHaveTextContent(/accepted ✓/i);
+  });
 });

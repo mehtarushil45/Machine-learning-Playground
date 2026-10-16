@@ -20,6 +20,7 @@ export interface AICopilotDrawerProps {
   chatMessages?: ChatMessage[];
   onSendMessage?: (msg: string) => void;
   onReviewDiff?: (code: string) => void;
+  onAcceptCode?: (code: string) => void;
   isLoading?: boolean;
   placeholder?: string;
   initialWidth?: number;
@@ -87,22 +88,25 @@ function FormattedText({ text }: { text: string }) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#C9A24B">$1</strong>')
-    .replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.4);padding:1px 5px;border-radius:3px;color:#E2BD68;font-family:monospace;font-size:10.5px">$1</code>');
+    .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#E2BD68;font-weight:600">$1</strong>')
+    .replace(/`([^`]+)`/g, '<code style="background:rgba(0,0,0,0.45);border:1px solid rgba(124,107,174,0.3);padding:1.5px 5px;border-radius:4px;color:#FDE047;font-family:Consolas,Monaco,monospace;font-size:11px">$1</code>');
 
-  return <span dangerouslySetInnerHTML={{ __html: html }} style={{ whiteSpace: 'pre-wrap' }} />;
+  return <span dangerouslySetInnerHTML={{ __html: html }} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }} />;
 }
 
 function CodeBlockCard({
   code,
   language,
   onReviewDiff,
+  onAcceptCode,
 }: {
   code: string;
   language?: string;
   onReviewDiff?: (code: string) => void;
+  onAcceptCode?: (code: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [accepted, setAccepted] = useState(false);
 
   const handleCopy = () => {
     try {
@@ -112,14 +116,24 @@ function CodeBlockCard({
     } catch {}
   };
 
+  const handleAccept = () => {
+    if (!onAcceptCode) return;
+    onAcceptCode(code);
+    setAccepted(true);
+    setTimeout(() => setAccepted(false), 2500);
+  };
+
   return (
     <div
       style={{
-        margin: '8px 0',
+        margin: '10px 0',
         borderRadius: 6,
         overflow: 'hidden',
         border: `1px solid ${BB.border}`,
         background: '#07050E',
+        width: '100%',
+        boxSizing: 'border-box',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
       }}
     >
       <div
@@ -127,17 +141,44 @@ function CodeBlockCard({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '4px 8px',
+          padding: '5px 10px',
           background: 'rgba(21, 16, 38, 0.95)',
           borderBottom: `1px solid ${BB.border}`,
           fontSize: 10,
           color: BB.muted,
         }}
       >
-        <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        <span style={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: BB.goldLight }}>
           {language || 'python'}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {onAcceptCode && (
+            <button
+              data-testid="copilot-accept-code-btn"
+              onClick={handleAccept}
+              title="Accept and apply this code directly into the active editor file"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 9px',
+                borderRadius: 4,
+                background: accepted
+                  ? 'rgba(34, 197, 94, 0.35)'
+                  : 'linear-gradient(135deg, rgba(34, 197, 94, 0.28), rgba(201, 162, 75, 0.22))',
+                border: '1px solid rgba(34, 197, 94, 0.6)',
+                color: '#4ADE80',
+                fontSize: 10.5,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 0 10px rgba(34, 197, 94, 0.2)',
+                transition: 'all 120ms ease',
+              }}
+            >
+              <Check style={{ width: 11, height: 11 }} />
+              <span>{accepted ? 'Accepted ✓' : 'Accept Code'}</span>
+            </button>
+          )}
           {onReviewDiff && (
             <button
               data-testid="copilot-apply-diff-btn"
@@ -147,14 +188,15 @@ function CodeBlockCard({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
-                padding: '2px 7px',
+                padding: '3px 8px',
                 borderRadius: 4,
-                background: 'rgba(201, 162, 75, 0.2)',
-                border: `1px solid ${BB.gold}`,
-                color: BB.gold,
-                fontSize: 10,
+                background: 'rgba(124, 107, 174, 0.22)',
+                border: `1px solid ${BB.borderHover}`,
+                color: BB.primaryLight,
+                fontSize: 10.5,
                 fontWeight: 600,
                 cursor: 'pointer',
+                transition: 'all 120ms ease',
               }}
             >
               <SplitSquareVertical style={{ width: 11, height: 11 }} />
@@ -168,13 +210,14 @@ function CodeBlockCard({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 3,
-              padding: '2px 6px',
+              padding: '3px 7px',
               borderRadius: 4,
-              background: 'none',
+              background: 'rgba(255, 255, 255, 0.04)',
               border: `1px solid ${BB.border}`,
               color: BB.muted,
-              fontSize: 10,
+              fontSize: 10.5,
               cursor: 'pointer',
+              transition: 'all 120ms ease',
             }}
           >
             {copied ? <Check style={{ width: 11, height: 11, color: BB.success }} /> : <Copy style={{ width: 11, height: 11 }} />}
@@ -185,9 +228,9 @@ function CodeBlockCard({
       <pre
         style={{
           margin: 0,
-          padding: '8px 10px',
-          fontSize: 11,
-          lineHeight: 1.45,
+          padding: '10px 12px',
+          fontSize: 11.5,
+          lineHeight: 1.5,
           fontFamily: 'Consolas, Monaco, "Courier New", monospace',
           color: '#E0DBF5',
           overflowX: 'auto',
@@ -207,11 +250,12 @@ export function AICopilotDrawer({
   chatMessages = [],
   onSendMessage,
   onReviewDiff,
+  onAcceptCode,
   isLoading = false,
   placeholder = 'Ask AI Copilot…',
-  initialWidth = 340,
-  minWidth = 280,
-  maxWidth = 600,
+  initialWidth = 380,
+  minWidth = 300,
+  maxWidth = 720,
   title = 'AI Copilot',
   badge = 'AGENT',
 }: AICopilotDrawerProps) {
@@ -369,10 +413,12 @@ export function AICopilotDrawer({
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: 12,
+          padding: '14px 12px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 10,
+          gap: 12,
+          boxSizing: 'border-box',
+          width: '100%',
         }}
       >
         {/* Context Insights */}
@@ -380,31 +426,33 @@ export function AICopilotDrawer({
           <div
             key={msg.id}
             style={{
-              padding: '8px 10px',
-              borderRadius: 6,
+              padding: '10px 12px',
+              borderRadius: 8,
+              width: '100%',
+              boxSizing: 'border-box',
               background:
                 msg.type === 'warning'
                   ? 'rgba(245,158,11,0.08)'
                   : msg.type === 'tip'
                   ? 'rgba(201,162,75,0.08)'
-                  : 'rgba(75,59,124,0.12)',
+                  : 'rgba(75,59,124,0.14)',
               border: `1px solid ${
                 msg.type === 'warning'
-                  ? 'rgba(245,158,11,0.25)'
+                  ? 'rgba(245,158,11,0.28)'
                   : msg.type === 'tip'
-                  ? 'rgba(201,162,75,0.25)'
+                  ? 'rgba(201,162,75,0.28)'
                   : BB.border
               }`,
-              fontSize: 11,
+              fontSize: 11.5,
               color: BB.text,
-              lineHeight: 1.5,
+              lineHeight: 1.55,
             }}
           >
             <div
               dangerouslySetInnerHTML={{
                 __html: msg.text
-                  .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#C9A24B">$1</strong>')
-                  .replace(/`(.*?)`/g, '<code style="background:rgba(0,0,0,0.3);padding:1px 4px;border-radius:3px">$1</code>'),
+                  .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#E2BD68;font-weight:600">$1</strong>')
+                  .replace(/`(.*?)`/g, '<code style="background:rgba(0,0,0,0.35);padding:1px 4px;border-radius:3px;color:#FDE047">$1</code>'),
               }}
             />
           </div>
@@ -418,15 +466,18 @@ export function AICopilotDrawer({
                 key={chat.id}
                 style={{
                   alignSelf: 'flex-end',
-                  maxWidth: '90%',
-                  padding: '8px 11px',
-                  borderRadius: 8,
-                  background: BB.primary,
+                  maxWidth: '88%',
+                  padding: '9px 13px',
+                  borderRadius: '10px 10px 2px 10px',
+                  background: 'linear-gradient(135deg, #4B3B7C 0%, #36295C 100%)',
                   color: BB.text,
-                  fontSize: 11.5,
+                  fontSize: 12,
                   lineHeight: 1.5,
-                  border: `1px solid ${BB.primaryLight}`,
+                  border: `1px solid rgba(124, 107, 174, 0.45)`,
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
                   whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  boxSizing: 'border-box',
                 }}
               >
                 {chat.text}
@@ -442,27 +493,83 @@ export function AICopilotDrawer({
             <div
               key={chat.id}
               style={{
-                alignSelf: 'flex-start',
-                maxWidth: '95%',
-                padding: '9px 12px',
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '12px 14px',
                 borderRadius: 8,
                 background: isError
                   ? 'rgba(239, 68, 68, 0.08)'
                   : isWarning
                   ? 'rgba(245, 158, 11, 0.08)'
-                  : BB.elevated,
+                  : 'linear-gradient(180deg, #18122E 0%, #130E26 100%)',
                 color: BB.text,
-                fontSize: 11.5,
-                lineHeight: 1.55,
+                fontSize: 12,
+                lineHeight: 1.6,
                 border: `1px solid ${
                   isError
                     ? 'rgba(239, 68, 68, 0.35)'
                     : isWarning
                     ? 'rgba(245, 158, 11, 0.35)'
-                    : BB.border
+                    : 'rgba(107, 92, 166, 0.32)'
                 }`,
+                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.28)',
               }}
             >
+              {/* Assistant Message Header */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 8,
+                  paddingBottom: 6,
+                  borderBottom: `1px solid ${
+                    isError
+                      ? 'rgba(239, 68, 68, 0.2)'
+                      : isWarning
+                      ? 'rgba(245, 158, 11, 0.2)'
+                      : 'rgba(107, 92, 166, 0.2)'
+                  }`,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: 4,
+                      background: isError
+                        ? 'rgba(239, 68, 68, 0.2)'
+                        : isWarning
+                        ? 'rgba(245, 158, 11, 0.2)'
+                        : 'rgba(201, 162, 75, 0.15)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Sparkles style={{ width: 11, height: 11, color: isError ? BB.error : isWarning ? BB.warning : BB.gold }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: BB.text, letterSpacing: '0.02em' }}>
+                    AI Copilot
+                  </span>
+                </div>
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    color: BB.muted,
+                    background: 'rgba(0,0,0,0.3)',
+                    padding: '1px 6px',
+                    borderRadius: 3,
+                  }}
+                >
+                  {isError ? 'Error' : isWarning ? 'Warning' : 'Assistant'}
+                </span>
+              </div>
+
               {parts.map((p, idx) =>
                 p.type === 'code' ? (
                   <CodeBlockCard
@@ -470,6 +577,7 @@ export function AICopilotDrawer({
                     code={p.content}
                     language={p.language}
                     onReviewDiff={onReviewDiff}
+                    onAcceptCode={onAcceptCode}
                   />
                 ) : (
                   <FormattedText key={idx} text={p.content} />
@@ -483,20 +591,22 @@ export function AICopilotDrawer({
         {isLoading && (
           <div
             style={{
-              alignSelf: 'flex-start',
-              padding: '8px 12px',
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '10px 14px',
               borderRadius: 8,
-              background: BB.elevated,
-              border: `1px solid ${BB.border}`,
-              color: BB.muted,
-              fontSize: 11,
+              background: 'linear-gradient(135deg, rgba(28, 21, 52, 0.8), rgba(21, 16, 38, 0.95))',
+              border: `1px solid rgba(201, 162, 75, 0.35)`,
+              color: BB.goldLight,
+              fontSize: 11.5,
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
+              gap: 9,
+              boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
             }}
           >
-            <Sparkles style={{ width: 13, height: 13, color: BB.gold }} />
-            <span>AI Copilot is reasoning...</span>
+            <Sparkles style={{ width: 14, height: 14, color: BB.gold }} />
+            <span style={{ fontWeight: 600 }}>AI Copilot is reasoning...</span>
           </div>
         )}
         <div ref={messagesEndRef} />

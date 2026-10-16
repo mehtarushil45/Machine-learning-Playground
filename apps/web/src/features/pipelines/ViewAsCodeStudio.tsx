@@ -1045,15 +1045,39 @@ export function ViewAsCodeStudio({
     onShowToast,
   ]);
 
-  const handleAcceptDiff = useCallback(() => {
+  const handleAcceptDiff = useCallback(async () => {
     const { filename: file, candidateCode } = diffModalState;
+    if (!file || !candidateCode) return;
     updateExperimentFileCode(file, candidateCode);
     setBuilderCodeByFile((prev) => ({ ...prev, [file]: candidateCode }));
-    setSavedCodeByFile((prev) => ({ ...prev, [file]: candidateCode }));
-    markFileGenerated(file);
+    markFileModified(file);
+    try {
+      if (typeof CodeExecutionService?.saveWorkspaceFile === 'function') {
+        await CodeExecutionService.saveWorkspaceFile(effectiveProjectId, file, candidateCode);
+      }
+      setSavedCodeByFile((prev) => ({ ...prev, [file]: candidateCode }));
+      refreshWorkspaceFiles();
+    } catch {}
     setDiffModalState({ isOpen: false, candidateCode: '', filename: '' });
     onShowToast?.('Code Updated', `Accepted regenerated pipeline code for ${file}.`, 'success');
-  }, [diffModalState, updateExperimentFileCode, markFileGenerated, onShowToast]);
+  }, [diffModalState, effectiveProjectId, updateExperimentFileCode, markFileModified, refreshWorkspaceFiles, onShowToast]);
+
+  const handleAcceptCodeFromCopilot = useCallback(async (codeToApply: string) => {
+    if (isFileReadOnly) {
+      onShowToast?.('Read-only File', 'Cannot apply code to a read-only file.', 'error');
+      return;
+    }
+    updateExperimentFileCode(currentFile, codeToApply);
+    markFileModified(currentFile);
+    try {
+      if (typeof CodeExecutionService?.saveWorkspaceFile === 'function') {
+        await CodeExecutionService.saveWorkspaceFile(effectiveProjectId, currentFile, codeToApply);
+      }
+      setSavedCodeByFile((prev) => ({ ...prev, [currentFile]: codeToApply }));
+      refreshWorkspaceFiles();
+    } catch {}
+    onShowToast?.('Code Accepted', `Applied AI Copilot code to ${currentFile}`, 'success');
+  }, [currentFile, isFileReadOnly, effectiveProjectId, updateExperimentFileCode, markFileModified, refreshWorkspaceFiles, onShowToast]);
 
   const handleRejectDiff = useCallback(() => {
     setDiffModalState({ isOpen: false, candidateCode: '', filename: '' });
@@ -2068,7 +2092,7 @@ export function ViewAsCodeStudio({
       <RegenerateDiffModal
         isOpen={diffModalState.isOpen}
         filename={diffModalState.filename}
-        currentCode={experimentFiles[diffModalState.filename] || ''}
+        currentCode={experimentFiles[diffModalState.filename] || (diffModalState.filename === currentFile ? displayedCode : '')}
         regeneratedCode={diffModalState.candidateCode}
         onAccept={handleAcceptDiff}
         onReject={handleRejectDiff}
@@ -3812,6 +3836,7 @@ export function ViewAsCodeStudio({
             candidateCode: proposedCode,
           });
         }}
+        onAcceptCode={handleAcceptCodeFromCopilot}
         isLoading={isCopilotThinking}
         placeholder="Ask AI Copilot about this pipeline, model, or errors..."
         title="AI Copilot"
