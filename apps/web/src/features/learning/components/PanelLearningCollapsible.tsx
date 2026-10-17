@@ -40,34 +40,73 @@ export function PanelLearningCollapsible({
   return (
     <div
       data-testid="panel-learning-collapsible"
-      className={`border border-slate-700/60 bg-[#111622] rounded-xl overflow-hidden mb-4 shadow-sm transition-all ${className}`}
+      className={`border rounded-xl overflow-hidden mb-4 shadow-sm transition-all ${className}`}
       style={{
-        backgroundColor: '#111622',
-        borderColor: 'rgba(51, 65, 85, 0.7)',
+        backgroundColor: 'rgba(27, 21, 48, 0.75)',
+        borderColor: 'rgba(107, 92, 166, 0.3)',
         flexShrink: 0,
       }}
     >
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className="w-full flex items-center justify-between px-3.5 py-2.5 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800/40 transition-colors"
+        className="w-full flex items-center justify-between px-3.5 py-2.5 text-left text-xs font-semibold text-white transition-colors"
+        style={{
+          background: 'rgba(42, 34, 71, 0.35)',
+        }}
         aria-expanded={isOpen}
       >
         <div className="flex items-center gap-2.5">
-          <div className="w-5 h-5 rounded bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center shrink-0">
-            <Compass className="w-3.5 h-3.5" />
+          <div
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 4,
+              background: 'rgba(0, 212, 255, 0.16)',
+              border: '1px solid rgba(0, 212, 255, 0.38)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <Compass style={{ width: 14, height: 14, color: '#00D4FF' }} />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 8px',
+                borderRadius: 4,
+                background: 'rgba(0, 212, 255, 0.16)',
+                border: '1px solid rgba(0, 212, 255, 0.38)',
+                color: '#FFFFFF',
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.07em',
+              }}
+            >
               Page Guide
             </span>
-            <span className="text-xs font-semibold text-slate-200">
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#FFFFFF' }}>
               What is this? {title}
             </span>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-400 bg-slate-800/80 border border-slate-700 px-2 py-0.5 rounded font-medium">
+          <span
+            style={{
+              fontSize: 10,
+              color: '#FFFFFF',
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontWeight: 500,
+            }}
+          >
             {isOpen ? 'Hide Guide ▲' : 'Show Guide ▼'}
           </span>
         </div>
@@ -75,14 +114,26 @@ export function PanelLearningCollapsible({
 
       {isOpen && (
         <div
-          className="px-4 pb-3.5 pt-2 text-xs bg-slate-900/40 space-y-3 animate-in fade-in duration-150"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)' }}
+          className="px-4 pb-3.5 pt-2 text-xs space-y-3 animate-in fade-in duration-150"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.45)' }}
         >
           {/* Action-oriented steps: What to do on this page */}
           {steps && steps.length > 0 && (
             <div>
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                <ListChecks className="w-3.5 h-3.5 text-slate-400" />
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: '#FFFFFF',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  marginBottom: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <ListChecks style={{ width: 14, height: 14, color: '#00D4FF' }} />
                 <span>What to do on this page:</span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5">
@@ -92,16 +143,37 @@ export function PanelLearningCollapsible({
                   return (
                     <div
                       key={i}
-                      className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800/90 flex flex-col justify-between"
+                      className="p-2.5 rounded-lg flex flex-col justify-between"
+                      style={{
+                        background: 'rgba(27, 21, 48, 0.85)',
+                        border: '1px solid rgba(107, 92, 166, 0.25)',
+                      }}
                     >
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="w-4 h-4 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-bold flex items-center justify-center shrink-0">
+                          <span
+                            style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: '50%',
+                              background: 'rgba(0, 212, 255, 0.16)',
+                              border: '1px solid rgba(0, 212, 255, 0.38)',
+                              color: '#FFFFFF',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
                             {i + 1}
                           </span>
-                          <span className="text-xs font-semibold text-slate-100">{stepTitle}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#FFFFFF' }}>{stepTitle}</span>
                         </div>
-                        <p className="text-[11px] text-slate-400 leading-relaxed pl-6">{stepAction}</p>
+                        <p style={{ fontSize: 11, color: '#FFFFFF', lineHeight: 1.5, paddingLeft: 26, opacity: 0.9 }}>
+                          {stepAction}
+                        </p>
                       </div>
                     </div>
                   )
@@ -112,22 +184,30 @@ export function PanelLearningCollapsible({
 
           {/* Simple concepts or details */}
           {concept && (
-            <p className="font-medium text-slate-200">{concept}</p>
+            <p style={{ fontWeight: 500, color: '#FFFFFF' }}>{concept}</p>
           )}
           {details && (
-            <p className="text-slate-400 leading-relaxed">{details}</p>
+            <p style={{ color: '#FFFFFF', lineHeight: 1.6, opacity: 0.85 }}>{details}</p>
           )}
 
           {/* Helpful practical tip */}
           {(quickTip || practicalTip) && (
-            <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-[11px] text-slate-300 flex items-start gap-2">
-              <span className="font-semibold text-slate-200 shrink-0">Helpful Tip:</span>
-              <span className="text-slate-300">{quickTip || practicalTip}</span>
+            <div
+              className="p-2.5 rounded-lg flex items-start gap-2"
+              style={{
+                background: 'rgba(27, 21, 48, 0.85)',
+                border: '1px solid rgba(107, 92, 166, 0.25)',
+                fontSize: 11,
+                color: '#FFFFFF',
+              }}
+            >
+              <span style={{ fontWeight: 700, color: '#00D4FF', flexShrink: 0 }}>Helpful Tip:</span>
+              <span style={{ color: '#FFFFFF', opacity: 0.95 }}>{quickTip || practicalTip}</span>
             </div>
           )}
 
           {citation && (
-            <p className="text-[10px] text-slate-500 italic pt-0.5">
+            <p style={{ fontSize: 10, color: 'rgba(255, 255, 255, 0.6)', fontStyle: 'italic', paddingTop: 2 }}>
               Reference: {citation}
             </p>
           )}

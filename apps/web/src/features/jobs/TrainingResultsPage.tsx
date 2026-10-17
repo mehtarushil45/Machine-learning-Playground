@@ -26,6 +26,8 @@ import type { JobEntity } from '../../types/job';
 import type { PlatformTab } from '../../App';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
 import {
+  PanelLearningCollapsible,
+  HeadsUpCardsContainer,
   MetricLearningTooltip,
   BaselineDisplay,
   useLearning,
@@ -508,6 +510,31 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({ onNavigat
 
       {activeView==='leaderboard' ? (
         <div style={{ flex:1, minHeight:0, overflowY:'auto', background:T.bg }}>
+          {/* Page Guide for Experiment Leaderboard */}
+          <div style={{ padding: '16px 24px 0 24px', flexShrink: 0 }}>
+            <PanelLearningCollapsible
+              title="Experiment Leaderboard Guide"
+              steps={[
+                {
+                  title: 'Review Model Rankings',
+                  action: 'Examine primary evaluation metric scores to see which algorithm performed best on the test set.',
+                },
+                {
+                  title: 'Side-by-Side Diff',
+                  action: 'Select checkboxes for any 2 runs to compare their hyperparameters, scalers, and data configs side-by-side.',
+                },
+                {
+                  title: 'Inspect Run Details',
+                  action: 'Click Inspect on any run to switch back to the Overview tab with full confusion matrix and threshold tuning.',
+                },
+                {
+                  title: 'Promote Champion',
+                  action: 'Click Set as Champion on your top candidate model to promote it for deployment and serving.',
+                },
+              ]}
+              quickTip="Use side-by-side diff to see exactly what hyperparameter changed between runs and caused higher scores."
+            />
+          </div>
           <ExperimentLeaderboard
             currentJob={job} fileJobs={fileJobs} activeExperimentFile={activeExperimentFile}
             onSelectJob={(selected,file) => { setJob(selected); setActiveJob(selected); if(file) setActiveExperimentFile(file); setActiveView('overview'); }}
@@ -518,6 +545,33 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({ onNavigat
         </div>
       ) : (
         <div style={{ flex:1, minHeight:0, overflowY:'auto', display:'flex', flexDirection:'column', background:T.bg }}>
+          {/* Page Guide for Training & Results Overview */}
+          <div style={{ padding: '16px 24px 0 24px', flexShrink: 0 }}>
+            <PanelLearningCollapsible
+              title="Training Results & Evaluation Guide"
+              steps={[
+                {
+                  title: 'Compare Models',
+                  action: 'Check the experiment leaderboard table to see which algorithm achieved the best test score.',
+                },
+                {
+                  title: 'Compare Against Baseline',
+                  action: 'Check the baseline reference card to ensure your model beats a trivial majority-class or average guess.',
+                },
+                {
+                  title: 'Inspect Confusion Matrix',
+                  action: 'Toggle the confusion matrix to see exactly which categories the model confused or predicted accurately.',
+                },
+                {
+                  title: 'Promote Your Champion',
+                  action: 'Click Promote to Champion on your top run to stage it for deployment and live serving.',
+                },
+              ]}
+              quickTip="Watch out for overfitting: if training accuracy is 99% but test score is much lower, simplify your model."
+            />
+            <HeadsUpCardsContainer />
+          </div>
+
           {isRunning && (
             <div style={{ padding:'16px 24px', borderBottom:'1px solid '+T.border, borderLeft:'3px solid '+T.warning, display:'flex', flexDirection:'column', gap:10, flexShrink:0 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
