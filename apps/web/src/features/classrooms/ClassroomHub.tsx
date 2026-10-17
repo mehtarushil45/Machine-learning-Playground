@@ -29,6 +29,7 @@ import {
   ArrowLeft,
   ChevronRight,
   FileText,
+  BookOpen,
 } from 'lucide-react';
 import {
   ClassroomService,
@@ -123,7 +124,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
   // Instructor Tabs: 'submissions' | 'create-assignment' | 'roster' | 'curriculum'
   const [instructorTab, setInstructorTab] = useState<'submissions' | 'create-assignment' | 'roster' | 'curriculum'>('submissions');
-  const [curriculumData, setCurriculumData] = useState<{ total_students_active: number; lessons: any[] } | null>(null);
+  const [selectedAssignment, setSelectedAssignment] = useState<any | null>(null);
+  const [curriculumAssignments, setCurriculumAssignments] = useState<any[]>([]);
+  const [curriculumAssignmentsSummary, setCurriculumAssignmentsSummary] = useState<Record<string, { totalSubmissions: number; avgScore: number; passedCount: number }>>({});
   const [isLoadingCurriculum, setIsLoadingCurriculum] = useState(false);
 
   // Student Workspace State
@@ -281,12 +284,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       if (activeCls) {
         setSelectedClassroomId(activeCls.id);
         const asgnList = await ClassroomService.listAssignments(activeCls.id).catch(() => []);
+        setClassroomAssignments(asgnList || []);
+        setCurriculumAssignments(asgnList || []);
 
         if (asgnList.length > 0) {
-          const subData = await ClassroomService.getSubmissions(asgnList[0].id).catch(() => []);
+          const asgnToSelect = selectedAssignment && asgnList.some((a: any) => a.id === selectedAssignment.id)
+            ? selectedAssignment
+            : asgnList[0];
+          setSelectedAssignment(asgnToSelect);
+          const subData = await ClassroomService.getSubmissions(asgnToSelect.id).catch(() => []);
           setSubmissions(subData);
         } else {
           setSubmissions([]);
+          setSelectedAssignment(null);
         }
       }
     } catch (err: any) {
@@ -294,7 +304,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     } finally {
       setIsLoadingInstructor(false);
     }
-  }, [activeClassroom]);
+  }, [activeClassroom, selectedAssignment]);
 
   // Load assignments when in classroom view mode
   useEffect(() => {
@@ -319,16 +329,42 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   }, [viewMode, activeClassroom?.id, selectedClassroomId]);
 
   const loadCurriculumProgress = useCallback(async () => {
+    const targetClassroomId = selectedClassroomId || activeClassroom?.id || classrooms[0]?.id;
+    if (!targetClassroomId) return;
     setIsLoadingCurriculum(true);
     try {
-      const data = await ClassroomService.getCurriculumInstructorSummary();
-      setCurriculumData(data);
+      const asgns = await ClassroomService.listAssignments(targetClassroomId).catch(() => []);
+      setCurriculumAssignments(asgns || []);
+      setClassroomAssignments(asgns || []);
+
+      const summaryMap: Record<string, { totalSubmissions: number; avgScore: number; passedCount: number }> = {};
+      await Promise.all(
+        asgns.map(async (asgn: any) => {
+          try {
+            const subs = await ClassroomService.getSubmissions(asgn.id).catch(() => []);
+            const validScores = subs.filter((s: any) => s.grade_score !== null && s.grade_score !== undefined);
+            const sumScore = validScores.reduce((acc: number, s: any) => acc + (s.grade_score || 0), 0);
+            const avg = validScores.length > 0 ? Math.round((sumScore / validScores.length) * 10) / 10 : 0;
+            const passingScore = asgn.rubric?.passing_score_percentage ?? 60.0;
+            const passed = subs.filter((s: any) => (s.grade_score ?? 0) >= passingScore).length;
+
+            summaryMap[asgn.id] = {
+              totalSubmissions: subs.length,
+              avgScore: avg,
+              passedCount: passed,
+            };
+          } catch {
+            summaryMap[asgn.id] = { totalSubmissions: 0, avgScore: 0, passedCount: 0 };
+          }
+        })
+      );
+      setCurriculumAssignmentsSummary(summaryMap);
     } catch (err: any) {
       console.error('Failed to load curriculum progress:', err);
     } finally {
       setIsLoadingCurriculum(false);
     }
-  }, []);
+  }, [selectedClassroomId, activeClassroom?.id, classrooms]);
 
   useEffect(() => {
     if (viewMode === 'instructor') {
@@ -678,8 +714,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       setNewAssignmentDesc('');
       setNewAssignmentStartDate('');
       setNewAssignmentEndDate('');
-      setInstructorTab('submissions');
+      setInstructorTab('curriculum');
       loadInstructorData();
+      loadCurriculumProgress();
     } catch (err: any) {
       onShowToast?.('Failed to Create Assignment', err.message, 'error');
     }
@@ -1267,12 +1304,43 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
           {instructorTab === 'submissions' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-3">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   {activeClassroom && (
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-[#9E93B8]">Classroom:</span>
                       <span className="text-xs font-bold text-[#F5F1EC] font-mono">{activeClassroom.name}</span>
                     </div>
+                  )}
+                  {selectedAssignment && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[#9E93B8]">Assignment:</span>
+                      <span className="text-xs font-bold text-[#00D4FF] font-mono">{selectedAssignment.title}</span>
+                    </div>
+                  )}
+                  {classroomAssignments.length > 1 && (
+                    <select
+                      value={selectedAssignment?.id || ''}
+                      onChange={async (e) => {
+                        const target = classroomAssignments.find((a: any) => a.id === e.target.value);
+                        if (target) {
+                          setSelectedAssignment(target);
+                          setIsLoadingInstructor(true);
+                          try {
+                            const subData = await ClassroomService.getSubmissions(target.id).catch(() => []);
+                            setSubmissions(subData);
+                          } finally {
+                            setIsLoadingInstructor(false);
+                          }
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-[#1C1534] border border-[rgba(107,92,166,0.3)] text-xs font-bold text-[#00D4FF] focus:outline-none cursor-pointer"
+                    >
+                      {classroomAssignments.map((a: any) => (
+                        <option key={a.id} value={a.id} className="bg-[#151026] text-white">
+                          {a.title}
+                        </option>
+                      ))}
+                    </select>
                   )}
                 </div>
 
@@ -1639,26 +1707,33 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             >
               <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-4 flex-wrap gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/30 text-[#00F5A0]">
+                  <div className="p-2 rounded-xl bg-[#00D4FF]/10 border border-[#00D4FF]/30 text-[#00D4FF]">
                     <GraduationCap className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-[#F5F1EC]">Curriculum Lesson Progress</h3>
-                    <p className="text-xs text-[#9E93B8]">Cohort Student Mastery & Lesson Completion Rates</p>
+                    <h3 className="text-sm font-bold text-[#F5F1EC]">Curriculum Progress &amp; Assignments</h3>
+                    <p className="text-xs text-[#9E93B8]">Classroom assignments, milestones, and student submission completion</p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <div className="px-3.5 py-1.5 rounded-xl bg-[#1C1534] border border-[rgba(107,92,166,0.3)] flex items-center gap-2">
-                    <span className="text-xs text-[#9E93B8]">Active Cohort Learners:</span>
+                    <span className="text-xs text-[#9E93B8]">Total Assignments:</span>
                     <span className="text-xs font-bold text-[#00D4FF] font-mono">
-                      {curriculumData?.total_students_active ?? 0}
+                      {curriculumAssignments.length}
                     </span>
                   </div>
                   <button
+                    onClick={() => setInstructorTab('create-assignment')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#00D4FF] hover:bg-[#00F5A0] text-xs font-bold text-[#0B0912] transition-colors shadow cursor-pointer"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    <span>Create Assignment</span>
+                  </button>
+                  <button
                     onClick={loadCurriculumProgress}
                     disabled={isLoadingCurriculum}
-                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] transition-colors flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCurriculum ? 'animate-spin' : ''}`} />
                     <span>Refresh</span>
@@ -1666,53 +1741,129 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 </div>
               </div>
 
-              {isLoadingCurriculum && !curriculumData ? (
-                <div className="py-12 text-center text-xs text-[#9E93B8] font-mono animate-pulse">
-                  Loading cohort curriculum metrics...
+              {isLoadingCurriculum && curriculumAssignments.length === 0 ? (
+                <div className="py-16 text-center text-xs text-[#00D4FF] font-mono animate-pulse">
+                  Loading classroom curriculum assignments...
                 </div>
-              ) : !curriculumData || curriculumData.lessons.length === 0 ? (
-                <div className="text-xs text-[#9E93B8] italic py-8 text-center">
-                  No curriculum lessons registered.
+              ) : curriculumAssignments.length === 0 ? (
+                <div className="py-16 text-center space-y-4">
+                  <div className="w-12 h-12 mx-auto rounded-2xl bg-[#241B42] border border-[rgba(107,92,166,0.3)] flex items-center justify-center text-[#00D4FF]">
+                    <BookOpen className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-bold text-[#F5F1EC]">No Assignments Created Yet</h4>
+                    <p className="text-xs text-[#9E93B8] max-w-md mx-auto">
+                      Classroom curriculum progress tracks assignments created for this cohort. Once you create an assignment, it will appear here with student completion and score metrics.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setInstructorTab('create-assignment')}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-[#0B0912] shadow transition-all hover:opacity-90 active:scale-95 cursor-pointer"
+                    style={{ background: 'linear-gradient(135deg, #00D4FF 0%, #00F5A0 100%)' }}
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Create First Assignment</span>
+                  </button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {curriculumData.lessons.map((item: any) => {
-                    const isCompletedByAny = item.completed_count > 0;
+                  {curriculumAssignments.map((asgn: any, idx: number) => {
+                    const stats = curriculumAssignmentsSummary[asgn.id] || { totalSubmissions: 0, avgScore: 0, passedCount: 0 };
+                    const rubric = asgn.rubric || {};
+                    const problemType = rubric.problem_type || 'Classification';
+                    const minAcc = rubric.min_accuracy ? `${Math.round(rubric.min_accuracy * 100)}%` : '80%';
+                    const maxLat = rubric.max_latency_ms ? `${rubric.max_latency_ms} ms` : '100 ms';
+                    const passingScore = rubric.passing_score_percentage ?? 60.0;
+                    const durationMins = rubric.duration_minutes ?? 90;
+
                     return (
                       <div
-                        key={item.lesson_id}
-                        className="p-4 rounded-2xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] flex flex-col justify-between space-y-3 hover:border-[rgba(107,92,166,0.45)] transition-all"
+                        key={asgn.id || idx}
+                        className="p-5 rounded-2xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.25)] flex flex-col justify-between space-y-4 hover:border-[rgba(107,92,166,0.45)] transition-all shadow-lg"
                       >
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/30">
-                              Module {item.lesson_number || item.lesson_id}
+                        {/* Header & Badges */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/30 uppercase">
+                              Assignment {idx + 1}
                             </span>
-                            <span
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full font-mono ${
-                                isCompletedByAny
-                                  ? 'bg-[#00F5A0]/15 text-[#00F5A0] border border-[#00F5A0]/40'
-                                  : 'bg-[#9E93B8]/10 text-[#9E93B8] border border-[#9E93B8]/20'
-                              }`}
-                            >
-                              {item.completed_count} Completed
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full font-mono bg-[#00F5A0]/15 text-[#00F5A0] border border-[#00F5A0]/40 capitalize">
+                              {problemType}
                             </span>
                           </div>
-                          <h4 className="text-xs font-bold text-[#F5F1EC] line-clamp-1">{item.lesson_title}</h4>
-                          {item.goal && (
-                            <p className="text-[11px] text-[#9E93B8] line-clamp-2 leading-relaxed">
-                              {item.goal}
-                            </p>
+                          <h4 className="text-xs font-bold text-[#F5F1EC] line-clamp-1">{asgn.title}</h4>
+                          <p className="text-[11px] text-[#9E93B8] line-clamp-2 leading-relaxed">
+                            {asgn.description || 'Practical ML curriculum assignment & evaluation rubric.'}
+                          </p>
+                        </div>
+
+                        {/* Rubric Milestones / Targets */}
+                        <div className="p-3 rounded-xl bg-[#151026] border border-[rgba(107,92,166,0.18)] space-y-1.5 text-[11px]">
+                          <div className="flex justify-between items-center text-[#9E93B8]">
+                            <span>Target Accuracy:</span>
+                            <span className="font-mono text-[#00F5A0] font-bold">{minAcc}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[#9E93B8]">
+                            <span>Latency Limit:</span>
+                            <span className="font-mono text-[#F5F1EC]">{maxLat}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[#9E93B8]">
+                            <span>Passing Score:</span>
+                            <span className="font-mono text-[#00D4FF]">{passingScore}%</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[#9E93B8]">
+                            <span>Exam Duration:</span>
+                            <span className="font-mono text-[#F5F1EC]">{durationMins} mins</span>
+                          </div>
+                          {asgn.dataset_id && (
+                            <div className="flex justify-between items-center text-[#9E93B8]">
+                              <span>Dataset:</span>
+                              <span className="font-mono text-[#F5F1EC] truncate max-w-35">{asgn.dataset_id}</span>
+                            </div>
+                          )}
+                          {asgn.due_date && (
+                            <div className="flex justify-between items-center text-[#9E93B8]">
+                              <span>Due Date:</span>
+                              <span className="font-mono text-[#00D4FF]">{formatExamDate(asgn.due_date)}</span>
+                            </div>
                           )}
                         </div>
 
-                        <div className="pt-2 border-t border-[rgba(107,92,166,0.18)] flex items-center justify-between text-[11px]">
-                          <span className="text-[#9E93B8] font-mono text-[10px]">{item.page_route}</span>
-                          <span className="text-xs font-bold text-[#00F5A0] font-mono">
-                            {curriculumData.total_students_active > 0
-                              ? `${Math.round((item.completed_count / curriculumData.total_students_active) * 100)}% cohort`
-                              : `${item.completed_count} students`}
-                          </span>
+                        {/* Student Completion Progress Telemetry */}
+                        <div className="pt-2 border-t border-[rgba(107,92,166,0.2)] space-y-2">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[#9E93B8]">Submissions:</span>
+                            <span className="font-mono font-bold text-[#00D4FF]">
+                              {stats.totalSubmissions} {stats.totalSubmissions === 1 ? 'submission' : 'submissions'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-[#9E93B8]">Avg Score / Pass:</span>
+                            <span className="font-mono font-bold text-[#00F5A0]">
+                              {stats.totalSubmissions > 0
+                                ? `${stats.avgScore} / 100 (${stats.passedCount} passed)`
+                                : 'No submissions yet'}
+                            </span>
+                          </div>
+
+                          {/* Action Button */}
+                          <button
+                            onClick={async () => {
+                              setSelectedAssignment(asgn);
+                              setIsLoadingInstructor(true);
+                              try {
+                                const subData = await ClassroomService.getSubmissions(asgn.id).catch(() => []);
+                                setSubmissions(subData);
+                                setInstructorTab('submissions');
+                              } finally {
+                                setIsLoadingInstructor(false);
+                              }
+                            }}
+                            className="w-full mt-2 py-2 px-3 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#00D4FF] hover:text-[#00F5A0] border border-[rgba(107,92,166,0.3)] transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <span>View Submissions &amp; Grades</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
                     );

@@ -220,4 +220,51 @@ describe('Simplified Classroom & Assignment Flow', () => {
       expect(screen.getByRole('button', { name: /publish lab assignment/i })).toBeInTheDocument();
     });
   });
+
+  describe('Part 4: Curriculum Progress Tab Displays Created Assignments', () => {
+    it('shows created assignments and omits old generic lessons in Curriculum Progress', async () => {
+      (ClassroomService.listExams as any).mockResolvedValue(mockExamList);
+      (ClassroomService.listClassrooms as any).mockResolvedValue([
+        { id: 'c-100', name: 'Intro to ML Cohort A', course_id: 'CS401' },
+      ]);
+      (ClassroomService.listAssignments as any).mockResolvedValue([
+        {
+          id: 'asgn-curr-1',
+          classroom_id: 'c-100',
+          title: 'Classification Benchmark Lab',
+          description: 'Build scikit-learn model with min 85% accuracy.',
+          dataset_id: 'churn_lab_dataset.csv',
+          rubric: {
+            problem_type: 'classification',
+            min_accuracy: 0.85,
+            max_latency_ms: 80,
+            passing_score_percentage: 70,
+            duration_minutes: 60,
+          },
+        },
+      ]);
+      (ClassroomService.getSubmissions as any).mockResolvedValue([
+        { submission_id: 'sub-1', grade_score: 90, status: 'SUBMITTED' },
+      ]);
+
+      render(<ClassroomHub initialView="instructor" />);
+
+      // Switch to Curriculum Progress tab
+      const curriculumTabBtn = await screen.findByRole('button', { name: /curriculum progress/i });
+      fireEvent.click(curriculumTabBtn);
+
+      // Verify old static lesson headers and counters are NOT rendered
+      expect(screen.queryByText(/Cohort Student Mastery & Lesson Completion Rates/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Active Cohort Learners/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Module 1/i)).not.toBeInTheDocument();
+
+      // Verify created assignment appears in Curriculum Progress
+      expect(await screen.findByText('Classification Benchmark Lab')).toBeInTheDocument();
+      expect(screen.getByText(/Build scikit-learn model with min 85% accuracy/i)).toBeInTheDocument();
+      expect(screen.getByText('85%')).toBeInTheDocument();
+      expect(screen.getByText('80 ms')).toBeInTheDocument();
+      expect(screen.getByText('70%')).toBeInTheDocument();
+      expect(screen.getByText(/View Submissions & Grades/i)).toBeInTheDocument();
+    });
+  });
 });
