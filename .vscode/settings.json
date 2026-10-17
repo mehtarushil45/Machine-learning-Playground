@@ -2,6 +2,11 @@
     "js/ts.tsdk.path": "node_modules\\typescript\\lib",
     "python.defaultInterpreterPath": "${workspaceFolder}/services/api/.venv/Scripts/python.exe",
     "css.lint.unknownAtRules": "ignore",
+    "css.lint.unknownProperties": "ignore",
+    "css.lint.validProperties": [
+        "scrollbar-width",
+        "-ms-overflow-style"
+    ],
     "python.analysis.extraPaths": [
         "./services/api",
         "."

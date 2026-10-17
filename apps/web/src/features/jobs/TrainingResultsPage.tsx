@@ -1,32 +1,18 @@
 /**
- * TrainingResultsPage — Page 3 of the ML Platform.
- * Shows training job progress (live SSE) and high-contrast, startup-grade results dashboard.
- * Reads exclusively from ProjectContext.activeJob and multi-file experiment store.
- *
- * Design features:
- * - Enterprise-grade Model Performance Benchmark dashboard
- * - Multi-file experiment tabs for instant file-result switching
- * - Symbol-only refresh button with live file-code parsing & re-synchronization
- * - In-card "Evaluation may be unreliable" notice (integrated directly in benchmark card)
- * - Type-aware Key Performance Indicators (KPI) cards with hover illumination
- * - Segmented glowing train/test split distribution bar
- * - High-contrast Run Configuration specifications (no Job ID, no "verified from job record")
- * - Honest, un-hyped model guidance and performance interpretations
- * - Zero redundant badge strips
+ * TrainingResultsPage — Enterprise ML Platform Results Dashboard.
+ * Design: Bloomberg Terminal meets Linear.app — flat, continuous layout.
+ * No box effects, no floating card stacks, no glow halos. Clean, restrained, professional.
  */
 import { memo, useEffect, useRef, useState, useMemo } from 'react';
 import {
   ArrowLeft,
   BarChart2,
   AlertCircle,
-  CheckCircle2,
   Play,
   RefreshCw,
   Cpu,
   AlertTriangle,
-  Layers,
   Sliders,
-  Sparkles,
   Rocket,
   Trophy,
 } from 'lucide-react';
@@ -39,56 +25,50 @@ import { FeatureImportanceCard } from './FeatureImportanceCard';
 import type { JobEntity } from '../../types/job';
 import type { PlatformTab } from '../../App';
 import { parsePipelineTargetAndConfig } from '../../utils/codeParser';
-import { PanelLearningCollapsible, HeadsUpCardsContainer, MetricLearningTooltip, BaselineDisplay } from '../learning';
+import {
+  MetricLearningTooltip,
+  BaselineDisplay,
+  useLearning,
+} from '../learning';
 
-/* ── Premium High-Contrast Design Tokens ─────────────────────────────────────── */
-const BB = {
-  base: '#08070F',
-  surface: '#120E22',
-  elevated: '#18132E',
-  card: '#1D1737',
-  cardHover: '#251D45',
-  glassBg: 'rgba(24, 19, 46, 0.75)',
-  border: 'rgba(138, 121, 202, 0.22)',
-  borderLight: 'rgba(167, 139, 250, 0.35)',
-  borderAccent: 'rgba(245, 158, 11, 0.45)',
-  primary: '#4B3B7C',
-  primaryLight: '#8A79CA',
-  primaryGlow: 'rgba(138, 121, 202, 0.25)',
-  maroon: '#6E1423',
-  maroonLight: '#D33852',
-  gold: '#F59E0B',
-  goldLight: '#FBBF24',
-  text: '#FFFFFF',
-  textSecondary: '#E2E8F0',
-  muted: '#94A3B8',
-  subtle: '#64748B',
-  disabled: '#475569',
-  success: '#10B981',
-  successLight: '#34D399',
+/* ── Blueberry & Maroon Design System Tokens (from index.css) ───────── */
+const T = {
+  bg: 'var(--bb-surface, #1B1530)',
+  base: 'var(--bb-base, #0B0912)',
+  surface: 'var(--bb-surface, #1B1530)',
+  elevated: 'var(--bb-elevated, #2A2247)',
+  surfaceHover: 'var(--bb-primary-faint, rgba(107, 92, 166, 0.12))',
+  border: 'var(--bb-primary-border, rgba(107, 92, 166, 0.18))',
+  borderSubtle: 'rgba(107, 92, 166, 0.10)',
+  accent: 'var(--bb-primary-light, #6C5CA6)',
+  accentHover: '#8A7DC0',
+  accentSubtle: 'var(--bb-primary-faint, rgba(107, 92, 166, 0.12))',
+  accentBorder: 'var(--bb-primary-ring, rgba(107, 92, 166, 0.35))',
+  gold: 'var(--bb-gold, #C9A24B)',
+  goldSubtle: 'var(--bb-gold-faint, rgba(201, 162, 75, 0.12))',
+  goldBorder: 'rgba(201, 162, 75, 0.35)',
+  maroon: 'var(--bb-maroon, #6E1423)',
+  maroonHover: 'var(--bb-maroon-hover, #8E2A3C)',
+  maroonFaint: 'var(--bb-maroon-faint, rgba(110, 20, 35, 0.15))',
+  maroonLight: '#B23A4E',
+  success: '#22C55E',
   warning: '#F59E0B',
-  error: '#F87171',
+  error: 'var(--bb-error, #B23A4E)',
+  text: 'var(--bb-text, #F5F1EC)',
+  textSec: 'var(--bb-muted, #9E93B8)',
+  textDim: 'var(--bb-placeholder, #5E5480)',
+  mono: 'var(--font-mono, "JetBrains Mono", monospace)',
+  ui: 'var(--font-ui, "Space Grotesk", sans-serif)',
 } as const;
 
-/* ── Regression error metrics (lower-is-better, not bounded 0-1) ─── */
 const REGRESSION_ERROR_METRICS = new Set([
-  'mae',
-  'mse',
-  'rmse',
-  'mean_absolute_error',
-  'mean_squared_error',
-  'root_mean_squared_error',
+  'mae', 'mse', 'rmse', 'mean_absolute_error', 'mean_squared_error', 'root_mean_squared_error',
 ]);
-
-/* ── R-squared-family metrics (bounded roughly -inf to 1) ──────────── */
 const R2_METRICS = new Set(['r2', 'r2_score']);
 
-/**
- * Format a metric value without double-converting percentages.
- */
 function fmtVal(key: string, val: number | string): string {
-  if (typeof val !== 'number') return String(val ?? '—');
-  if (!Number.isFinite(val)) return '—';
+  if (typeof val !== 'number') return String(val ?? '--');
+  if (!Number.isFinite(val)) return '--';
   const lk = key.toLowerCase();
   if (REGRESSION_ERROR_METRICS.has(lk)) return val.toFixed(4);
   if (R2_METRICS.has(lk)) return val.toFixed(4);
@@ -108,25 +88,17 @@ function getPrimary(m: Record<string, number | string>): string | null {
 }
 
 function metricColor(key: string, val: number | string): string {
-  if (typeof val !== 'number' || !Number.isFinite(val)) return BB.muted;
+  if (typeof val !== 'number' || !Number.isFinite(val)) return T.textDim;
   const lk = key.toLowerCase();
-  if (REGRESSION_ERROR_METRICS.has(lk)) return BB.primaryLight;
+  if (REGRESSION_ERROR_METRICS.has(lk)) return T.accent;
   if (R2_METRICS.has(lk)) {
-    if (val >= 0.85) return BB.successLight;
-    if (val >= 0.7) return BB.gold;
-    return BB.maroonLight;
+    if (val >= 0.85) return T.success;
+    if (val >= 0.7) return T.warning;
+    return T.error;
   }
-  if (val >= 0.85) return BB.successLight;
-  if (val >= 0.7) return BB.gold;
-  return BB.maroonLight;
-}
-
-/** Returns 0-1 ring value; for error metrics returns 0 (cannot normalize). */
-function toRingValue(key: string, val: number): number {
-  const lk = key.toLowerCase();
-  if (REGRESSION_ERROR_METRICS.has(lk)) return 0;
-  if (R2_METRICS.has(lk)) return Math.max(0, Math.min(1, val));
-  return Math.max(0, Math.min(1, val));
+  if (val >= 0.85) return T.success;
+  if (val >= 0.7) return T.warning;
+  return T.error;
 }
 
 function isRatioMetric(key: string): boolean {
@@ -134,8 +106,29 @@ function isRatioMetric(key: string): boolean {
   return !REGRESSION_ERROR_METRICS.has(lk) && !R2_METRICS.has(lk);
 }
 
-function MetricRing({ value, color, size = 104 }: { value: number; color: string; size?: number }) {
-  const strokeWidth = 8;
+function toRingValue(key: string, val: number): number {
+  const lk = key.toLowerCase();
+  if (REGRESSION_ERROR_METRICS.has(lk)) return 0;
+  if (R2_METRICS.has(lk)) return Math.max(0, Math.min(1, val));
+  return Math.max(0, Math.min(1, val));
+}
+
+function perfInterp(key: string, val: number): string {
+  const lk = key.toLowerCase();
+  if (REGRESSION_ERROR_METRICS.has(lk)) return 'Lower is better. Compare against a baseline to assess quality.';
+  if (R2_METRICS.has(lk)) {
+    if (val >= 0.85) return '>= 0.85 Strong explanatory power. Verify on held-out data.';
+    if (val >= 0.7) return '>= 0.70 Moderate fit. Consider feature engineering.';
+    if (val >= 0) return '< 0.70 Weak fit. Review features and dataset quality.';
+    return 'Negative result -- model performs worse than predicting the mean.';
+  }
+  if (val >= 0.85) return 'Evaluate for overfitting and class imbalance before concluding quality.';
+  if (val >= 0.7) return 'Moderate result. Check class balance and dataset size.';
+  return 'Below typical thresholds. Review target, features, and dataset quality.';
+}
+
+function MetricRing({ value, color, size = 96 }: { value: number; color: string; size?: number }) {
+  const strokeWidth = 6;
   const R = size / 2 - strokeWidth;
   const circ = 2 * Math.PI * R;
   const clampedValue = Math.max(0, Math.min(1, value));
@@ -148,7 +141,7 @@ function MetricRing({ value, color, size = 104 }: { value: number; color: string
         cy={cx}
         r={R}
         fill="none"
-        stroke="rgba(138, 121, 202, 0.18)"
+        stroke={T.border}
         strokeWidth={strokeWidth}
       />
       <circle
@@ -161,55 +154,59 @@ function MetricRing({ value, color, size = 104 }: { value: number; color: string
         strokeDasharray={circ}
         strokeDashoffset={offset}
         strokeLinecap="round"
-        style={{
-          transition: 'stroke-dashoffset 800ms cubic-bezier(0.4, 0, 0.2, 1)',
-          filter: `drop-shadow(0 0 8px ${color}88)`,
-        }}
+        style={{ transition: 'stroke-dashoffset 800ms ease' }}
       />
     </svg>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const m: Record<string, { c: string; bg: string; label: string }> = {
-    COMPLETED:  { c: BB.successLight, bg: 'rgba(16, 185, 129, 0.15)', label: 'Completed' },
-    FAILED:     { c: BB.error,        bg: 'rgba(248, 113, 113, 0.15)', label: 'Failed' },
-    CANCELLED:  { c: BB.muted,        bg: 'rgba(148, 163, 184, 0.15)', label: 'Cancelled' },
-    RUNNING:    { c: BB.gold,         bg: 'rgba(245, 158, 11, 0.15)',  label: 'Running' },
-    QUEUED:     { c: BB.primaryLight, bg: 'rgba(138, 121, 202, 0.15)', label: 'Queued' },
-    TRAINING:   { c: BB.gold,         bg: 'rgba(245, 158, 11, 0.15)',  label: 'Training' },
-    EVALUATING: { c: BB.primaryLight, bg: 'rgba(138, 121, 202, 0.15)', label: 'Evaluating' },
-    STARTING:   { c: BB.muted,        bg: 'rgba(148, 163, 184, 0.12)', label: 'Starting' },
+  const MAP: Record<string, { c: string; label: string }> = {
+    COMPLETED:  { c: T.success,  label: 'Completed' },
+    FAILED:     { c: T.error,    label: 'Failed' },
+    CANCELLED:  { c: T.textDim,  label: 'Cancelled' },
+    RUNNING:    { c: T.warning,  label: 'Running' },
+    QUEUED:     { c: T.accent,   label: 'Queued' },
+    TRAINING:   { c: T.warning,  label: 'Training' },
+    EVALUATING: { c: T.accent,   label: 'Evaluating' },
+    STARTING:   { c: T.textSec,  label: 'Starting' },
   };
-  const e = m[status] ?? { c: BB.muted, bg: 'rgba(148, 163, 184, 0.12)', label: status };
+  const e = MAP[status] ?? { c: T.textSec, label: status };
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '3px 10px',
-        borderRadius: 20,
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: '0.04em',
-        color: e.c,
-        background: e.bg,
-        border: `1px solid ${e.c}44`,
-        boxShadow: `0 0 10px ${e.c}22`,
-      }}
-    >
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: e.c, boxShadow: `0 0 6px ${e.c}` }} />
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'2px 8px', borderRadius:4, fontSize:10, fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase', color:e.c, background:e.c+'18', border:'1px solid '+e.c+'30', fontFamily:T.ui }}>
+      <span style={{ width:5, height:5, borderRadius:'50%', background:e.c, flexShrink:0 }} />
       {e.label}
     </span>
   );
 }
 
-/**
- * Parse python code from an experiment file to extract target, algorithm, scaler, imputer, and split settings.
- */
-function parsePipelineCode(code: string) {
-  return parsePipelineTargetAndConfig(code);
+function MetricRow({ metricKey, value, align }: { metricKey: string; value: number | string; align: 'left' | 'center' | 'right' }) {
+  const isInvalid = typeof value === 'number' && !Number.isFinite(value);
+  const color = isInvalid ? T.textDim : metricColor(metricKey, value);
+  const barPct = !isInvalid && typeof value === 'number' && isRatioMetric(metricKey) ? Math.max(0, Math.min(100, value * 100)) : null;
+  return (
+    <div
+      style={{ display:'grid', gridTemplateColumns:'180px 1fr 80px', alignItems:'center', padding:'10px 24px', borderBottom:'1px solid '+T.borderSubtle, transition:'background 100ms', gap:16 }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = T.surfaceHover; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      <MetricLearningTooltip metricName={metricKey} align={align}>
+        <span style={{ fontSize:13, color:'#FFFFFF', fontWeight:500, cursor:'default' }}>{fmtKey(metricKey)}</span>
+      </MetricLearningTooltip>
+      <div style={{ display:'flex', alignItems:'center' }}>
+        {isInvalid ? (
+          <span style={{ color: T.textDim, fontSize: 11 }}>Not available for this evaluation</span>
+        ) : (
+          <div style={{ flex:1, height:4, background:T.border, borderRadius:2, overflow:'hidden' }}>
+            {barPct !== null && <div style={{ height:'100%', width:barPct+'%', background:color, borderRadius:2, transition:'width 600ms cubic-bezier(0.4,0,0.2,1)' }} />}
+          </div>
+        )}
+      </div>
+      <span style={{ fontSize:13, fontWeight:700, color:isInvalid?T.textDim:'#FFFFFF', fontFamily:T.mono, textAlign:'right' }}>
+        {isInvalid ? 'N/A' : fmtVal(metricKey, value)}
+      </span>
+    </div>
+  );
 }
 
 interface TrainingResultsPageProps {
@@ -217,24 +214,13 @@ interface TrainingResultsPageProps {
   onShowToast?: (title: string, desc?: string, type?: 'success' | 'info' | 'error') => void;
 }
 
-export const TrainingResultsPage = memo(function TrainingResultsPage({
-  onNavigate,
-  onShowToast,
-}: TrainingResultsPageProps) {
+export const TrainingResultsPage = memo(function TrainingResultsPage({ onNavigate, onShowToast }: TrainingResultsPageProps) {
   const {
-    activeJob,
-    setActiveJob,
-    trainingConfig,
-    setTrainingConfig,
-    dataset,
-    experimentFiles,
-    activeExperimentFile,
-    setActiveExperimentFile,
-    fileJobs,
-    setFileJob,
-    setSelectedTarget,
-    setSelectedFeatures,
+    activeJob, setActiveJob, trainingConfig, setTrainingConfig, dataset,
+    experimentFiles, activeExperimentFile, setActiveExperimentFile,
+    fileJobs, setFileJob, setSelectedTarget, setSelectedFeatures,
   } = useProject();
+  const { learningMode } = useLearning();
 
   const [job, setJob] = useState<JobEntity | null>(activeJob);
   const [activeView, setActiveView] = useState<'overview' | 'leaderboard'>('overview');
@@ -246,31 +232,17 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
     if (!job || job.status !== 'COMPLETED') return;
     setIsDeploying(true);
     try {
-      const dep = await LocalDeploymentService.create(
-        job.job_id,
-        `${job.algorithm || 'Model'} Service`
-      );
-      onShowToast?.(
-        'Model Deployed!',
-        `${job.algorithm || 'Model'} endpoint is live and ready for testing.`,
-        'success'
-      );
+      const dep = await LocalDeploymentService.create(job.job_id, job.algorithm ? job.algorithm + ' Service' : 'Model Service');
+      onShowToast?.('Model Deployed!', (job.algorithm || 'Model') + ' endpoint is live.', 'success');
       onNavigate('deployments', dep.deployment_id);
     } catch (err: any) {
-      onShowToast?.(
-        'Deployment Failed',
-        err?.detail || err?.message || 'Could not instantiate local serving endpoint.',
-        'error'
-      );
+      onShowToast?.('Deployment Failed', err?.detail || err?.message || 'Could not instantiate endpoint.', 'error');
     } finally {
       setIsDeploying(false);
     }
   };
 
-  // Synchronize state with context
-  useEffect(() => {
-    setJob(activeJob);
-  }, [activeJob?.job_id, activeJob?.status]);
+  useEffect(() => { setJob(activeJob); }, [activeJob?.job_id, activeJob?.status]);
 
   useEffect(() => {
     if (!job) return;
@@ -278,68 +250,35 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
     if (terminal.includes(job.status)) {
       if (job.status === 'COMPLETED' && !job.metadata?.metrics && fetchedRef.current !== job.job_id) {
         fetchedRef.current = job.job_id;
-        fetchJobDetails(job.job_id)
-          .then((full) => {
-            if (full) {
-              setJob(full);
-              setActiveJob(full);
-              if (setFileJob && activeExperimentFile) {
-                setFileJob(activeExperimentFile, full);
-              }
-            }
-          })
-          .catch(() => {});
+        fetchJobDetails(job.job_id).then((full) => {
+          if (full) { setJob(full); setActiveJob(full); if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, full); }
+        }).catch(() => {});
       }
       return;
     }
     let ok = true;
     const ctrl = new AbortController();
-
-    // Immediate check if job completed while tab was in background
-    fetchJobDetails(job.job_id)
-      .then((fresh) => {
-        if (fresh && ok && terminal.includes(fresh.status)) {
-          setJob(fresh);
-          setActiveJob(fresh);
-          if (setFileJob && activeExperimentFile) {
-            setFileJob(activeExperimentFile, fresh);
-          }
-          ctrl.abort();
-        }
-      })
-      .catch(() => {});
-
+    fetchJobDetails(job.job_id).then((fresh) => {
+      if (fresh && ok && terminal.includes(fresh.status)) {
+        setJob(fresh); setActiveJob(fresh);
+        if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, fresh);
+        ctrl.abort();
+      }
+    }).catch(() => {});
     const unsub = subscribeToJobProgressSSE(job.job_id, {
       onProgress: (live) => {
         if (!ok) return;
         setJob((prev) => {
           if (!prev) return prev;
-          // Guard: If job has already completed or reached terminal state, do not regress back to non-terminal
-          const term = ['COMPLETED', 'FAILED', 'CANCELLED'];
-          if (term.includes(prev.status) && !term.includes(live.status)) {
-            return prev;
-          }
-          const n = {
-            ...prev,
-            status: live.status,
-            progress: live.progress,
-            current_stage: live.current_stage,
-            estimated_seconds: live.estimated_seconds_remaining,
-          };
+          const term = ['COMPLETED','FAILED','CANCELLED'];
+          if (term.includes(prev.status) && !term.includes(live.status)) return prev;
+          const n = { ...prev, status:live.status, progress:live.progress, current_stage:live.current_stage, estimated_seconds:live.estimated_seconds_remaining };
           setActiveJob(n);
-          if (setFileJob && activeExperimentFile) {
-            setFileJob(activeExperimentFile, n);
-          }
+          if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, n);
           if (live.status === 'COMPLETED' && fetchedRef.current !== prev.job_id) {
             fetchedRef.current = prev.job_id;
             fetchJobDetails(prev.job_id).then((full) => {
-              if (full && ok) {
-                setJob(full);
-                setActiveJob(full);
-                if (setFileJob && activeExperimentFile) {
-                  setFileJob(activeExperimentFile, full);
-                }
-              }
+              if (full && ok) { setJob(full); setActiveJob(full); if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, full); }
             }).catch(() => {});
           }
           return n;
@@ -351,35 +290,20 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
         fetchedRef.current = job.job_id;
         const full = await fetchJobDetails(job.job_id).catch(() => null);
         if (full && ok) {
-          setJob(full);
-          setActiveJob(full);
-          if (setFileJob && activeExperimentFile) {
-            setFileJob(activeExperimentFile, full);
-          }
+          setJob(full); setActiveJob(full);
+          if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, full);
           onShowToast?.('Training complete', 'Review the results below.', 'success');
         }
       },
     });
-    pollJobUntilDone(
-      job.job_id,
-      (p) => {
-        if (!ok) return;
-        setJob(p);
-        setActiveJob(p);
-        if (setFileJob && activeExperimentFile) {
-          setFileJob(activeExperimentFile, p);
-        }
-      },
-      ctrl.signal
-    ).catch(() => {});
-    return () => {
-      ok = false;
-      ctrl.abort();
-      unsub();
-    };
+    pollJobUntilDone(job.job_id, (p) => {
+      if (!ok) return;
+      setJob(p); setActiveJob(p);
+      if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, p);
+    }, ctrl.signal).catch(() => {});
+    return () => { ok = false; ctrl.abort(); unsub(); };
   }, [job?.job_id, activeExperimentFile, setActiveJob, setFileJob, onShowToast]);
 
-  /* ── Multi-file list ─────────────────────────────────────────────────── */
   const fileList = useMemo(() => {
     const keys = Object.keys(experimentFiles || {});
     return keys.length > 0 ? keys : [activeExperimentFile || 'pipeline_generated.py'];
@@ -387,27 +311,16 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
 
   const handleSelectFile = (fileName: string) => {
     setActiveExperimentFile(fileName);
-    if (fileJobs && fileJobs[fileName]) {
-      setJob(fileJobs[fileName]);
-      setActiveJob(fileJobs[fileName]);
-    }
+    if (fileJobs && fileJobs[fileName]) { setJob(fileJobs[fileName]); setActiveJob(fileJobs[fileName]); }
   };
 
-  // Auto-synchronize target, features, and config from active experiment file code if edited & saved
   useEffect(() => {
     const activeCode = experimentFiles?.[activeExperimentFile];
     if (!activeCode) return;
     const parsed = parsePipelineTargetAndConfig(activeCode);
     if (parsed.target && parsed.target !== (job?.target_column || trainingConfig?.target_column)) {
-      if (job) {
-        const syncedJob = { ...job, target_column: parsed.target };
-        setJob(syncedJob);
-        setActiveJob(syncedJob);
-        if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, syncedJob);
-      }
-      if (trainingConfig) {
-        setTrainingConfig({ ...trainingConfig, target_column: parsed.target });
-      }
+      if (job) { const s = { ...job, target_column: parsed.target }; setJob(s); setActiveJob(s); if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, s); }
+      if (trainingConfig) setTrainingConfig({ ...trainingConfig, target_column: parsed.target });
       setSelectedTarget(parsed.target);
     }
   }, [activeExperimentFile, experimentFiles, job?.target_column, trainingConfig?.target_column, setActiveJob, setFileJob, setSelectedTarget, setTrainingConfig]);
@@ -416,1276 +329,466 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({
     setIsRefreshing(true);
     try {
       const activeCode = experimentFiles?.[activeExperimentFile] ?? '';
-      const parsed = parsePipelineCode(activeCode);
-
+      const parsed = parsePipelineTargetAndConfig(activeCode);
       let freshJob = job?.job_id ? await fetchJobDetails(job.job_id).catch(() => null) : null;
-
       if (freshJob) {
         if (parsed.algorithm && parsed.algorithm !== freshJob.algorithm) {
-          freshJob = {
-            ...freshJob,
-            algorithm: parsed.algorithm,
-            metadata: {
-              ...freshJob.metadata,
-              ...(parsed.scaler ? { scaler: parsed.scaler } : {}),
-              ...(parsed.imputer ? { imputer: parsed.imputer } : {}),
-              ...(parsed.seed !== undefined ? { random_seed: parsed.seed } : {}),
-            },
-          };
+          freshJob = { ...freshJob, algorithm:parsed.algorithm, metadata:{ ...freshJob.metadata, ...(parsed.scaler?{scaler:parsed.scaler}:{}), ...(parsed.imputer?{imputer:parsed.imputer}:{}), ...(parsed.seed!==undefined?{random_seed:parsed.seed}:{}) } };
         }
-        if (parsed.target) {
-          freshJob = { ...freshJob, target_column: parsed.target };
-        }
-        setJob(freshJob);
-        setActiveJob(freshJob);
+        if (parsed.target) freshJob = { ...freshJob, target_column:parsed.target };
+        setJob(freshJob); setActiveJob(freshJob);
         if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, freshJob);
       } else if (job) {
-        const updatedJob: JobEntity = {
-          ...job,
-          ...(parsed.algorithm ? { algorithm: parsed.algorithm } : {}),
-          ...(parsed.target ? { target_column: parsed.target } : {}),
-          metadata: {
-            ...job.metadata,
-            ...(parsed.scaler ? { scaler: parsed.scaler } : {}),
-            ...(parsed.imputer ? { imputer: parsed.imputer } : {}),
-            ...(parsed.seed !== undefined ? { random_seed: parsed.seed } : {}),
-          },
-        };
-        setJob(updatedJob);
-        setActiveJob(updatedJob);
-        if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, updatedJob);
+        const u: JobEntity = { ...job, ...(parsed.algorithm?{algorithm:parsed.algorithm}:{}), ...(parsed.target?{target_column:parsed.target}:{}), metadata:{ ...job.metadata, ...(parsed.scaler?{scaler:parsed.scaler}:{}), ...(parsed.imputer?{imputer:parsed.imputer}:{}), ...(parsed.seed!==undefined?{random_seed:parsed.seed}:{}) } };
+        setJob(u); setActiveJob(u);
+        if (setFileJob && activeExperimentFile) setFileJob(activeExperimentFile, u);
       }
-
-      if (
-        parsed.target ||
-        parsed.algorithm ||
-        parsed.scaler ||
-        parsed.imputer ||
-        parsed.testSplit !== undefined ||
-        parsed.seed !== undefined
-      ) {
-        if (trainingConfig) {
-          setTrainingConfig({
-            ...trainingConfig,
-            ...(parsed.target ? { target_column: parsed.target } : {}),
-            ...(parsed.algorithm ? { algorithm: parsed.algorithm } : {}),
-            ...(parsed.scaler ? { scaler: parsed.scaler } : {}),
-            ...(parsed.imputer ? { imputer: parsed.imputer } : {}),
-            ...(parsed.testSplit !== undefined ? { train_test_split: parsed.testSplit } : {}),
-            ...(parsed.seed !== undefined ? { random_seed: parsed.seed } : {}),
-          });
-        }
-        if (parsed.target) {
-          setSelectedTarget(parsed.target);
-        }
-        if (parsed.features && parsed.features.length > 0) {
-          setSelectedFeatures(parsed.features);
-        }
+      if (parsed.target||parsed.algorithm||parsed.scaler||parsed.imputer||parsed.testSplit!==undefined||parsed.seed!==undefined) {
+        if (trainingConfig) { setTrainingConfig({ ...trainingConfig, ...(parsed.target?{target_column:parsed.target}:{}), ...(parsed.algorithm?{algorithm:parsed.algorithm}:{}), ...(parsed.scaler?{scaler:parsed.scaler}:{}), ...(parsed.imputer?{imputer:parsed.imputer}:{}), ...(parsed.testSplit!==undefined?{train_test_split:parsed.testSplit}:{}), ...(parsed.seed!==undefined?{random_seed:parsed.seed}:{}) }); }
+        if (parsed.target) setSelectedTarget(parsed.target);
+        if (parsed.features && parsed.features.length > 0) setSelectedFeatures(parsed.features);
       }
-
-      onShowToast?.('Benchmark Refreshed', `Synchronized evaluation for ${activeExperimentFile}`, 'success');
+      onShowToast?.('Benchmark Refreshed', 'Synchronized evaluation for ' + activeExperimentFile, 'success');
     } finally {
       setTimeout(() => setIsRefreshing(false), 300);
     }
   };
 
-  /* ── No-job empty state ──────────────────────────────────────────────── */
   if (!job) {
     return (
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 22,
-          color: BB.textSecondary,
-          padding: 32,
-          background: `radial-gradient(ellipse at center, rgba(138, 121, 202, 0.08) 0%, ${BB.base} 70%)`,
-        }}
-      >
-        <div
-          style={{
-            width: 80,
-            height: 80,
-            borderRadius: 24,
-            background: 'linear-gradient(135deg, rgba(138, 121, 202, 0.25) 0%, rgba(20, 16, 36, 0.8) 100%)',
-            border: `1px solid ${BB.borderLight}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 12px 36px rgba(0,0,0,0.45)',
-          }}
-        >
-          <BarChart2 style={{ width: 40, height: 40, color: BB.primaryLight }} />
+      <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:20, padding:40, background:T.bg }}>
+        <div style={{ width:56, height:56, borderRadius:8, background:T.surface, border:'1px solid '+T.border, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <BarChart2 style={{ width:26, height:26, color:T.textDim }} />
         </div>
-        <div style={{ textAlign: 'center', maxWidth: 420 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, color: BB.text, marginBottom: 8, letterSpacing: '-0.02em' }}>
-            No Training Run Yet
-          </div>
-          <div style={{ fontSize: 13, color: BB.muted, lineHeight: 1.6 }}>
-            Go to Dataset Setup, configure your model, and click "Launch training job" to start.
-          </div>
+        <div style={{ textAlign:'center', maxWidth:380 }}>
+          <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:8, letterSpacing:'-0.01em' }}>No Training Run Yet</div>
+          <div style={{ fontSize:13, color:T.textSec, lineHeight:1.6 }}>Go to Dataset Setup, configure your model, and click "Launch training job" to start.</div>
         </div>
-        <button
-          onClick={() => onNavigate('workspace')}
-          style={{
-            marginTop: 6,
-            padding: '10px 24px',
-            borderRadius: 10,
-            border: `1px solid ${BB.primaryLight}`,
-            background: 'linear-gradient(135deg, rgba(75, 59, 124, 0.8) 0%, rgba(138, 121, 202, 0.5) 100%)',
-            color: BB.text,
-            fontSize: 13,
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontFamily: 'var(--font-ui)',
-            boxShadow: '0 6px 20px rgba(138, 121, 202, 0.35)',
-            transition: 'all 180ms ease',
-          }}
+        <button onClick={() => onNavigate('workspace')}
+          style={{ marginTop:4, padding:'8px 18px', borderRadius:4, border:'1px solid '+T.border, background:T.surface, color:T.text, fontSize:12, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', gap:7, fontFamily:T.ui }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = T.surfaceHover; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = T.surface; }}
         >
-          <ArrowLeft style={{ width: 15, height: 15 }} /> Go to Dataset Setup
+          <ArrowLeft style={{ width:13, height:13 }} /> Go to Dataset Setup
         </button>
       </div>
     );
   }
 
-  /* ── Derived values ─────────────────────────────────────────────────── */
   const metrics = (job.metadata?.metrics || (job as any).metrics) as Record<string, number | string> | undefined;
-  const isRunning = !['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.status);
+  const isRunning = !['COMPLETED','FAILED','CANCELLED'].includes(job.status);
   const pk = metrics ? getPrimary(metrics) : null;
   const pv = pk !== null && metrics ? metrics[pk] : null;
-  const pc = pk && typeof pv === 'number' ? metricColor(pk, pv) : BB.muted;
+  const pc = pk && typeof pv === 'number' ? metricColor(pk, pv) : T.textSec;
+  const ringValue = pk && typeof pv === 'number' ? toRingValue(pk, pv) : 0;
   const pct = Math.min(100, Math.max(0, job.progress ?? 0));
-
-  /* ── Actual config: prefer job.metadata over trainingConfig ────────── */
-  const actualAlgorithm = job.algorithm || trainingConfig?.algorithm || '—';
-  const actualScaler = (job.metadata?.scaler as string | undefined) || trainingConfig?.scaler || '—';
-  const actualImputer = (job.metadata?.imputer as string | undefined) || trainingConfig?.imputer || '—';
+  const actualAlgorithm = job.algorithm || trainingConfig?.algorithm || '--';
+  const actualScaler = (job.metadata?.scaler as string | undefined) || trainingConfig?.scaler || '--';
+  const actualImputer = (job.metadata?.imputer as string | undefined) || trainingConfig?.imputer || '--';
   const actualCvFolds = (job.metadata?.cross_validation as number | undefined) ?? trainingConfig?.cv_folds;
   const actualSeed = (job.metadata?.random_seed as number | null | undefined) ?? trainingConfig?.random_seed;
   const actualSplit = trainingConfig?.train_test_split ?? 0.8;
-  const datasetName = trainingConfig?.dataset_name || job.dataset_id || '—';
+  const datasetName = trainingConfig?.dataset_name || job.dataset_id || '--';
   const featureCols = job.feature_columns?.length ? job.feature_columns : trainingConfig?.feature_columns || [];
-
-  /* ── Small-dataset / unreliable evaluation warning ──────────────────── */
-  const datasetRowCount =
-    dataset?.rowCount ??
-    dataset?.rows?.length ??
-    ((job?.metadata as any)?.row_count as number | undefined) ??
-    ((trainingConfig as any)?.row_count as number | undefined);
-  const hasUnreliableMetrics = metrics
-    ? Object.values(metrics).some((v) => typeof v === 'number' && !Number.isFinite(v))
-    : false;
+  const datasetRowCount = dataset?.rowCount ?? dataset?.rows?.length ?? ((job?.metadata as any)?.row_count as number | undefined) ?? ((trainingConfig as any)?.row_count as number | undefined);
+  const hasUnreliableMetrics = metrics ? Object.values(metrics).some((v) => typeof v === 'number' && !Number.isFinite(v)) : false;
   const isTinyDataset = datasetRowCount !== undefined && datasetRowCount < 50;
   const showReliabilityWarning = hasUnreliableMetrics || isTinyDataset;
-  const isClassification =
-    (job.metadata?.problem_type as string)?.includes('classification') ||
-    (trainingConfig as any)?.task_type === 'classification' ||
-    trainingConfig?.algorithm?.includes('classifier') ||
-    (metrics && ('accuracy' in metrics || 'f1_score' in metrics || 'f1' in metrics));
-
-  /* ── Ring display value ─────────────────────────────────────────────── */
-  const ringValue = pk && typeof pv === 'number' ? toRingValue(pk, pv) : 0;
-
-  /* ── Performance interpretation — honest & informative ───────────────── */
-  function performanceInterpretation(key: string, val: number): string {
-    const lk = key.toLowerCase();
-    if (REGRESSION_ERROR_METRICS.has(lk)) {
-      return 'Lower is better. Compare against a baseline (e.g. mean prediction) to assess quality.';
-    }
-    if (R2_METRICS.has(lk)) {
-      if (val >= 0.85) return '≥ 0.85 — Strong explanatory power. Verify on held-out data.';
-      if (val >= 0.7) return '≥ 0.70 — Moderate fit. Consider feature engineering.';
-      if (val >= 0) return '< 0.70 — Weak fit. Review features and dataset quality.';
-      return 'Negative — model performs worse than predicting the mean. Check configuration.';
-    }
-    if (val >= 0.85) return 'Evaluate for overfitting and class imbalance before concluding quality.';
-    if (val >= 0.7) return 'Moderate result. Check class balance and dataset size.';
-    return 'Below typical thresholds. Review target, features, and dataset quality.';
-  }
-
+  const isClassification = (job.metadata?.problem_type as string)?.includes('classification') || (trainingConfig as any)?.task_type === 'classification' || trainingConfig?.algorithm?.includes('classifier') || (metrics && ('accuracy' in metrics || 'f1_score' in metrics || 'f1' in metrics));
   const trainPct = Math.round(actualSplit * 100);
   const testPct = 100 - trainPct;
   const trainRows = datasetRowCount != null ? Math.round(datasetRowCount * actualSplit) : null;
   const testRows = datasetRowCount != null ? datasetRowCount - (trainRows ?? 0) : null;
+  const configRows = [
+    { label:'Dataset',     val:datasetName },
+    { label:'Algorithm',   val:actualAlgorithm.replace(/_/g,' ') },
+    { label:'Target',      val:job.target_column||trainingConfig?.target_column||'--' },
+    { label:'Features',    val:featureCols.length+' column'+(featureCols.length!==1?'s':'') },
+    { label:'Train Split', val:trainPct+'% / '+testPct+'%' },
+    { label:'CV Folds',    val:actualCvFolds!=null?actualCvFolds+'-fold':'--' },
+    { label:'Scaler',      val:actualScaler.replace(/_/g,' ') },
+    { label:'Imputer',     val:actualImputer.replace(/_/g,' ') },
+    { label:'Seed',        val:actualSeed!=null?String(actualSeed):'--' },
+  ];
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        minHeight: 0,
-        background: BB.base,
-        color: BB.text,
-      }}
-    >
-      {/* ── MAIN DASHBOARD CONTAINER ─────────────────────────────────── */}
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          padding: '24px 28px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 20,
-          background: `radial-gradient(circle at 50% 0%, rgba(138, 121, 202, 0.08) 0%, ${BB.base} 65%)`,
-        }}
-      >
-        {/* ── TOP ACTION BAR: EXPERIMENT FILES & SYMBOL-ONLY REFRESH ── */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '8px 12px',
-            borderRadius: 12,
-            background: 'rgba(24, 19, 46, 0.65)',
-            border: `1px solid ${BB.border}`,
-            backdropFilter: 'blur(16px)',
-            flexWrap: 'wrap',
-            gap: 10,
-          }}
-        >
-          {/* Left: View Switcher (Overview vs Leaderboard) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                background: 'rgba(0, 0, 0, 0.4)',
-                padding: 3,
-                borderRadius: 8,
-                border: `1px solid ${BB.border}`,
-              }}
-            >
-              <button
-                onClick={() => setActiveView('overview')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: activeView === 'overview' ? 700 : 500,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background:
-                    activeView === 'overview'
-                      ? 'linear-gradient(135deg, rgba(138, 121, 202, 0.4) 0%, rgba(75, 59, 124, 0.6) 100%)'
-                      : 'transparent',
-                  color: activeView === 'overview' ? '#FFF' : BB.muted,
-                  boxShadow: activeView === 'overview' ? '0 0 10px rgba(138, 121, 202, 0.35)' : 'none',
-                  transition: 'all 120ms ease',
-                }}
-              >
-                <BarChart2 size={13} style={{ color: activeView === 'overview' ? BB.gold : 'inherit' }} />
-                <span>Run Overview</span>
-              </button>
-
-              <button
-                onClick={() => setActiveView('leaderboard')}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '5px 12px',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontWeight: activeView === 'leaderboard' ? 700 : 500,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background:
-                    activeView === 'leaderboard'
-                      ? 'linear-gradient(135deg, rgba(138, 121, 202, 0.4) 0%, rgba(75, 59, 124, 0.6) 100%)'
-                      : 'transparent',
-                  color: activeView === 'leaderboard' ? '#FFF' : BB.muted,
-                  boxShadow: activeView === 'leaderboard' ? '0 0 10px rgba(138, 121, 202, 0.35)' : 'none',
-                  transition: 'all 120ms ease',
-                }}
-              >
-                <Trophy size={13} style={{ color: activeView === 'leaderboard' ? BB.gold : 'inherit' }} />
-                <span>Leaderboard & Param Diff</span>
-              </button>
-            </div>
-
-            {/* In overview mode: File Tabs */}
-            {activeView === 'overview' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', minHeight:0, background:T.bg, color:T.text, fontFamily:T.ui }}>
+      {/* TOP TOOLBAR: TABS, ACTIVE FILE, ICON REFRESH, SINGLE DEPLOY MODEL BUTTON */}
+      <div style={{ height:44, minHeight:44, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 20px', borderBottom:'1px solid '+T.border, background:T.elevated, flexShrink:0, gap:12 }}>
+        <div style={{ display:'flex', alignItems:'center', height:'100%', gap:14, minWidth:0, overflow:'hidden' }}>
+          <div style={{ display:'flex', alignItems:'center', height:'100%', flexShrink:0 }}>
+            {([{id:'overview' as const, icon:BarChart2, label:'Run Overview'},{id:'leaderboard' as const, icon:Trophy, label:'Leaderboard'}]).map(({id,icon:Icon,label}) => {
+              const isActive = activeView===id;
+              return (
+                <button key={id} onClick={() => setActiveView(id)}
+                  style={{ display:'flex', alignItems:'center', gap:6, padding:'0 14px', height:'100%', fontSize:13, fontWeight:isActive?600:400, border:'none', borderBottom:isActive?'2px solid '+T.accent:'2px solid transparent', borderTop:'2px solid transparent', background:'transparent', color:isActive?T.text:T.textSec, cursor:'pointer', fontFamily:T.ui }}
+                  onMouseEnter={(e) => { if(!isActive) e.currentTarget.style.color=T.text; }}
+                  onMouseLeave={(e) => { if(!isActive) e.currentTarget.style.color=T.textSec; }}
+                >
+                  <Icon size={13} />{label}
+                </button>
+              );
+            })}
+          </div>
+          {activeView==='overview' && (
+            <>
+              <div style={{ width:1, height:18, background:T.border, flexShrink:0 }} />
+              <div style={{ display:'flex', alignItems:'center', gap:6, overflowX:'auto', minWidth:0 }} className="no-scrollbar">
                 {fileList.map((fileName) => {
-                  const isActive = fileName === activeExperimentFile;
+                  const isActive = fileName===activeExperimentFile;
                   return (
-                    <button
-                      key={fileName}
-                      onClick={() => handleSelectFile(fileName)}
+                    <button key={fileName} onClick={() => handleSelectFile(fileName)}
+                      title={fileName}
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '5px 12px',
-                        borderRadius: 7,
-                        fontSize: 12,
-                        fontWeight: isActive ? 700 : 500,
-                        fontFamily: 'var(--font-mono)',
-                        cursor: 'pointer',
-                        border: isActive
-                          ? '1px solid rgba(138, 121, 202, 0.6)'
-                          : '1px solid rgba(255, 255, 255, 0.08)',
-                        background: isActive
-                          ? 'linear-gradient(135deg, rgba(138, 121, 202, 0.25) 0%, rgba(75, 59, 124, 0.4) 100%)'
-                          : 'rgba(255, 255, 255, 0.03)',
-                        color: isActive ? '#FFFFFF' : BB.muted,
-                        boxShadow: isActive ? '0 0 10px rgba(138, 121, 202, 0.35)' : 'none',
-                        transition: 'all 150ms ease',
+                        display:'flex',
+                        alignItems:'center',
+                        gap:6,
+                        padding:'3px 10px',
+                        borderRadius:4,
+                        fontSize:11,
+                        fontWeight:isActive?600:400,
+                        fontFamily:T.mono,
+                        cursor:'pointer',
+                        border:'1px solid '+(isActive?T.accentBorder:T.border),
+                        background:isActive?T.accentSubtle:'transparent',
+                        color:isActive?T.text:T.textSec,
+                        whiteSpace:'nowrap',
+                        maxWidth:200,
+                        overflow:'hidden',
+                        textOverflow:'ellipsis',
                       }}
                     >
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: isActive ? BB.successLight : 'rgba(255, 255, 255, 0.2)',
-                        }}
-                      />
-                      {fileName}
+                      <span style={{ width:5, height:5, borderRadius:'50%', background:isActive?T.success:T.textDim, flexShrink:0 }} />
+                      <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{fileName}</span>
                     </button>
                   );
                 })}
               </div>
-            )}
-          </div>
-
-          {/* Right Action buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {/* Symbol-Only Refresh Button */}
-            <button
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              title="Refresh Results and Sync File Changes"
-              aria-label="Refresh Results"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                border: `1px solid ${BB.border}`,
-                background: 'rgba(138, 121, 202, 0.12)',
-                color: '#FFFFFF',
-                cursor: isRefreshing ? 'not-allowed' : 'pointer',
-                transition: 'all 150ms ease',
-              }}
-            >
-              <RefreshCw
-                style={{
-                  width: 14,
-                  height: 14,
-                  color: BB.primaryLight,
-                  animation: isRefreshing ? 'spin 1s linear infinite' : 'none',
-                }}
-              />
-            </button>
-
-            {/* 1-Click Deploy Model Action */}
-            {job.status === 'COMPLETED' && (
-              <button
-                onClick={handleDeployModel}
-                disabled={isDeploying}
-                title="Deploy trained model artifact to a local serving endpoint"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  padding: '6px 14px',
-                  borderRadius: 8,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: isDeploying ? 'not-allowed' : 'pointer',
-                  opacity: isDeploying ? 0.75 : 1,
-                  border: '1px solid rgba(0, 245, 160, 0.4)',
-                  background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18) 0%, rgba(0, 245, 160, 0.22) 100%)',
-                  color: '#00F5A0',
-                  boxShadow: '0 0 14px rgba(0, 245, 160, 0.2)',
-                  transition: 'all 150ms ease',
-                }}
-              >
-                {isDeploying ? (
-                  <>
-                    <RefreshCw style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> Deploying...
-                  </>
-                ) : (
-                  <>
-                    <Rocket style={{ width: 14, height: 14 }} /> Deploy Model
-                  </>
-                )}
-              </button>
-            )}
-          </div>
+            </>
+          )}
         </div>
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+          {/* REFRESH BUTTON: ICON SYMBOL ONLY */}
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            title="Refresh Benchmark"
+            aria-label="Refresh"
+            style={{
+              display:'flex',
+              alignItems:'center',
+              justifyContent:'center',
+              width:28,
+              height:28,
+              borderRadius:4,
+              border:'1px solid '+T.border,
+              background:'transparent',
+              color:T.textSec,
+              cursor:isRefreshing?'not-allowed':'pointer',
+              transition:'all 100ms ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background=T.surfaceHover; e.currentTarget.style.color=T.text; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color=T.textSec; }}
+          >
+            <RefreshCw style={{ width:13, height:13, animation:isRefreshing?'spin 1s linear infinite':'none' }} />
+          </button>
 
-        {activeView === 'leaderboard' ? (
+          {/* SINGLE DEPLOY MODEL BUTTON */}
+          {job.status==='COMPLETED' && (
+            <button onClick={handleDeployModel} disabled={isDeploying}
+              style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:'8px 8px 0 8px', fontSize:12, fontWeight:600, cursor:isDeploying?'not-allowed':'pointer', opacity:isDeploying?0.65:1, border:'none', background:T.maroon, color:T.text, fontFamily:T.ui, transition:'all 150ms ease' }}
+              onMouseEnter={(e) => { if(!isDeploying) e.currentTarget.style.background=T.maroonHover; }}
+              onMouseLeave={(e) => { if(!isDeploying) e.currentTarget.style.background=T.maroon; }}
+            >
+              {isDeploying?<><RefreshCw style={{width:12,height:12,animation:'spin 1s linear infinite'}}/> Deploying...</>:<><Rocket style={{width:12,height:12}}/> Deploy Model</>}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {activeView==='leaderboard' ? (
+        <div style={{ flex:1, minHeight:0, overflowY:'auto', background:T.bg }}>
           <ExperimentLeaderboard
-            currentJob={job}
-            fileJobs={fileJobs}
-            activeExperimentFile={activeExperimentFile}
-            onSelectJob={(selected, file) => {
-              setJob(selected);
-              setActiveJob(selected);
-              if (file) setActiveExperimentFile(file);
-              setActiveView('overview');
-            }}
+            currentJob={job} fileJobs={fileJobs} activeExperimentFile={activeExperimentFile}
+            onSelectJob={(selected,file) => { setJob(selected); setActiveJob(selected); if(file) setActiveExperimentFile(file); setActiveView('overview'); }}
             onDeployJob={handleDeployModel}
-            onPromoteChampion={(promoted) => {
-              setJob(promoted);
-              setActiveJob(promoted);
-              onShowToast?.(
-                'Champion Promoted',
-                `${promoted.algorithm ? promoted.algorithm.replace(/_/g, ' ') : 'Model'} is now the active Champion model.`,
-                'success'
-              );
-            }}
-            targetColumn={job.target_column || trainingConfig?.target_column}
+            onPromoteChampion={(promoted) => { setJob(promoted); setActiveJob(promoted); onShowToast?.('Champion Promoted',(promoted.algorithm?promoted.algorithm.replace(/_/g,' '):'Model')+' is now the active Champion.','success'); }}
+            targetColumn={job.target_column||trainingConfig?.target_column}
           />
-        ) : (
-          <>
-            {/* Student Learning Layer: Diagnostic Guidance & Heads-Up Mistake Cards */}
-            <div style={{ width: '100%', flexShrink: 0 }}>
-              <PanelLearningCollapsible
-                title="Training Results & Evaluation Guide"
-                steps={[
-                  {
-                    title: 'Compare Models',
-                    action: 'Check the experiment leaderboard table to see which algorithm achieved the best test score.',
-                  },
-                  {
-                    title: 'Compare Against Baseline',
-                    action: 'Check the baseline reference card to ensure your model beats a trivial majority-class or average guess.',
-                  },
-                  {
-                    title: 'Inspect Confusion Matrix',
-                    action: 'Toggle the confusion matrix to see exactly which categories the model confused or predicted accurately.',
-                  },
-                  {
-                    title: 'Promote Your Champion',
-                    action: 'Click Promote to Champion on your top run to stage it for deployment and live serving.',
-                  },
-                ]}
-                quickTip="Watch out for overfitting: if training accuracy is 99% but test score is much lower, simplify your model."
-              />
-              <HeadsUpCardsContainer />
-            </div>
-
-        {/* Live Training In Progress Banner */}
-        {isRunning && (
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(26, 20, 48, 0.9) 0%, rgba(18, 14, 34, 0.9) 100%)',
-              border: '1px solid rgba(245, 158, 11, 0.35)',
-              borderRadius: 14,
-              padding: '20px 24px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 14,
-              boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
-              backdropFilter: 'blur(12px)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Cpu style={{ width: 20, height: 20, color: BB.gold }} />
-                <span style={{ fontSize: 15, fontWeight: 800, color: BB.text }}>Training in Progress</span>
-                <StatusBadge status={job.status} />
+        </div>
+      ) : (
+        <div style={{ flex:1, minHeight:0, overflowY:'auto', display:'flex', flexDirection:'column', background:T.bg }}>
+          {isRunning && (
+            <div style={{ padding:'16px 24px', borderBottom:'1px solid '+T.border, borderLeft:'3px solid '+T.warning, display:'flex', flexDirection:'column', gap:10, flexShrink:0 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  <Cpu style={{ width:16, height:16, color:T.warning }} />
+                  <span style={{ fontSize:13, fontWeight:600, color:T.text }}>Training in Progress</span>
+                  <StatusBadge status={job.status} />
+                </div>
+                <span style={{ fontSize:13, fontFamily:T.mono, fontWeight:700, color:T.warning }}>{pct.toFixed(0)}%</span>
               </div>
-              <span
-                style={{
-                  fontSize: 16,
-                  fontFamily: 'var(--font-mono)',
-                  fontWeight: 800,
-                  color: BB.gold,
-                }}
-              >
-                {pct.toFixed(0)}%
-              </span>
-            </div>
-            <div style={{ height: 8, borderRadius: 4, background: 'rgba(0,0,0,0.4)', overflow: 'hidden' }}>
-              <div
-                style={{
-                  height: '100%',
-                  borderRadius: 4,
-                  background: `linear-gradient(90deg, ${BB.maroonLight}, ${BB.gold})`,
-                  width: `${pct}%`,
-                  transition: 'width 400ms ease',
-                  boxShadow: `0 0 12px ${BB.gold}88`,
-                }}
-              />
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                fontSize: 12,
-                color: BB.muted,
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              <span>{job.current_stage || 'Fitting estimator...'}</span>
-              {job.estimated_seconds ? <span>~{job.estimated_seconds.toFixed(0)}s remaining</span> : null}
-            </div>
-          </div>
-        )}
-
-        {/* Failed Banner */}
-        {job.status === 'FAILED' && (
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(110, 20, 35, 0.3) 0%, rgba(30, 15, 25, 0.6) 100%)',
-              border: '1px solid rgba(248, 113, 113, 0.45)',
-              borderRadius: 14,
-              padding: '20px 24px',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 16,
-              boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
-              backdropFilter: 'blur(12px)',
-            }}
-          >
-            <div
-              style={{
-                background: 'rgba(239, 68, 68, 0.2)',
-                borderRadius: 10,
-                padding: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <AlertCircle style={{ width: 24, height: 24, color: BB.error }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                <span style={{ fontSize: 15, fontWeight: 800, color: '#FFF' }}>Training Failed</span>
-                <StatusBadge status={job.status} />
+              <div style={{ height:3, borderRadius:2, background:T.border, overflow:'hidden' }}>
+                <div style={{ height:'100%', borderRadius:2, background:T.warning, width:pct+'%', transition:'width 400ms ease' }} />
               </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: BB.textSecondary,
-                  fontFamily: 'var(--font-mono)',
-                  lineHeight: 1.5,
-                  background: 'rgba(0,0,0,0.3)',
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  border: '1px solid rgba(248, 113, 113, 0.2)',
-                }}
-              >
-                {job.error_message || job.current_stage || 'An unexpected error occurred.'}
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:T.textSec, fontFamily:T.mono }}>
+                <span>{job.current_stage||'Fitting estimator...'}</span>
+                {job.estimated_seconds?<span>~{job.estimated_seconds.toFixed(0)}s remaining</span>:null}
               </div>
-              <button
-                onClick={() => onNavigate('workspace')}
-                style={{
-                  marginTop: 14,
-                  padding: '8px 18px',
-                  borderRadius: 8,
-                  border: `1px solid ${BB.border}`,
-                  background: BB.elevated,
-                  color: BB.text,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontFamily: 'var(--font-ui)',
-                }}
-              >
-                <Play style={{ width: 12, height: 12 }} /> Back to Setup
-              </button>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ── MODEL PERFORMANCE BENCHMARK (COMPLETED RUNS) ───────────── */}
-        {job.status === 'COMPLETED' && (
-          <div
-            style={{
-              background: 'linear-gradient(135deg, rgba(28, 21, 53, 0.8) 0%, rgba(18, 14, 34, 0.9) 100%)',
-              border: `1px solid ${BB.border}`,
-              borderRadius: 16,
-              padding: '24px 28px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 18,
-              boxShadow: '0 12px 36px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)',
-              backdropFilter: 'blur(16px)',
-            }}
-          >
-            {/* Embedded Reliability Warning Notice */}
-            {showReliabilityWarning && (
-              <div
-                style={{
-                  background: 'rgba(245, 158, 11, 0.1)',
-                  border: '1px solid rgba(245, 158, 11, 0.35)',
-                  borderRadius: 10,
-                  padding: '12px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                }}
-              >
-                <AlertTriangle style={{ width: 18, height: 18, color: BB.goldLight, flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 800,
-                      color: '#FFFFFF',
-                      marginBottom: 2,
-                    }}
-                  >
-                    Evaluation may be unreliable
-                  </div>
-                  <div style={{ fontSize: 12, color: BB.textSecondary, lineHeight: 1.4 }}>
-                    {isTinyDataset
-                      ? `Very small dataset (${datasetRowCount} rows). Metrics may be unstable — gather more data before drawing conclusions.`
-                      : 'One or more metrics could not be calculated. Check dataset quality and configuration.'}
-                  </div>
+          {job.status==='FAILED' && (
+            <div style={{ padding:'16px 24px', borderBottom:'1px solid '+T.border, borderLeft:'3px solid '+T.error, display:'flex', alignItems:'flex-start', gap:14, flexShrink:0 }}>
+              <AlertCircle style={{ width:18, height:18, color:T.error, flexShrink:0, marginTop:1 }} />
+              <div style={{ flex:1 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                  <span style={{ fontSize:13, fontWeight:600, color:T.text }}>Training Failed</span>
+                  <StatusBadge status={job.status} />
+                </div>
+                <div style={{ fontSize:12, color:T.textSec, fontFamily:T.mono, lineHeight:1.6, padding:'8px 0' }}>
+                  {job.error_message||job.current_stage||'An unexpected error occurred.'}
+                </div>
+                <button onClick={() => onNavigate('workspace')}
+                  style={{ marginTop:12, padding:'5px 12px', borderRadius:4, border:'1px solid '+T.border, background:'transparent', color:T.text, fontSize:12, fontWeight:500, cursor:'pointer', display:'inline-flex', alignItems:'center', gap:6, fontFamily:T.ui }}
+                >
+                  <Play style={{ width:11, height:11 }} /> Back to Setup
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showReliabilityWarning && (
+            <div style={{ padding:'12px 24px', borderBottom:'1px solid '+T.border, borderLeft:'3px solid '+T.warning, display:'flex', alignItems:'flex-start', gap:10, flexShrink:0 }}>
+              <AlertTriangle style={{ width:15, height:15, color:T.warning, flexShrink:0, marginTop:1 }} />
+              <div>
+                <div style={{ fontSize:12, fontWeight:600, color:T.text, marginBottom:2 }}>Evaluation may be unreliable</div>
+                <div style={{ fontSize:12, color:T.textSec, lineHeight:1.5 }}>
+                  {isTinyDataset?'Very small dataset ('+datasetRowCount+' rows). Metrics may be unstable.':'One or more metrics could not be calculated. Check dataset quality and configuration.'}
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Benchmark Body: Gauge & Primary Metric Details */}
-            {pk !== null && typeof pv === 'number' && Number.isFinite(pv) && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 28,
-                  padding: '16px 20px',
-                  borderRadius: 12,
-                  background: 'rgba(0, 0, 0, 0.25)',
-                  border: `1px solid rgba(138, 121, 202, 0.15)`,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div style={{ position: 'relative', flexShrink: 0 }}>
-                  <MetricRing value={ringValue} color={pc} size={104} />
-                  <div
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    {isRatioMetric(pk) ? (
-                      <>
-                        <span
-                          style={{
-                            fontSize: 24,
-                            fontWeight: 900,
-                            color: '#FFFFFF',
-                            fontFamily: 'var(--font-mono)',
-                            lineHeight: 1,
-                          }}
-                        >
-                          {(pv * 100).toFixed(1)}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: BB.muted,
-                            letterSpacing: '0.06em',
-                            textTransform: 'uppercase',
-                            marginTop: 2,
-                          }}
-                        >
-                          %
-                        </span>
-                      </>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 18,
-                          fontWeight: 900,
-                          color: '#FFFFFF',
-                          fontFamily: 'var(--font-mono)',
-                          lineHeight: 1,
-                          textAlign: 'center',
-                          padding: '0 6px',
-                        }}
-                      >
-                        {pv.toFixed(3)}
+          {/* Benchmark Primary Metric Hero (Direct on page, no background layer) */}
+          {job.status==='COMPLETED' && pk !== null && typeof pv === 'number' && Number.isFinite(pv) && (
+            <div style={{ padding:'20px 24px', borderBottom:'1px solid '+T.border, display:'flex', alignItems:'center', gap:24, flexShrink:0 }}>
+              <div style={{ position:'relative', width:96, height:96, flexShrink:0 }}>
+                <MetricRing value={ringValue} color={pc} size={96} />
+                <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center' }}>
+                  {isRatioMetric(pk) ? (
+                    <>
+                      <span style={{ fontSize:22, fontWeight:800, color:T.text, fontFamily:T.mono, lineHeight:1 }}>
+                        {(pv * 100).toFixed(1)}
                       </span>
-                    )}
-                  </div>
-                </div>
-
-                <div style={{ flex: 1, minWidth: 260 }}>
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 800,
-                      color: BB.gold,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.12em',
-                      marginBottom: 4,
-                    }}
-                  >
-                    Primary Metric
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 26,
-                      fontWeight: 900,
-                      color: '#FFFFFF',
-                      letterSpacing: '-0.02em',
-                      lineHeight: 1.1,
-                      marginBottom: 10,
-                    }}
-                  >
-                    {fmtKey(pk)}
-                  </div>
-                  {/* Honest Plain Language Interpretation Box */}
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: BB.textSecondary,
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      padding: '10px 14px',
-                      borderRadius: 8,
-                      border: '1px solid rgba(138, 121, 202, 0.25)',
-                      lineHeight: 1.5,
-                      fontFamily: 'var(--font-ui)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    <Sparkles style={{ width: 15, height: 15, color: BB.gold, flexShrink: 0 }} />
-                    <span>{performanceInterpretation(pk, pv)}</span>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: 'rgba(52, 211, 153, 0.1)',
-                    border: '1px solid rgba(52, 211, 153, 0.25)',
-                    borderRadius: 12,
-                    padding: '14px 18px',
-                    gap: 4,
-                    flexShrink: 0,
-                  }}
-                >
-                  <CheckCircle2 style={{ width: 24, height: 24, color: BB.successLight }} />
-                  <span style={{ fontSize: 10, fontWeight: 800, color: BB.successLight, letterSpacing: '0.06em' }}>
-                    EVALUATED
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── DUAL-COLUMN DASHBOARD GRID ─────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 20 }}>
-          {/* ── LEFT COLUMN: METRICS & DIAGNOSTICS ───────────────────── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* KPI Cards: All Evaluation Metrics */}
-            {metrics && Object.keys(metrics).length > 0 && (
-              <div
-                style={{
-                  background: BB.card,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 16,
-                  overflow: 'visible',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-                }}
-              >
-                <div
-                  style={{
-                    padding: '14px 20px',
-                    borderBottom: `1px solid ${BB.border}`,
-                    borderTopLeftRadius: 15,
-                    borderTopRightRadius: 15,
-                    background: BB.elevated,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <BarChart2 style={{ width: 16, height: 16, color: BB.primaryLight }} />
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 800,
-                        color: BB.text,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.08em',
-                      }}
-                    >
-                      Evaluation Metrics
-                    </span>
-                  </div>
-                  {actualSplit != null && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: BB.muted,
-                        background: 'rgba(0,0,0,0.3)',
-                        padding: '3px 10px',
-                        borderRadius: 6,
-                        border: `1px solid ${BB.border}`,
-                      }}
-                    >
-                      Computed on {testPct}% test split
+                      <span style={{ fontSize:10, color:T.textDim, fontWeight:700 }}>%</span>
+                    </>
+                  ) : (
+                    <span style={{ fontSize:15, fontWeight:800, color:T.text, fontFamily:T.mono }}>
+                      {fmtVal(pk, pv)}
                     </span>
                   )}
                 </div>
+              </div>
+              <div style={{ flex:1, display:'flex', flexDirection:'column', gap:6 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  <span style={{ fontSize:16, fontWeight:700, color:T.text, letterSpacing:'-0.01em' }}>{fmtKey(pk)}</span>
+                  <StatusBadge status={job.status} />
+                </div>
+                <div style={{ fontSize:12.5, color:T.textSec, lineHeight:1.5 }}>
+                  {perfInterp(pk, pv)}
+                </div>
+              </div>
+            </div>
+          )}
 
-                <div
+          {/* RUN CONFIGURATION & DATASET SPLIT (ALL RIGHT SIDE INFORMATION NOW DIRECT ON PAGE) */}
+          <div style={{ padding:'20px 24px', borderBottom:'1px solid '+T.border, display:'flex', flexDirection:'column', gap:16, flexShrink:0 }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:7 }}>
+                <Cpu style={{ width:13, height:13, color:'#00D4FF' }} />
+                <span
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                    gap: 1,
-                    background: BB.border,
-                    borderBottomLeftRadius: 15,
-                    borderBottomRightRadius: 15,
-                    overflow: 'visible',
+                    display:'inline-flex',
+                    alignItems:'center',
+                    padding:'2px 8px',
+                    borderRadius:4,
+                    background:'rgba(0, 212, 255, 0.16)',
+                    border:'1px solid rgba(0, 212, 255, 0.38)',
+                    color:'#FFFFFF',
+                    fontSize:10,
+                    fontWeight:700,
+                    textTransform:'uppercase',
+                    letterSpacing:'0.08em',
+                    fontFamily:T.ui,
                   }}
                 >
-                  {Object.entries(metrics).map(([k, v], idx, arr) => {
-                    const isInvalid = typeof v === 'number' && !Number.isFinite(v);
-                    const lk = k.toLowerCase();
-                    const isErr = REGRESSION_ERROR_METRICS.has(lk);
-                    const isR2 = R2_METRICS.has(lk);
-                    const align = idx === 0 ? 'left' : idx === arr.length - 1 ? 'right' : 'center';
-
-                    return (
-                      <div
-                        key={k}
-                        style={{
-                          background: BB.card,
-                          padding: '18px 20px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          transition: 'all 150ms ease',
-                          position: 'relative',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = BB.cardHover;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = BB.card;
-                        }}
-                      >
-                        <div>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: BB.muted,
-                              textTransform: 'uppercase',
-                              letterSpacing: '0.06em',
-                              marginBottom: 8,
-                            }}
-                          >
-                            <MetricLearningTooltip metricName={k} align={align}>
-                              <span>{fmtKey(k)}</span>
-                            </MetricLearningTooltip>
-                          </div>
-                          <div
-                            style={{
-                              fontSize: 22,
-                              fontWeight: 900,
-                              color: isInvalid ? BB.disabled : '#FFFFFF',
-                              fontFamily: 'var(--font-mono)',
-                              lineHeight: 1.1,
-                            }}
-                          >
-                            {isInvalid ? 'N/A' : fmtVal(k, v)}
-                          </div>
-                        </div>
-
-                        {/* Metric category badge */}
-                        <div style={{ fontSize: 10, color: BB.subtle }}>
-                          {isInvalid ? (
-                            <span style={{ color: BB.disabled, fontSize: 10 }}>Not available for this evaluation</span>
-                          ) : isErr ? (
-                            <span
-                              style={{
-                                color: BB.primaryLight,
-                                background: 'rgba(138, 121, 202, 0.15)',
-                                padding: '2px 7px',
-                                borderRadius: 4,
-                                border: '1px solid rgba(138, 121, 202, 0.25)',
-                              }}
-                            >
-                              Error (lower is better)
-                            </span>
-                          ) : isR2 ? (
-                            <span
-                              style={{
-                                color: BB.gold,
-                                background: 'rgba(245, 158, 11, 0.15)',
-                                padding: '2px 7px',
-                                borderRadius: 4,
-                                border: '1px solid rgba(245, 158, 11, 0.25)',
-                              }}
-                            >
-                              R² Explanatory Power
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                color: BB.successLight,
-                                background: 'rgba(16, 185, 129, 0.14)',
-                                padding: '2px 7px',
-                                borderRadius: 4,
-                                border: '1px solid rgba(16, 185, 129, 0.25)',
-                              }}
-                            >
-                              Ratio (0–100%)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  Run Configuration
+                </span>
+              </div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:'12px 20px' }}>
+              {configRows.map(({label,val}) => (
+                <div key={label} style={{ display:'flex', flexDirection:'column', gap:6, minWidth:0 }}>
+                  <span
+                    style={{
+                      display:'inline-flex',
+                      alignItems:'center',
+                      width:'fit-content',
+                      padding:'2px 8px',
+                      borderRadius:4,
+                      background:'rgba(0, 212, 255, 0.16)',
+                      border:'1px solid rgba(0, 212, 255, 0.38)',
+                      color:'#FFFFFF',
+                      fontSize:10,
+                      fontWeight:700,
+                      textTransform:'uppercase',
+                      letterSpacing:'0.07em',
+                      fontFamily:T.ui,
+                    }}
+                  >
+                    {label}
+                  </span>
+                  <span
+                    title={String(val)}
+                    style={{
+                      fontSize:13,
+                      fontWeight:600,
+                      color:T.text,
+                      fontFamily:T.mono,
+                      overflow:'hidden',
+                      textOverflow:'ellipsis',
+                      whiteSpace:'nowrap',
+                      maxWidth:'100%',
+                    }}
+                  >
+                    {val}
+                  </span>
                 </div>
+              ))}
+            </div>
 
-                {/* Student Learning Layer: Baseline Model & Wilson Confidence Interval (B4, B5) */}
-                <div style={{ padding: '16px 20px', background: BB.elevated, borderTop: `1px solid ${BB.border}` }}>
+            {/* Dataset Split */}
+            <div style={{ display:'flex', flexDirection:'column', gap:8, paddingTop:4 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:11 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                  <Sliders style={{ width:12, height:12, color:'#00D4FF' }} />
+                  <span
+                    style={{
+                      display:'inline-flex',
+                      alignItems:'center',
+                      width:'fit-content',
+                      padding:'2px 8px',
+                      borderRadius:4,
+                      background:'rgba(0, 212, 255, 0.16)',
+                      border:'1px solid rgba(0, 212, 255, 0.38)',
+                      color:'#FFFFFF',
+                      fontSize:10,
+                      fontWeight:700,
+                      textTransform:'uppercase',
+                      letterSpacing:'0.07em',
+                      fontFamily:T.ui,
+                    }}
+                  >
+                    Dataset Split
+                  </span>
+                </div>
+                <div style={{ display:'flex', gap:16, fontSize:11 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                    <div style={{ width:7, height:7, borderRadius:2, background:T.accent }} />
+                    <span style={{ color:T.textSec }}>Train {trainPct}%</span>
+                    {trainRows!=null&&<span style={{ color:T.textDim, fontFamily:T.mono }}>({trainRows})</span>}
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                    <div style={{ width:7, height:7, borderRadius:2, background:T.warning }} />
+                    <span style={{ color:T.textSec }}>Test {testPct}%</span>
+                    {testRows!=null&&<span style={{ color:T.textDim, fontFamily:T.mono }}>({testRows})</span>}
+                  </div>
+                </div>
+              </div>
+              <div style={{ height:4, borderRadius:2, overflow:'hidden', background:T.border, display:'flex', gap:2 }}>
+                <div style={{ width:trainPct+'%', background:T.accent, borderRadius:2 }} title={'Train: '+trainPct+'%'} />
+                <div style={{ flex:1, background:T.warning, borderRadius:2 }} title={'Test: '+testPct+'%'} />
+              </div>
+            </div>
+          </div>
+
+          {/* Evaluation Metrics (Flat Table, Direct on page, No background layer) */}
+          {metrics && Object.keys(metrics).length>0 && (
+            <div style={{ borderBottom:'1px solid '+T.border, flexShrink:0 }}>
+              <div style={{ padding:'14px 24px 6px', display:'flex', alignItems:'center', gap:7 }}>
+                <BarChart2 style={{ width:13, height:13, color:'#00D4FF' }} />
+                <span
+                  style={{
+                    display:'inline-flex',
+                    alignItems:'center',
+                    padding:'2px 8px',
+                    borderRadius:4,
+                    background:'rgba(0, 212, 255, 0.16)',
+                    border:'1px solid rgba(0, 212, 255, 0.38)',
+                    color:'#FFFFFF',
+                    fontSize:10,
+                    fontWeight:700,
+                    textTransform:'uppercase',
+                    letterSpacing:'0.07em',
+                    fontFamily:T.ui,
+                  }}
+                >
+                  Evaluation Metrics
+                </span>
+                {actualSplit!=null && <span style={{ fontSize:10, color:'#FFFFFF', marginLeft:'auto' }}>Computed on {testPct}% test split</span>}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'180px 1fr 80px', padding:'6px 24px', borderBottom:'1px solid '+T.borderSubtle, gap:16 }}>
+                {([['Metric','left'],['Value','left'],['Score','right']] as const).map(([h,align]) => (
+                  <span key={h} style={{ fontSize:10, fontWeight:700, color:'#FFFFFF', textTransform:'uppercase', letterSpacing:'0.07em', textAlign:align }}>{h}</span>
+                ))}
+              </div>
+              {Object.entries(metrics).map(([k,v],idx,arr) => (
+                <MetricRow key={k} metricKey={k} value={v} align={idx===0?'left':idx===arr.length-1?'right':'center'} />
+              ))}
+              {learningMode && (
+                <div style={{ padding:'12px 24px', borderTop:'1px solid '+T.borderSubtle }}>
                   <BaselineDisplay
-                    taskType={isClassification ? 'classification' : 'regression'}
-                    modelScore={typeof (metrics?.accuracy ?? pv) === 'number' ? Number(metrics?.accuracy ?? pv) : undefined}
-                    baselineScore={isClassification ? (typeof (job as any).baseline_accuracy === 'number' ? (job as any).baseline_accuracy : 0.50) : 0.0}
-                    testSampleSize={testRows ?? undefined}
+                    className="border-0 bg-transparent p-0"
+                    taskType={isClassification?'classification':'regression'}
+                    modelScore={typeof(metrics?.accuracy??pv)==='number'?Number(metrics?.accuracy??pv):undefined}
+                    baselineScore={isClassification?(typeof(job as any).baseline_accuracy==='number'?(job as any).baseline_accuracy:0.50):0.0}
+                    testSampleSize={testRows??undefined}
                     wilsonInterval={(job as any).wilson_ci}
                   />
                 </div>
+              )}
+            </div>
+          )}
+
+          {job.status==='COMPLETED' && (!metrics||Object.keys(metrics).length===0) && (
+            <div style={{ padding:'16px 24px', borderBottom:'1px solid '+T.border, display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
+              <AlertCircle style={{ width:18, height:18, color:T.warning, flexShrink:0 }} />
+              <div>
+                <div style={{ fontSize:13, fontWeight:600, color:T.text }}>Job completed — no metrics returned</div>
+                <div style={{ fontSize:12, color:T.textSec, marginTop:3, lineHeight:1.5 }}>The training worker finished but did not return evaluation metrics. Check backend logs.</div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Completed but no metrics */}
-            {job.status === 'COMPLETED' && (!metrics || Object.keys(metrics).length === 0) && (
-              <div
-                style={{
-                  background: BB.card,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 14,
-                  padding: '20px 22px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 14,
-                }}
-              >
-                <AlertCircle style={{ width: 20, height: 20, color: BB.warning, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: BB.text }}>Job completed — no metrics returned</div>
-                  <div style={{ fontSize: 12, color: BB.muted, marginTop: 4 }}>
-                    The training worker finished but did not return evaluation metrics. Check backend logs for details.
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── Interactive Threshold Optimizer & Confusion Matrix (Classification) ── */}
-            {isClassification && job.status === 'COMPLETED' && (
-              <ThresholdOptimizer
-                job={job}
-                targetColumn={job.target_column || trainingConfig?.target_column || 'Target'}
-                baseMetrics={metrics}
-                confusionMatrix={job.metadata?.confusion_matrix as number[][] | undefined}
-              />
-            )}
-
-            {/* ── Feature Importance & Contribution Breakdown ── */}
-            {job.status === 'COMPLETED' && (
+          {/* FEATURE IMPORTANCE BLOCK (BROUGHT BACK! DIRECT ON PAGE) */}
+          {featureCols.length > 0 && (
+            <div style={{ padding:'20px 24px', borderBottom:'1px solid '+T.border, flexShrink:0 }}>
               <FeatureImportanceCard
-                featureImportance={
-                  (job.metadata?.all_feature_importance as any) ||
-                  (job.metadata?.feature_importance as any)
-                }
+                featureImportance={job.metadata?.feature_importance as any}
                 featureColumns={featureCols}
               />
-            )}
-
-            {/* Feature Columns Used Badge Bar */}
-            {featureCols.length > 0 && (
-              <div
-                style={{
-                  background: BB.card,
-                  border: `1px solid ${BB.border}`,
-                  borderRadius: 16,
-                  overflow: 'hidden',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-                }}
-              >
-                <div
-                  style={{
-                    padding: '14px 20px',
-                    borderBottom: `1px solid ${BB.border}`,
-                    background: BB.elevated,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                  }}
-                >
-                  <Layers style={{ width: 15, height: 15, color: BB.primaryLight }} />
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color: BB.text,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                    }}
-                  >
-                    Feature Columns Used ({featureCols.length})
-                  </span>
-                </div>
-                <div style={{ padding: '16px 20px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {featureCols.map((col) => (
-                    <span
-                      key={col}
-                      style={{
-                        display: 'inline-block',
-                        padding: '4px 12px',
-                        borderRadius: 6,
-                        fontSize: 12,
-                        fontWeight: 700,
-                        fontFamily: 'var(--font-mono)',
-                        background: 'rgba(138, 121, 202, 0.15)',
-                        color: BB.textSecondary,
-                        border: '1px solid rgba(138, 121, 202, 0.3)',
-                      }}
-                    >
-                      {col}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── RIGHT COLUMN: DATASET SPLIT & RUN SPECS ─────────────── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* Visual Train / Test Split Card */}
-            <div
-              style={{
-                background: BB.card,
-                border: `1px solid ${BB.border}`,
-                borderRadius: 16,
-                overflow: 'hidden',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-              }}
-            >
-              <div
-                style={{
-                  padding: '14px 20px',
-                  borderBottom: `1px solid ${BB.border}`,
-                  background: BB.elevated,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Sliders style={{ width: 15, height: 15, color: BB.gold }} />
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color: BB.text,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                    }}
-                  >
-                    Dataset Split Distribution
-                  </span>
-                </div>
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontFamily: 'var(--font-mono)',
-                    color: BB.muted,
-                  }}
-                >
-                  {trainPct}% / {testPct}%
-                </span>
-              </div>
-
-              <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Segmented Bar */}
-                <div
-                  style={{
-                    display: 'flex',
-                    height: 12,
-                    borderRadius: 6,
-                    overflow: 'hidden',
-                    background: 'rgba(0,0,0,0.4)',
-                    padding: 2,
-                    gap: 3,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: `${trainPct}%`,
-                      background: 'linear-gradient(90deg, #6C5CA6 0%, #8A79CA 100%)',
-                      borderRadius: 4,
-                      boxShadow: '0 0 8px rgba(138, 121, 202, 0.45)',
-                    }}
-                    title={`Train: ${trainPct}%`}
-                  />
-                  <div
-                    style={{
-                      width: `${testPct}%`,
-                      background: 'linear-gradient(90deg, #C9A24B 0%, #F59E0B 100%)',
-                      borderRadius: 4,
-                      boxShadow: '0 0 8px rgba(245, 158, 11, 0.45)',
-                    }}
-                    title={`Test: ${testPct}%`}
-                  />
-                </div>
-
-                {/* Legend & Breakdown Chips */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: 2, background: '#8A79CA', boxShadow: '0 0 6px #8A79CA' }} />
-                    <span style={{ color: BB.muted }}>Train Set:</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF', fontFamily: 'var(--font-mono)' }}>
-                      {trainPct}% {trainRows != null ? `(${trainRows} rows)` : ''}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: 2, background: '#F59E0B', boxShadow: '0 0 6px #F59E0B' }} />
-                    <span style={{ color: BB.muted }}>Test Set:</span>
-                    <span style={{ fontWeight: 700, color: '#FFFFFF', fontFamily: 'var(--font-mono)' }}>
-                      {testPct}% {testRows != null ? `(${testRows} rows)` : ''}
-                    </span>
-                  </div>
-                </div>
-              </div>
             </div>
+          )}
 
-            {/* Run Configuration Card (Zero Job ID, Zero verified from job record) */}
-            <div
-              style={{
-                background: BB.card,
-                border: `1px solid ${BB.border}`,
-                borderRadius: 16,
-                overflow: 'hidden',
-                boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-              }}
-            >
-              <div
-                style={{
-                  padding: '14px 20px',
-                  borderBottom: `1px solid ${BB.border}`,
-                  background: BB.elevated,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Cpu style={{ width: 15, height: 15, color: BB.primaryLight }} />
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color: BB.text,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                    }}
-                  >
-                    Run Configuration
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ padding: '6px 0' }}>
-                {[
-                  { label: 'Dataset', val: datasetName },
-                  { label: 'Algorithm', val: actualAlgorithm.replace(/_/g, ' ') },
-                  { label: 'Target', val: job.target_column || trainingConfig?.target_column || '—' },
-                  { label: 'Features', val: `${featureCols.length} column${featureCols.length !== 1 ? 's' : ''}` },
-                  {
-                    label: 'Train Split',
-                    val: `${trainPct}% train / ${testPct}% test`,
-                  },
-                  { label: 'CV Folds', val: actualCvFolds != null ? `${actualCvFolds}-fold` : '—' },
-                  { label: 'Scaler', val: actualScaler.replace(/_/g, ' ') },
-                  { label: 'Imputer', val: actualImputer.replace(/_/g, ' ') },
-                  { label: 'Random Seed', val: actualSeed != null ? String(actualSeed) : '—' },
-                ].map(({ label, val }) => (
-                  <div
-                    key={label}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '10px 20px',
-                      borderBottom: `1px solid rgba(138, 121, 202, 0.1)`,
-                      transition: 'background 120ms ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent';
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: BB.muted,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em',
-                      }}
-                    >
-                      {label}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: '#FFFFFF',
-                        fontFamily: 'var(--font-mono)',
-                        textAlign: 'right',
-                      }}
-                    >
-                      {val}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {/* Threshold Optimizer & Confusion Matrix (Direct on page, No background layer) */}
+          {isClassification && job.status==='COMPLETED' && (
+            <div style={{ padding:'20px 24px 32px', flexShrink:0 }}>
+              <ThresholdOptimizer job={job} targetColumn={job.target_column||trainingConfig?.target_column||'Target'} baseMetrics={metrics} confusionMatrix={job.metadata?.confusion_matrix as number[][]|undefined} />
             </div>
-          </div>
+          )}
         </div>
-        </>
-        )}
-      </div>
+      )}
     </div>
   );
 });

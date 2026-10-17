@@ -521,8 +521,8 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
         height: '100%',
         overflowY: 'auto',
         padding: '28px 36px',
-        background: '#050B14',
-        color: '#E2E8F0',
+        background: 'var(--bb-surface, #1B1530)',
+        color: 'var(--bb-text, #F5F1EC)',
       }}
     >
       {/* ── Header ── */}

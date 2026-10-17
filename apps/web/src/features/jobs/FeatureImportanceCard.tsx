@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import React from 'react';
+import { Sparkles } from 'lucide-react';
 
 interface FeatureImportanceItem {
   feature: string;
@@ -12,26 +12,29 @@ interface FeatureImportanceCardProps {
   featureColumns: string[];
 }
 
+/* ── Blueberry & Maroon Design System Tokens (from index.css) ───────── */
 const BB = {
-  card: '#1D1737',
-  elevated: '#18132E',
-  border: 'rgba(138, 121, 202, 0.22)',
-  text: '#FFFFFF',
-  textSecondary: '#E2E8F0',
-  muted: '#94A3B8',
-  subtle: '#64748B',
-  primary: '#4B3B7C',
-  primaryLight: '#8A79CA',
-  gold: '#F59E0B',
-  success: '#10B981',
+  base: 'var(--bb-base, #0B0912)',
+  surface: 'var(--bb-surface, #1B1530)',
+  elevated: 'var(--bb-elevated, #2A2247)',
+  border: 'var(--bb-primary-border, rgba(107, 92, 166, 0.18))',
+  borderSubtle: 'rgba(107, 92, 166, 0.10)',
+  primary: 'var(--bb-primary, #4B3B7C)',
+  primaryLight: 'var(--bb-primary-light, #6C5CA6)',
+  accent: 'var(--bb-primary-light, #6C5CA6)',
+  gold: 'var(--bb-gold, #C9A24B)',
+  goldLight: '#E2BD68',
+  text: 'var(--bb-text, #F5F1EC)',
+  textSec: 'var(--bb-muted, #9E93B8)',
+  textDim: 'var(--bb-placeholder, #5E5480)',
+  mono: 'var(--font-mono, "JetBrains Mono", monospace)',
+  ui: 'var(--font-ui, "Space Grotesk", sans-serif)',
 };
 
 export const FeatureImportanceCard: React.FC<FeatureImportanceCardProps> = ({
   featureImportance,
   featureColumns,
 }) => {
-  const [showAll, setShowAll] = useState(false);
-
   // Normalize feature importance items
   const items: FeatureImportanceItem[] = React.useMemo(() => {
     if (featureImportance && featureImportance.length > 0) {
@@ -58,37 +61,26 @@ export const FeatureImportanceCard: React.FC<FeatureImportanceCardProps> = ({
 
   if (items.length === 0) return null;
 
-  const displayItems = showAll ? items : items.slice(0, 5);
-
   return (
-    <div
-      style={{
-        background: BB.card,
-        border: `1px solid ${BB.border}`,
-        borderRadius: 16,
-        overflow: 'hidden',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-      }}
-    >
-      <div
-        style={{
-          padding: '14px 20px',
-          borderBottom: `1px solid ${BB.border}`,
-          background: BB.elevated,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, background: 'transparent' }}>
+      {/* Header (Direct on page, no box) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Sparkles style={{ width: 16, height: 16, color: BB.gold }} />
+          <Sparkles style={{ width: 14, height: 14, color: '#00D4FF' }} />
           <span
             style={{
-              fontSize: 12,
-              fontWeight: 800,
-              color: BB.text,
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '2px 8px',
+              borderRadius: 4,
+              background: 'rgba(0, 212, 255, 0.16)',
+              border: '1px solid rgba(0, 212, 255, 0.38)',
+              color: '#FFFFFF',
+              fontSize: 10,
+              fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
+              fontFamily: BB.ui,
             }}
           >
             Feature Importance & Contribution
@@ -97,127 +89,95 @@ export const FeatureImportanceCard: React.FC<FeatureImportanceCardProps> = ({
         <span
           style={{
             fontSize: 11,
-            color: BB.muted,
-            background: 'rgba(0,0,0,0.3)',
-            padding: '3px 10px',
-            borderRadius: 6,
-            border: `1px solid ${BB.border}`,
+            color: BB.textDim,
+            fontFamily: BB.mono,
           }}
         >
           {items.length} Features Evaluated
         </span>
       </div>
 
-      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: 12, color: BB.textSecondary, lineHeight: 1.5 }}>
-          Relative importance weights computed on test evaluation. Features at the top exert the strongest predictive influence on the model.
-        </div>
+      <div style={{ fontSize: 12, color: BB.textSec, lineHeight: 1.5, fontFamily: BB.ui }}>
+        Relative importance weights computed on test evaluation. Features at the top exert the strongest predictive influence on the model.
+      </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {displayItems.map((item, index) => {
-            const pct = Math.round(item.importance * 100);
-            return (
-              <div
-                key={item.feature}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 5,
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  border: '1px solid rgba(138, 121, 202, 0.12)',
-                  transition: 'background 150ms ease',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 800,
-                        fontFamily: 'var(--font-mono)',
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        background: index === 0 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(138, 121, 202, 0.15)',
-                        color: index === 0 ? BB.gold : BB.primaryLight,
-                        border: `1px solid ${index === 0 ? 'rgba(245, 158, 11, 0.3)' : 'rgba(138, 121, 202, 0.2)'}`,
-                      }}
-                    >
-                      #{item.rank ?? index + 1}
-                    </span>
-                    <span style={{ fontWeight: 600, color: BB.text, fontFamily: 'var(--font-mono)' }}>
-                      {item.feature}
-                    </span>
-                  </div>
+      {/* Feature Rows (Scrollable without visible scrollbar, direct on page, no 'show all' button) */}
+      <div
+        className="no-scrollbar"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          marginTop: 4,
+          maxHeight: 280,
+          overflowY: 'auto',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+          paddingRight: 2,
+        }}
+      >
+        {items.map((item, index) => {
+          const pct = Math.round(item.importance * 100);
+          return (
+            <div
+              key={item.feature}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                padding: '2px 0',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span
                     style={{
-                      fontFamily: 'var(--font-mono)',
+                      fontSize: 11,
                       fontWeight: 700,
-                      color: index === 0 ? BB.gold : BB.textSecondary,
+                      fontFamily: BB.mono,
+                      color: index === 0 ? BB.gold : BB.textDim,
                     }}
                   >
-                    {pct}% weight
+                    #{item.rank ?? index + 1}
+                  </span>
+                  <span style={{ fontWeight: 600, color: BB.text, fontFamily: BB.mono }}>
+                    {item.feature}
                   </span>
                 </div>
-
-                {/* Progress bar */}
-                <div
+                <span
                   style={{
-                    height: 6,
-                    borderRadius: 3,
-                    background: 'rgba(0,0,0,0.3)',
-                    overflow: 'hidden',
+                    fontFamily: BB.mono,
+                    fontWeight: 700,
+                    color: index === 0 ? BB.gold : BB.textSec,
+                    fontSize: 11,
                   }}
                 >
-                  <div
-                    style={{
-                      height: '100%',
-                      width: `${pct}%`,
-                      borderRadius: 3,
-                      background:
-                        index === 0
-                          ? 'linear-gradient(90deg, #F59E0B 0%, #FBBF24 100%)'
-                          : 'linear-gradient(90deg, #6C5CA6 0%, #8A79CA 100%)',
-                      boxShadow: index === 0 ? '0 0 8px rgba(245, 158, 11, 0.4)' : '0 0 8px rgba(138, 121, 202, 0.3)',
-                      transition: 'width 300ms ease',
-                    }}
-                  />
-                </div>
+                  {pct}% weight
+                </span>
               </div>
-            );
-          })}
-        </div>
 
-        {items.length > 5 && (
-          <button
-            onClick={() => setShowAll((prev) => !prev)}
-            style={{
-              alignSelf: 'center',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              background: 'transparent',
-              border: 'none',
-              color: BB.primaryLight,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-              padding: '6px 12px',
-              borderRadius: 6,
-            }}
-          >
-            {showAll ? (
-              <>
-                <ChevronUp size={14} /> Show Top 5
-              </>
-            ) : (
-              <>
-                <ChevronDown size={14} /> Show All ({items.length}) Features
-              </>
-            )}
-          </button>
-        )}
+              {/* Progress bar */}
+              <div
+                style={{
+                  height: 4,
+                  borderRadius: 2,
+                  background: BB.border,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${pct}%`,
+                    borderRadius: 2,
+                    background: index === 0 ? BB.gold : BB.accent,
+                    transition: 'width 300ms ease',
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

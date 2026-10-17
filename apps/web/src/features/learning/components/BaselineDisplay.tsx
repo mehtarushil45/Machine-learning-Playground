@@ -73,6 +73,7 @@ export function BaselineDisplay({
   return (
     <div
       data-testid="baseline-metric-display"
+      style={className?.includes('border-0') ? { border: 'none', background: 'transparent', padding: 0 } : undefined}
       className={`p-3 rounded-lg border text-xs bg-[#111622] ${
         barelyBeatsBaseline && !isRegression
           ? 'border-slate-600 bg-slate-900/95 text-slate-200'

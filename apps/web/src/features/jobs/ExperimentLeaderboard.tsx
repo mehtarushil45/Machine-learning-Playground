@@ -22,22 +22,49 @@ interface ExperimentLeaderboardProps {
   targetColumn?: string;
 }
 
-const BB = {
-  card: '#1D1737',
-  cardHover: '#251D45',
-  elevated: '#18132E',
-  border: 'rgba(138, 121, 202, 0.22)',
-  text: '#FFFFFF',
-  textSecondary: '#E2E8F0',
-  muted: '#94A3B8',
-  subtle: '#64748B',
-  primary: '#4B3B7C',
-  primaryLight: '#8A79CA',
-  gold: '#F59E0B',
-  goldLight: '#FBBF24',
-  success: '#10B981',
-  successLight: '#34D399',
-  error: '#F87171',
+/* ── Blueberry & Maroon Design System Tokens ───────────────────────── */
+const T = {
+  bg: 'var(--bb-surface, #1B1530)',
+  surface: 'var(--bb-elevated, #2A2247)',
+  elevated: 'var(--bb-elevated, #2A2247)',
+  surfaceHover: 'var(--bb-primary-faint, rgba(107, 92, 166, 0.12))',
+  border: 'var(--bb-primary-border, rgba(107, 92, 166, 0.18))',
+  borderSubtle: 'rgba(107, 92, 166, 0.10)',
+  accent: 'var(--bb-primary-light, #6C5CA6)',
+  accentHover: '#8A7DC0',
+  accentSubtle: 'var(--bb-primary-faint, rgba(107, 92, 166, 0.12))',
+  accentBorder: 'var(--bb-primary-ring, rgba(107, 92, 166, 0.35))',
+  gold: 'var(--bb-gold, #C9A24B)',
+  goldSubtle: 'var(--bb-gold-faint, rgba(201, 162, 75, 0.12))',
+  goldBorder: 'rgba(201, 162, 75, 0.35)',
+  success: '#22C55E',
+  successSubtle: 'rgba(34, 197, 94, 0.12)',
+  successBorder: 'rgba(34, 197, 94, 0.35)',
+  maroon: 'var(--bb-maroon, #6E1423)',
+  maroonHover: 'var(--bb-maroon-hover, #8E2A3C)',
+  maroonLight: '#B23A4E',
+  error: 'var(--bb-error, #B23A4E)',
+  text: 'var(--bb-text, #F5F1EC)',
+  textSec: 'var(--bb-muted, #9E93B8)',
+  textDim: 'var(--bb-placeholder, #5E5480)',
+  mono: 'var(--font-mono, "JetBrains Mono", monospace)',
+  ui: 'var(--font-ui, "Space Grotesk", sans-serif)',
+};
+
+const blueBadgeStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  width: 'fit-content',
+  padding: '2px 8px',
+  borderRadius: 4,
+  background: 'rgba(0, 212, 255, 0.16)',
+  border: '1px solid rgba(0, 212, 255, 0.38)',
+  color: '#FFFFFF',
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.07em',
+  fontFamily: 'var(--font-ui, "Space Grotesk", sans-serif)',
 };
 
 function getScore(job: JobEntity): { key: string; val: number | string } {
@@ -169,7 +196,6 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
         return prev.filter((id) => id !== jobId);
       }
       if (prev.length >= 2) {
-        // Replace second selection
         return [prev[0], jobId];
       }
       return [...prev, jobId];
@@ -185,44 +211,45 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
   const championRun = allRuns[0];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* ── TOP STATS KPI STRIP ── */}
+    <div style={{ display: 'flex', flexDirection: 'column', background: T.bg }}>
+      {/* ── TOP STATS KPI STRIP (FLAT, CONNECTED, NO FLOATING BOXES) ── */}
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          gap: 14,
+          borderBottom: `1px solid ${T.border}`,
+          background: T.surface,
         }}
       >
         <div
           style={{
-            background: BB.card,
-            border: `1px solid ${BB.border}`,
-            borderRadius: 14,
-            padding: '16px 20px',
+            padding: '14px 20px',
             display: 'flex',
             alignItems: 'center',
-            gap: 14,
+            gap: 12,
+            borderRight: `1px solid ${T.border}`,
           }}
         >
           <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 10,
-              background: 'rgba(138, 121, 202, 0.15)',
+              width: 32,
+              height: 32,
+              borderRadius: 4,
+              background: 'rgba(0, 212, 255, 0.16)',
+              border: '1px solid rgba(0, 212, 255, 0.38)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
-            <Layers style={{ width: 22, height: 22, color: BB.primaryLight }} />
+            <Layers style={{ width: 16, height: 16, color: '#00D4FF' }} />
           </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: BB.muted, textTransform: 'uppercase' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+            <span style={blueBadgeStyle}>
               Tracked Experiments
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: '#FFF', fontFamily: 'var(--font-mono)' }}>
+            </span>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#FFFFFF', fontFamily: T.mono }}>
               {allRuns.length}
             </div>
           </div>
@@ -230,37 +257,37 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
 
         <div
           style={{
-            background: BB.card,
-            border: `1px solid ${BB.border}`,
-            borderRadius: 14,
-            padding: '16px 20px',
+            padding: '14px 20px',
             display: 'flex',
             alignItems: 'center',
-            gap: 14,
+            gap: 12,
+            borderRight: `1px solid ${T.border}`,
           }}
         >
           <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 10,
-              background: 'rgba(245, 158, 11, 0.18)',
+              width: 32,
+              height: 32,
+              borderRadius: 4,
+              background: T.goldSubtle,
+              border: `1px solid ${T.goldBorder}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
-            <Crown style={{ width: 22, height: 22, color: BB.gold }} />
+            <Crown style={{ width: 16, height: 16, color: T.gold }} />
           </div>
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: BB.muted, textTransform: 'uppercase' }}>
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={blueBadgeStyle}>
               Champion Model
-            </div>
+            </span>
             <div
               style={{
-                fontSize: 14,
-                fontWeight: 800,
-                color: BB.gold,
+                fontSize: 13,
+                fontWeight: 700,
+                color: T.gold,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -273,99 +300,101 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
 
         <div
           style={{
-            background: BB.card,
-            border: `1px solid ${BB.border}`,
-            borderRadius: 14,
-            padding: '16px 20px',
+            padding: '14px 20px',
             display: 'flex',
             alignItems: 'center',
-            gap: 14,
+            gap: 12,
+            borderRight: `1px solid ${T.border}`,
           }}
         >
           <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 10,
-              background: 'rgba(16, 185, 129, 0.15)',
+              width: 32,
+              height: 32,
+              borderRadius: 4,
+              background: T.successSubtle,
+              border: `1px solid ${T.successBorder}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
-            <Trophy style={{ width: 22, height: 22, color: BB.successLight }} />
+            <Trophy style={{ width: 16, height: 16, color: T.success }} />
           </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: BB.muted, textTransform: 'uppercase' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={blueBadgeStyle}>
               Best Score
-            </div>
+            </span>
             <div
               style={{
-                fontSize: 22,
-                fontWeight: 900,
-                color: BB.successLight,
-                fontFamily: 'var(--font-mono)',
+                fontSize: 18,
+                fontWeight: 800,
+                color: T.success,
+                fontFamily: T.mono,
               }}
             >
-              {championRun ? formatScore(getScore(championRun.job).key, getScore(championRun.job).val) : '—'}
+              {championRun ? formatScore(getScore(championRun.job).key, getScore(championRun.job).val) : '--'}
             </div>
           </div>
         </div>
 
         <div
           style={{
-            background: BB.card,
-            border: `1px solid ${BB.border}`,
-            borderRadius: 14,
-            padding: '16px 20px',
+            padding: '14px 20px',
             display: 'flex',
             alignItems: 'center',
-            gap: 14,
+            gap: 12,
           }}
         >
           <div
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 10,
-              background: 'rgba(56, 189, 248, 0.15)',
+              width: 32,
+              height: 32,
+              borderRadius: 4,
+              background: 'rgba(0, 212, 255, 0.16)',
+              border: '1px solid rgba(0, 212, 255, 0.38)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
-            <GitCompare style={{ width: 22, height: 22, color: '#38BDF8' }} />
+            <GitCompare style={{ width: 16, height: 16, color: '#00D4FF' }} />
           </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: BB.muted, textTransform: 'uppercase' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={blueBadgeStyle}>
               Comparison Mode
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#38BDF8' }}>
+            </span>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#FFFFFF' }}>
               {selectedRunIds.length === 2 ? '2 Runs Selected' : 'Select 2 to Diff'}
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── TOOLBAR: SEARCH & ACTIONS ── */}
+      {/* ── TOOLBAR: SEARCH & COUNT ── */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: 12,
+          padding: '12px 20px',
+          borderBottom: `1px solid ${T.border}`,
+          background: T.surface,
         }}
       >
         <div style={{ position: 'relative', width: 340 }}>
           <Search
             style={{
               position: 'absolute',
-              left: 12,
+              left: 10,
               top: '50%',
               transform: 'translateY(-50%)',
-              width: 15,
-              height: 15,
-              color: BB.muted,
+              width: 14,
+              height: 14,
+              color: 'rgba(255, 255, 255, 0.6)',
             }}
           />
           <input
@@ -375,324 +404,357 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
               width: '100%',
-              padding: '8px 12px 8px 36px',
-              borderRadius: 8,
-              border: `1px solid ${BB.border}`,
-              background: BB.elevated,
-              color: '#FFF',
+              padding: '6px 10px 6px 32px',
+              borderRadius: 4,
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              background: T.bg,
+              color: '#FFFFFF',
               fontSize: 12,
               outline: 'none',
+              fontFamily: T.ui,
             }}
           />
         </div>
 
-        <div style={{ fontSize: 12, color: BB.muted }}>
-          Showing <strong>{filteredRuns.length}</strong> of {allRuns.length} runs
+        <div style={{ fontSize: 11, color: '#FFFFFF' }}>
+          Showing <strong style={{ color: '#FFFFFF' }}>{filteredRuns.length}</strong> of {allRuns.length} runs
         </div>
       </div>
 
-      {/* ── LEADERBOARD TABLE ── */}
-      <div
-        style={{
-          background: BB.card,
-          border: `1px solid ${BB.border}`,
-          borderRadius: 16,
-          overflow: 'hidden',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-        }}
-      >
-        <div style={{ overflowX: 'auto' }}>
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 12,
-              textAlign: 'left',
-            }}
-          >
-            <thead>
-              <tr
-                style={{
-                  background: BB.elevated,
-                  borderBottom: `1px solid ${BB.border}`,
-                  color: BB.muted,
-                  fontSize: 11,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                }}
-              >
-                <th style={{ padding: '12px 14px', width: 44, textAlign: 'center' }}>Diff</th>
-                <th style={{ padding: '12px 14px', width: 60 }}>Rank</th>
-                <th style={{ padding: '12px 14px' }}>Experiment Run</th>
-                <th style={{ padding: '12px 14px' }}>Algorithm</th>
-                <th style={{ padding: '12px 14px' }}>Target</th>
-                <th style={{ padding: '12px 14px' }}>Primary Score</th>
-                <th style={{ padding: '12px 14px' }}>Hyperparameters</th>
-                <th style={{ padding: '12px 14px' }}>Status</th>
-                <th style={{ padding: '12px 14px', textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRuns.map(({ job, fileName }, idx) => {
-                const isChampion = idx === 0;
-                const isSelectedForDiff = selectedRunIds.includes(job.job_id);
-                const isCurrent = job.job_id === currentJob.job_id;
-                const score = getScore(job);
+      {/* ── LEADERBOARD TABLE (FLAT, EDGE-TO-EDGE, NO SHADOW OR ROUNDED WRAPPERS) ── */}
+      <div style={{ overflowX: 'auto', background: T.surface }}>
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: 12,
+            textAlign: 'left',
+          }}
+        >
+          <thead>
+            <tr
+              style={{
+                background: T.bg,
+                borderBottom: `1px solid ${T.border}`,
+                color: '#FFFFFF',
+                fontSize: 10,
+                textTransform: 'uppercase',
+                letterSpacing: '0.07em',
+              }}
+            >
+              <th style={{ padding: '10px 14px', width: 44, textAlign: 'center' }}>
+                <span style={blueBadgeStyle}>Diff</span>
+              </th>
+              <th style={{ padding: '10px 14px', width: 60 }}>
+                <span style={blueBadgeStyle}>Rank</span>
+              </th>
+              <th style={{ padding: '10px 14px' }}>
+                <span style={blueBadgeStyle}>Experiment Run</span>
+              </th>
+              <th style={{ padding: '10px 14px' }}>
+                <span style={blueBadgeStyle}>Algorithm</span>
+              </th>
+              <th style={{ padding: '10px 14px' }}>
+                <span style={blueBadgeStyle}>Target</span>
+              </th>
+              <th style={{ padding: '10px 14px' }}>
+                <span style={blueBadgeStyle}>Primary Score</span>
+              </th>
+              <th style={{ padding: '10px 14px' }}>
+                <span style={blueBadgeStyle}>Hyperparameters</span>
+              </th>
+              <th style={{ padding: '10px 14px' }}>
+                <span style={blueBadgeStyle}>Status</span>
+              </th>
+              <th style={{ padding: '10px 14px', textAlign: 'right' }}>
+                <span style={{ ...blueBadgeStyle, float: 'right' }}>Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRuns.map(({ job, fileName }, idx) => {
+              const isChampion = idx === 0;
+              const isSelectedForDiff = selectedRunIds.includes(job.job_id);
+              const isCurrent = job.job_id === currentJob.job_id;
+              const score = getScore(job);
 
-                return (
-                  <tr
-                    key={job.job_id}
-                    style={{
-                      borderBottom: '1px solid rgba(138, 121, 202, 0.1)',
-                      background: isCurrent
-                        ? 'rgba(138, 121, 202, 0.1)'
-                        : isSelectedForDiff
-                        ? 'rgba(56, 189, 248, 0.05)'
-                        : 'transparent',
-                      transition: 'background 120ms ease',
-                    }}
-                  >
-                    {/* Checkbox for Diff */}
-                    <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                      <input
-                        type="checkbox"
-                        checked={isSelectedForDiff}
-                        onChange={() => handleToggleSelect(job.job_id)}
-                        style={{ cursor: 'pointer', accentColor: '#38BDF8' }}
-                      />
-                    </td>
+              return (
+                <tr
+                  key={job.job_id}
+                  style={{
+                    borderBottom: `1px solid ${T.borderSubtle}`,
+                    background: isCurrent
+                      ? T.accentSubtle
+                      : isSelectedForDiff
+                      ? 'rgba(0, 212, 255, 0.08)'
+                      : 'transparent',
+                    transition: 'background 100ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isCurrent && !isSelectedForDiff) e.currentTarget.style.background = T.surfaceHover;
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isCurrent && !isSelectedForDiff) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  {/* Checkbox for Diff */}
+                  <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={isSelectedForDiff}
+                      onChange={() => handleToggleSelect(job.job_id)}
+                      style={{ cursor: 'pointer', accentColor: '#00D4FF' }}
+                    />
+                  </td>
 
-                    {/* Rank */}
-                    <td style={{ padding: '12px 14px' }}>
-                      {isChampion ? (
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 4,
-                            padding: '2px 8px',
-                            borderRadius: 12,
-                            background: 'rgba(245, 158, 11, 0.2)',
-                            color: BB.gold,
-                            fontWeight: 800,
-                            border: '1px solid rgba(245, 158, 11, 0.4)',
-                          }}
-                        >
-                          <Crown size={12} /> #1
-                        </span>
-                      ) : (
-                        <span style={{ fontWeight: 700, color: BB.muted, fontFamily: 'var(--font-mono)' }}>
-                          #{idx + 1}
+                  {/* Rank */}
+                  <td style={{ padding: '10px 14px' }}>
+                    {isChampion ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          padding: '2px 7px',
+                          borderRadius: 3,
+                          background: T.goldSubtle,
+                          color: T.gold,
+                          fontWeight: 700,
+                          fontSize: 11,
+                          border: `1px solid ${T.goldBorder}`,
+                        }}
+                      >
+                        <Crown size={11} /> #1
+                      </span>
+                    ) : (
+                      <span style={{ fontWeight: 600, color: '#FFFFFF', fontFamily: T.mono, fontSize: 11 }}>
+                        #{idx + 1}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Experiment Run / Source */}
+                  <td style={{ padding: '10px 14px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontWeight: 600, color: '#FFFFFF', fontFamily: T.mono, fontSize: 12 }}>
+                        {fileName || `run-${job.job_id.slice(0, 8)}`}
+                      </span>
+                      {isCurrent && (
+                        <span style={{ fontSize: 9.5, color: '#00D4FF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          ● Active Buffer
                         </span>
                       )}
-                    </td>
+                    </div>
+                  </td>
 
-                    {/* Experiment Run / Source */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <span style={{ fontWeight: 700, color: '#FFF', fontFamily: 'var(--font-mono)' }}>
-                          {fileName || `run-${job.job_id.slice(0, 8)}`}
-                        </span>
-                        {isCurrent && (
-                          <span style={{ fontSize: 10, color: BB.primaryLight, fontWeight: 700 }}>
-                            ● Active Buffer
-                          </span>
-                        )}
-                      </div>
-                    </td>
+                  {/* Algorithm */}
+                  <td style={{ padding: '10px 14px' }}>
+                    <span style={{ fontWeight: 500, color: '#FFFFFF' }}>
+                      {formatAlgoName(job.algorithm)}
+                    </span>
+                  </td>
 
-                    {/* Algorithm */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <span style={{ fontWeight: 600, color: BB.textSecondary }}>
-                        {formatAlgoName(job.algorithm)}
-                      </span>
-                    </td>
+                  {/* Target */}
+                  <td style={{ padding: '10px 14px' }}>
+                    <span
+                      style={{
+                        padding: '2px 7px',
+                        borderRadius: 3,
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: '#FFFFFF',
+                        fontFamily: T.mono,
+                        fontSize: 11,
+                        border: '1px solid rgba(255, 255, 255, 0.18)',
+                      }}
+                    >
+                      {job.target_column || targetColumn || '--'}
+                    </span>
+                  </td>
 
-                    {/* Target */}
-                    <td style={{ padding: '12px 14px' }}>
+                  {/* Primary Score */}
+                  <td style={{ padding: '10px 14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span
                         style={{
-                          padding: '2px 8px',
-                          borderRadius: 6,
-                          background: 'rgba(255, 255, 255, 0.05)',
-                          color: '#FFF',
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: 11,
-                        }}
-                      >
-                        {job.target_column || targetColumn || '—'}
-                      </span>
-                    </td>
-
-                    {/* Primary Score */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span
-                          style={{
-                            fontSize: 13,
-                            fontWeight: 900,
-                            fontFamily: 'var(--font-mono)',
-                            padding: '3px 8px',
-                            borderRadius: 6,
-                            background: isChampion
-                              ? 'rgba(16, 185, 129, 0.2)'
-                              : 'rgba(138, 121, 202, 0.15)',
-                            color: isChampion ? BB.successLight : '#FFF',
-                            border: `1px solid ${isChampion ? 'rgba(16, 185, 129, 0.35)' : 'rgba(138, 121, 202, 0.25)'}`,
-                          }}
-                        >
-                          {formatScore(score.key, score.val)}
-                        </span>
-                        <span style={{ fontSize: 10, color: BB.muted, textTransform: 'uppercase' }}>
-                          {score.key.replace(/_/g, ' ')}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Hyperparameters */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, fontSize: 10.5 }}>
-                        <span style={{ color: BB.muted }}>
-                          Scaler: <strong>{(job.metadata?.scaler as string) || 'Standard'}</strong>
-                        </span>
-                        <span style={{ color: BB.subtle }}>|</span>
-                        <span style={{ color: BB.muted }}>
-                          CV: <strong>{String(job.metadata?.cross_validation || 5)}x</strong>
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Status */}
-                    <td style={{ padding: '12px 14px' }}>
-                      <span
-                        style={{
-                          fontSize: 10.5,
+                          fontSize: 12,
                           fontWeight: 700,
-                          padding: '2px 8px',
-                          borderRadius: 12,
-                          background:
-                            job.status === 'COMPLETED'
-                              ? 'rgba(16, 185, 129, 0.15)'
-                              : 'rgba(245, 158, 11, 0.15)',
-                          color: job.status === 'COMPLETED' ? BB.successLight : BB.gold,
+                          fontFamily: T.mono,
+                          padding: '2px 6px',
+                          borderRadius: 3,
+                          background: isChampion ? T.successSubtle : 'rgba(255, 255, 255, 0.08)',
+                          color: isChampion ? T.success : '#FFFFFF',
+                          border: `1px solid ${isChampion ? T.successBorder : 'rgba(255, 255, 255, 0.2)'}`,
                         }}
                       >
-                        {job.status}
+                        {formatScore(score.key, score.val)}
                       </span>
-                    </td>
+                      <span style={{ fontSize: 10, color: '#FFFFFF', textTransform: 'uppercase' }}>
+                        {score.key.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                  </td>
 
-                    {/* Actions */}
-                    <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {/* Hyperparameters */}
+                  <td style={{ padding: '10px 14px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 11, fontFamily: T.mono }}>
+                      <span style={{ color: '#FFFFFF' }}>
+                        Scaler: <strong style={{ color: '#FFFFFF' }}>{(job.metadata?.scaler as string) || 'Standard'}</strong>
+                      </span>
+                      <span style={{ color: 'rgba(255, 255, 255, 0.3)' }}>|</span>
+                      <span style={{ color: '#FFFFFF' }}>
+                        CV: <strong style={{ color: '#FFFFFF' }}>{String(job.metadata?.cross_validation || 5)}x</strong>
+                      </span>
+                    </div>
+                  </td>
+
+                  {/* Status */}
+                  <td style={{ padding: '10px 14px' }}>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: '2px 7px',
+                        borderRadius: 3,
+                        background:
+                          job.status === 'COMPLETED'
+                            ? T.successSubtle
+                            : T.goldSubtle,
+                        color: job.status === 'COMPLETED' ? T.success : T.gold,
+                        border: `1px solid ${job.status === 'COMPLETED' ? T.successBorder : T.goldBorder}`,
+                      }}
+                    >
+                      {job.status}
+                    </span>
+                  </td>
+
+                  {/* Actions */}
+                  <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <button
+                        onClick={() => onSelectJob(job, fileName)}
+                        style={{
+                          padding: '3px 8px',
+                          borderRadius: 3,
+                          background: 'transparent',
+                          border: '1px solid rgba(255, 255, 255, 0.25)',
+                          color: '#FFFFFF',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          fontFamily: T.ui,
+                        }}
+                        title="Inspect complete results and threshold optimizer"
+                      >
+                        <Eye size={11} /> Inspect
+                      </button>
+                      {job.status === 'COMPLETED' && !isChampion && (
                         <button
-                          onClick={() => onSelectJob(job, fileName)}
+                          data-testid={`set-champion-${job.job_id}`}
+                          onClick={() => handlePromoteChampion(job)}
                           style={{
-                            padding: '4px 10px',
-                            borderRadius: 6,
-                            background: isCurrent ? 'rgba(138, 121, 202, 0.3)' : BB.elevated,
-                            border: `1px solid ${BB.border}`,
-                            color: '#FFF',
+                            padding: '3px 8px',
+                            borderRadius: 3,
+                            background: T.goldSubtle,
+                            border: `1px solid ${T.goldBorder}`,
+                            color: T.gold,
                             fontSize: 11,
                             fontWeight: 600,
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             gap: 4,
+                            fontFamily: T.ui,
                           }}
-                          title="Inspect complete results and threshold optimizer"
+                          title="Promote this candidate model to Champion"
                         >
-                          <Eye size={12} /> Inspect
+                          <Crown size={11} /> Set as Champion
                         </button>
-                        {job.status === 'COMPLETED' && !isChampion && (
-                          <button
-                            data-testid={`set-champion-${job.job_id}`}
-                            onClick={() => handlePromoteChampion(job)}
-                            style={{
-                              padding: '4px 10px',
-                              borderRadius: 6,
-                              background: 'rgba(245, 158, 11, 0.18)',
-                              border: '1px solid rgba(245, 158, 11, 0.45)',
-                              color: BB.goldLight,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                            }}
-                            title="Promote this candidate model to Champion"
-                          >
-                            <Crown size={12} /> Set as Champion
-                          </button>
-                        )}
-                        {job.status === 'COMPLETED' && isChampion && (
-                          <span
-                            data-testid="champion-badge"
-                            style={{
-                              padding: '3px 8px',
-                              borderRadius: 6,
-                              background: 'rgba(245, 158, 11, 0.15)',
-                              border: '1px solid rgba(245, 158, 11, 0.4)',
-                              color: BB.gold,
-                              fontSize: 10.5,
-                              fontWeight: 800,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4,
-                            }}
-                          >
-                            <Crown size={11} /> Champion
-                          </span>
-                        )}
-                        {job.status === 'COMPLETED' && (
-                          <button
-                            onClick={() => onDeployJob(job)}
-                            style={{
-                              padding: '4px 10px',
-                              borderRadius: 6,
-                              background: 'rgba(0, 245, 160, 0.15)',
-                              border: '1px solid rgba(0, 245, 160, 0.4)',
-                              color: '#00F5A0',
-                              fontSize: 11,
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 4,
-                            }}
-                            title="Deploy this run to a serving endpoint"
-                          >
-                            <Rocket size={12} /> Deploy
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      )}
+                      {job.status === 'COMPLETED' && isChampion && (
+                        <span
+                          data-testid="champion-badge"
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: 3,
+                            background: T.goldSubtle,
+                            border: `1px solid ${T.goldBorder}`,
+                            color: T.gold,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontFamily: T.ui,
+                          }}
+                        >
+                          <Crown size={10} /> Champion
+                        </span>
+                      )}
+                      {job.status === 'COMPLETED' && (
+                        <button
+                          onClick={() => onDeployJob(job)}
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: 3,
+                            background: T.successSubtle,
+                            border: `1px solid ${T.successBorder}`,
+                            color: T.success,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            fontFamily: T.ui,
+                          }}
+                          title="Deploy this run to a serving endpoint"
+                        >
+                          <Rocket size={11} /> Deploy
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
-      {/* ── SIDE-BY-SIDE PARAM DIFF PANEL ── */}
+      {/* ── SIDE-BY-SIDE PARAM DIFF PANEL (FLAT, NO SHADOW OR ROUNDED CARD WRAPPER) ── */}
       {comparedRuns.length === 2 && (
         <div
           style={{
-            background: BB.card,
-            border: '1px solid rgba(56, 189, 248, 0.35)',
-            borderRadius: 16,
-            padding: '20px 24px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.45)',
+            borderTop: `1px solid ${T.border}`,
+            background: T.surface,
+            padding: '16px 20px',
             display: 'flex',
             flexDirection: 'column',
-            gap: 16,
+            gap: 12,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <GitCompare style={{ width: 18, height: 18, color: '#38BDF8' }} />
-              <span style={{ fontSize: 14, fontWeight: 800, color: '#FFF' }}>
+              <GitCompare style={{ width: 15, height: 15, color: '#00D4FF' }} />
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  background: 'rgba(0, 212, 255, 0.16)',
+                  border: '1px solid rgba(0, 212, 255, 0.38)',
+                  color: '#FFFFFF',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  fontFamily: T.ui,
+                }}
+              >
                 Side-by-Side Experiment Parameter Diff
               </span>
             </div>
@@ -700,12 +762,13 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
               onClick={() => setSelectedRunIds([currentJob.job_id])}
               style={{
                 fontSize: 11,
-                padding: '4px 10px',
-                borderRadius: 6,
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: BB.muted,
+                padding: '3px 8px',
+                borderRadius: 3,
+                background: 'transparent',
+                border: '1px solid rgba(255, 255, 255, 0.25)',
+                color: '#FFFFFF',
                 cursor: 'pointer',
+                fontFamily: T.ui,
               }}
             >
               Clear Comparison
@@ -717,28 +780,32 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
               style={{
                 width: '100%',
                 borderCollapse: 'collapse',
-                fontSize: 12,
-                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                fontFamily: T.mono,
               }}
             >
               <thead>
-                <tr style={{ borderBottom: `1px solid ${BB.border}`, color: BB.muted, textAlign: 'left' }}>
-                  <th style={{ padding: '8px 12px', width: 220 }}>Dimension / Config</th>
-                  <th style={{ padding: '8px 12px' }}>
-                    Run A: {comparedRuns[0].fileName || comparedRuns[0].job.job_id.slice(0, 8)}
+                <tr style={{ borderBottom: `1px solid ${T.border}`, color: '#FFFFFF', textAlign: 'left' }}>
+                  <th style={{ padding: '6px 10px', width: 220 }}>
+                    <span style={blueBadgeStyle}>Dimension / Config</span>
                   </th>
-                  <th style={{ padding: '8px 12px' }}>
-                    Run B: {comparedRuns[1].fileName || comparedRuns[1].job.job_id.slice(0, 8)}
+                  <th style={{ padding: '6px 10px' }}>
+                    <span style={blueBadgeStyle}>Run A: {comparedRuns[0].fileName || comparedRuns[0].job.job_id.slice(0, 8)}</span>
                   </th>
-                  <th style={{ padding: '8px 12px', width: 90, textAlign: 'center' }}>Diff State</th>
+                  <th style={{ padding: '6px 10px' }}>
+                    <span style={blueBadgeStyle}>Run B: {comparedRuns[1].fileName || comparedRuns[1].job.job_id.slice(0, 8)}</span>
+                  </th>
+                  <th style={{ padding: '6px 10px', width: 80, textAlign: 'center' }}>
+                    <span style={blueBadgeStyle}>Diff State</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {[
                   {
                     name: 'Algorithm',
-                    a: comparedRuns[0].job.algorithm?.replace(/_/g, ' ') || '—',
-                    b: comparedRuns[1].job.algorithm?.replace(/_/g, ' ') || '—',
+                    a: comparedRuns[0].job.algorithm?.replace(/_/g, ' ') || '--',
+                    b: comparedRuns[1].job.algorithm?.replace(/_/g, ' ') || '--',
                   },
                   {
                     name: 'Primary Metric Score',
@@ -747,8 +814,8 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
                   },
                   {
                     name: 'Target Column',
-                    a: comparedRuns[0].job.target_column || '—',
-                    b: comparedRuns[1].job.target_column || '—',
+                    a: comparedRuns[0].job.target_column || '--',
+                    b: comparedRuns[1].job.target_column || '--',
                   },
                   {
                     name: 'Feature Columns Count',
@@ -781,32 +848,32 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
                     <tr
                       key={name}
                       style={{
-                        borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                        background: isDiff ? 'rgba(245, 158, 11, 0.08)' : 'transparent',
+                        borderBottom: `1px solid ${T.borderSubtle}`,
+                        background: isDiff ? T.goldSubtle : 'transparent',
                       }}
                     >
-                      <td style={{ padding: '8px 12px', fontWeight: 700, color: isDiff ? BB.gold : BB.muted }}>
+                      <td style={{ padding: '6px 10px', fontWeight: 600, color: isDiff ? T.gold : '#FFFFFF' }}>
                         {name}
                       </td>
-                      <td style={{ padding: '8px 12px', color: '#FFF' }}>{a}</td>
-                      <td style={{ padding: '8px 12px', color: '#FFF' }}>{b}</td>
-                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                      <td style={{ padding: '6px 10px', color: '#FFFFFF' }}>{a}</td>
+                      <td style={{ padding: '6px 10px', color: '#FFFFFF' }}>{b}</td>
+                      <td style={{ padding: '6px 10px', textAlign: 'center' }}>
                         {isDiff ? (
                           <span
                             style={{
-                              fontSize: 10,
+                              fontSize: 9.5,
                               fontWeight: 800,
-                              padding: '2px 6px',
-                              borderRadius: 4,
-                              background: 'rgba(245, 158, 11, 0.25)',
-                              color: BB.gold,
-                              border: '1px solid rgba(245, 158, 11, 0.5)',
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                              background: T.goldSubtle,
+                              color: T.gold,
+                              border: `1px solid ${T.goldBorder}`,
                             }}
                           >
                             DIFF
                           </span>
                         ) : (
-                          <span style={{ fontSize: 10, color: BB.subtle }}>SAME</span>
+                          <span style={{ fontSize: 9.5, color: '#FFFFFF' }}>SAME</span>
                         )}
                       </td>
                     </tr>

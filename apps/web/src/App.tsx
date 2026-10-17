@@ -272,7 +272,7 @@ function AppContent() {
   return (
     <LearningProvider projectState={learningState}>
       <div
-        className="flex h-screen w-screen overflow-hidden antialiased"
+        className="flex h-screen w-screen overflow-hidden antialiased bb-canvas neural-grid-bg"
       style={{
         backgroundColor: BB.base,
         color: BB.text,
@@ -487,7 +487,7 @@ function AppContent() {
           display: 'flex',
           flexDirection: 'column',
           minWidth: 0,
-          background: 'rgba(11,9,18,0.92)',
+          background: 'transparent',
           height: '100vh',
         }}
       >
@@ -500,7 +500,7 @@ function AppContent() {
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '0 16px',
-            backgroundColor: 'rgba(11,9,18,0.88)',
+            backgroundColor: 'rgba(27,21,48,0.85)',
             backdropFilter: 'blur(12px)',
             borderBottom: `1px solid ${BB.border}`,
             gap: 16,

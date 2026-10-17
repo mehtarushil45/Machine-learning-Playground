@@ -9,19 +9,31 @@ interface ThresholdOptimizerProps {
   confusionMatrix?: number[][];
 }
 
-const BB = {
-  card: '#1D1737',
-  elevated: '#18132E',
-  border: 'rgba(138, 121, 202, 0.22)',
-  text: '#FFFFFF',
-  textSecondary: '#E2E8F0',
-  muted: '#94A3B8',
-  subtle: '#64748B',
-  primary: '#4B3B7C',
-  primaryLight: '#8A79CA',
-  gold: '#F59E0B',
-  success: '#10B981',
-  error: '#F87171',
+/* ── Blueberry & Maroon Design System Tokens (from index.css) ───────── */
+const T = {
+  bg: 'var(--bb-surface, #1B1530)',
+  surface: 'var(--bb-surface, #1B1530)',
+  elevated: 'var(--bb-elevated, #2A2247)',
+  surfaceHover: 'var(--bb-primary-faint, rgba(107, 92, 166, 0.12))',
+  border: 'var(--bb-primary-border, rgba(107, 92, 166, 0.18))',
+  borderSubtle: 'rgba(107, 92, 166, 0.10)',
+  accent: 'var(--bb-primary-light, #6C5CA6)',
+  accentHover: '#8A7DC0',
+  accentSubtle: 'var(--bb-primary-faint, rgba(107, 92, 166, 0.12))',
+  gold: 'var(--bb-gold, #C9A24B)',
+  goldSubtle: 'var(--bb-gold-faint, rgba(201, 162, 75, 0.12))',
+  goldBorder: 'rgba(201, 162, 75, 0.35)',
+  maroon: 'var(--bb-maroon, #6E1423)',
+  maroonHover: 'var(--bb-maroon-hover, #8E2A3C)',
+  maroonLight: '#B23A4E',
+  success: '#22C55E',
+  warning: '#F59E0B',
+  error: 'var(--bb-error, #B23A4E)',
+  text: 'var(--bb-text, #F5F1EC)',
+  textSec: 'var(--bb-muted, #9E93B8)',
+  textDim: 'var(--bb-placeholder, #5E5480)',
+  mono: 'var(--font-mono, "JetBrains Mono", monospace)',
+  ui: 'var(--font-ui, "Space Grotesk", sans-serif)',
 };
 
 export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
@@ -116,35 +128,32 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
   };
 
   return (
-    <div
-      style={{
-        background: BB.card,
-        border: `1px solid ${BB.border}`,
-        borderRadius: 16,
-        overflow: 'hidden',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
-      }}
-    >
-      {/* Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', background: 'transparent' }}>
+      {/* Flat Section Header (No Card Box, Clean Divider) */}
       <div
         style={{
-          padding: '14px 20px',
-          borderBottom: `1px solid ${BB.border}`,
-          background: BB.elevated,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          paddingBottom: 14,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Sliders style={{ width: 16, height: 16, color: BB.gold }} />
+          <Sliders style={{ width: 14, height: 14, color: '#00D4FF' }} />
           <span
             style={{
-              fontSize: 12,
-              fontWeight: 800,
-              color: BB.text,
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '2px 8px',
+              borderRadius: 4,
+              background: 'rgba(0, 212, 255, 0.16)',
+              border: '1px solid rgba(0, 212, 255, 0.38)',
+              color: '#FFFFFF',
+              fontSize: 10,
+              fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
+              fontFamily: T.ui,
             }}
           >
             Threshold Optimizer ({targetColumn}) & Confusion Matrix
@@ -153,57 +162,57 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
         <span
           style={{
             fontSize: 11,
-            color: BB.gold,
-            background: 'rgba(245, 158, 11, 0.12)',
-            padding: '3px 10px',
-            borderRadius: 6,
-            border: '1px solid rgba(245, 158, 11, 0.3)',
+            color: T.gold,
+            background: T.goldSubtle,
+            padding: '2px 8px',
+            borderRadius: 4,
+            border: `1px solid ${T.goldBorder}`,
             fontWeight: 700,
-            fontFamily: 'var(--font-mono)',
+            fontFamily: T.mono,
           }}
         >
           τ = {threshold.toFixed(2)}
         </span>
       </div>
 
-      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {/* Slider Controls */}
-        <div
-          style={{
-            background: 'rgba(0, 0, 0, 0.25)',
-            border: `1px solid ${BB.border}`,
-            borderRadius: 12,
-            padding: '16px 20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Slider Controls (Clean Flat Row, No Card Box) */}
+        <div style={{ padding: '4px 0 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: BB.textSecondary }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#FFFFFF', fontFamily: T.ui }}>
               Classification Decision Cutoff Threshold:
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button
                 onClick={() => setThreshold(0.5)}
                 style={{
                   fontSize: 11,
                   padding: '2px 8px',
                   borderRadius: 4,
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  color: BB.muted,
+                  background: 'transparent',
+                  border: '1px solid rgba(255, 255, 255, 0.25)',
+                  color: '#FFFFFF',
                   cursor: 'pointer',
+                  fontFamily: T.ui,
+                  transition: 'all 100ms ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#FFFFFF';
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = '#FFFFFF';
+                  e.currentTarget.style.background = 'transparent';
                 }}
               >
                 Reset (0.50)
               </button>
               <span
                 style={{
-                  fontSize: 14,
-                  fontWeight: 900,
-                  fontFamily: 'var(--font-mono)',
-                  color: BB.gold,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  fontFamily: T.mono,
+                  color: T.gold,
                 }}
               >
                 {threshold.toFixed(2)}
@@ -222,6 +231,7 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
               width: '100%',
               accentColor: '#F59E0B',
               cursor: 'pointer',
+              margin: '4px 0',
             }}
           />
 
@@ -230,8 +240,8 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
               display: 'flex',
               justifyContent: 'space-between',
               fontSize: 11,
-              color: BB.muted,
-              fontFamily: 'var(--font-mono)',
+              color: '#FFFFFF',
+              fontFamily: T.mono,
             }}
           >
             <span>0.05 (High Recall)</span>
@@ -240,12 +250,15 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
           </div>
         </div>
 
-        {/* Operating Point Metrics Grid */}
+        {/* Operating Point Metrics (Flat 4-column KPI row with subtle border, no floating boxes) */}
         <div
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-            gap: 10,
+            gap: 16,
+            padding: '12px 0 16px',
+            borderTop: `1px solid ${T.border}`,
+            borderBottom: `1px solid ${T.border}`,
           }}
         >
           {[
@@ -254,56 +267,64 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
             { label: 'F1-Score', val: simulated.f1, desc: 'Harmonic mean of P & R' },
             { label: 'Specificity', val: simulated.specificity, desc: 'True Negative Rate' },
           ].map((m) => (
-            <div
-              key={m.label}
-              style={{
-                background: 'rgba(255, 255, 255, 0.02)',
-                border: '1px solid rgba(138, 121, 202, 0.15)',
-                borderRadius: 10,
-                padding: '12px 14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
-            >
-              <div style={{ fontSize: 10, fontWeight: 700, color: BB.muted, textTransform: 'uppercase' }}>
+            <div key={m.label} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  width: 'fit-content',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  background: 'rgba(0, 212, 255, 0.16)',
+                  border: '1px solid rgba(0, 212, 255, 0.38)',
+                  color: '#FFFFFF',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.07em',
+                  fontFamily: T.ui,
+                }}
+              >
                 {m.label}
-              </div>
+              </span>
               <div
                 style={{
-                  fontSize: 18,
-                  fontWeight: 900,
-                  fontFamily: 'var(--font-mono)',
-                  color: m.val >= 0.8 ? '#10B981' : m.val >= 0.65 ? BB.gold : '#F87171',
+                  fontSize: 20,
+                  fontWeight: 800,
+                  fontFamily: T.mono,
+                  color: m.val >= 0.8 ? T.success : m.val >= 0.65 ? T.gold : T.error,
+                  lineHeight: 1.2,
                 }}
               >
                 {(m.val * 100).toFixed(1)}%
               </div>
-              <div style={{ fontSize: 10, color: BB.subtle }}>{m.desc}</div>
+              <div style={{ fontSize: 11, color: '#FFFFFF' }}>{m.desc}</div>
             </div>
           ))}
         </div>
 
-        {/* Confusion Matrix Section */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Confusion Matrix Section (Flat layout, clean segmented toggle) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: BB.textSecondary }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#FFFFFF', fontFamily: T.ui }}>
               2×2 Confusion Matrix at Threshold τ = {threshold.toFixed(2)}:
             </span>
-            <div style={{ display: 'flex', gap: 4, background: 'rgba(0,0,0,0.3)', padding: 2, borderRadius: 6 }}>
+            <div style={{ display: 'flex', gap: 2, background: T.surface, padding: 2, borderRadius: 4, border: `1px solid ${T.border}` }}>
               {(['counts', 'recall', 'precision'] as const).map((mode) => (
                 <button
                   key={mode}
                   onClick={() => setMatrixMode(mode)}
                   style={{
                     padding: '3px 8px',
-                    borderRadius: 4,
+                    borderRadius: 3,
                     fontSize: 10,
-                    fontWeight: 700,
+                    fontWeight: 600,
                     border: 'none',
                     cursor: 'pointer',
-                    background: matrixMode === mode ? BB.primary : 'transparent',
-                    color: matrixMode === mode ? '#FFF' : BB.muted,
+                    background: matrixMode === mode ? T.accentSubtle : 'transparent',
+                    color: matrixMode === mode ? '#FFFFFF' : 'rgba(255, 255, 255, 0.75)',
+                    fontFamily: T.ui,
+                    transition: 'all 100ms ease',
                   }}
                 >
                   {mode === 'counts' ? 'Counts' : mode === 'recall' ? 'Recall %' : 'Precision %'}
@@ -312,13 +333,13 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
             </div>
           </div>
 
-          {/* Matrix Visual Table */}
+          {/* Matrix Visual Table (Subtle tinting, no heavy box borders) */}
           <div
             style={{
               display: 'grid',
               gridTemplateColumns: '90px 1fr 1fr',
-              gap: 4,
-              fontFamily: 'var(--font-mono)',
+              gap: 6,
+              fontFamily: T.mono,
               fontSize: 12,
             }}
           >
@@ -327,8 +348,8 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
             <div
               style={{
                 textAlign: 'center',
-                padding: '6px',
-                color: BB.muted,
+                padding: '4px',
+                color: '#FFFFFF',
                 fontWeight: 700,
                 fontSize: 11,
               }}
@@ -338,8 +359,8 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
             <div
               style={{
                 textAlign: 'center',
-                padding: '6px',
-                color: BB.muted,
+                padding: '4px',
+                color: '#FFFFFF',
                 fontWeight: 700,
                 fontSize: 11,
               }}
@@ -354,7 +375,7 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
                 alignItems: 'center',
                 justifyContent: 'flex-end',
                 paddingRight: 8,
-                color: BB.muted,
+                color: '#FFFFFF',
                 fontWeight: 700,
                 fontSize: 11,
               }}
@@ -364,32 +385,30 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
             {/* TP */}
             <div
               style={{
-                background: 'rgba(16, 185, 129, 0.15)',
-                border: '1px solid rgba(16, 185, 129, 0.35)',
-                borderRadius: 8,
-                padding: '14px',
+                background: 'rgba(34, 197, 94, 0.08)',
+                borderRadius: 4,
+                padding: '12px',
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: 16, fontWeight: 900, color: '#34D399' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: T.success }}>
                 {fmtCell(simulated.tp, totalActualPos, totalPredPos)}
               </div>
-              <div style={{ fontSize: 10, color: '#10B981', marginTop: 2 }}>True Positive (TP)</div>
+              <div style={{ fontSize: 10, color: T.success, marginTop: 2, opacity: 0.9 }}>True Positive (TP)</div>
             </div>
             {/* FN */}
             <div
               style={{
-                background: 'rgba(248, 113, 113, 0.12)',
-                border: '1px solid rgba(248, 113, 113, 0.3)',
-                borderRadius: 8,
-                padding: '14px',
+                background: 'rgba(239, 68, 68, 0.08)',
+                borderRadius: 4,
+                padding: '12px',
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: 16, fontWeight: 900, color: '#F87171' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: T.error }}>
                 {fmtCell(simulated.fn, totalActualPos, totalPredNeg)}
               </div>
-              <div style={{ fontSize: 10, color: '#F87171', marginTop: 2 }}>False Negative (FN)</div>
+              <div style={{ fontSize: 10, color: T.error, marginTop: 2, opacity: 0.9 }}>False Negative (FN)</div>
             </div>
 
             {/* Actual Negative Row */}
@@ -399,7 +418,7 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
                 alignItems: 'center',
                 justifyContent: 'flex-end',
                 paddingRight: 8,
-                color: BB.muted,
+                color: '#FFFFFF',
                 fontWeight: 700,
                 fontSize: 11,
               }}
@@ -409,64 +428,60 @@ export const ThresholdOptimizer: React.FC<ThresholdOptimizerProps> = ({
             {/* FP */}
             <div
               style={{
-                background: 'rgba(245, 158, 11, 0.12)',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-                borderRadius: 8,
-                padding: '14px',
+                background: 'rgba(234, 179, 8, 0.08)',
+                borderRadius: 4,
+                padding: '12px',
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: 16, fontWeight: 900, color: '#FBBF24' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: T.warning }}>
                 {fmtCell(simulated.fp, totalActualNeg, totalPredPos)}
               </div>
-              <div style={{ fontSize: 10, color: '#F59E0B', marginTop: 2 }}>False Positive (FP)</div>
+              <div style={{ fontSize: 10, color: T.warning, marginTop: 2, opacity: 0.9 }}>False Positive (FP)</div>
             </div>
             {/* TN */}
             <div
               style={{
-                background: 'rgba(16, 185, 129, 0.15)',
-                border: '1px solid rgba(16, 185, 129, 0.35)',
-                borderRadius: 8,
-                padding: '14px',
+                background: 'rgba(34, 197, 94, 0.08)',
+                borderRadius: 4,
+                padding: '12px',
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: 16, fontWeight: 900, color: '#34D399' }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: T.success }}>
                 {fmtCell(simulated.tn, totalActualNeg, totalPredNeg)}
               </div>
-              <div style={{ fontSize: 10, color: '#10B981', marginTop: 2 }}>True Negative (TN)</div>
+              <div style={{ fontSize: 10, color: T.success, marginTop: 2, opacity: 0.9 }}>True Negative (TN)</div>
             </div>
           </div>
         </div>
 
-        {/* Tradeoff Explanation */}
+        {/* Tradeoff Explanation (Clean inline typography, no card box) */}
         <div
           style={{
             fontSize: 11.5,
-            color: BB.textSecondary,
-            background: 'rgba(255, 255, 255, 0.02)',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
-            borderRadius: 8,
-            padding: '10px 14px',
+            color: '#FFFFFF',
             lineHeight: 1.5,
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: 8,
+            marginTop: 4,
+            fontFamily: T.ui,
           }}
         >
-          <Info style={{ width: 15, height: 15, color: BB.primaryLight, flexShrink: 0 }} />
+          <Info style={{ width: 14, height: 14, color: '#00D4FF', flexShrink: 0, marginTop: 2 }} />
           <span>
             {threshold > 0.5 ? (
               <>
-                <strong>Conservative Threshold (τ = {threshold.toFixed(2)}):</strong> Requires higher confidence before predicting positive. Minimizes costly false alarms (FP: {simulated.fp}), but allows {simulated.fn} false negatives.
+                <strong style={{ color: '#FFFFFF' }}>Conservative Threshold (τ = {threshold.toFixed(2)}):</strong> Requires higher confidence before predicting positive. Minimizes costly false alarms (FP: {simulated.fp}), but allows {simulated.fn} false negatives.
               </>
             ) : threshold < 0.5 ? (
               <>
-                <strong>Aggressive Threshold (τ = {threshold.toFixed(2)}):</strong> Prioritizes capturing all positive occurrences (Recall: {(simulated.recall * 100).toFixed(1)}%). Reduces missed cases (FN: {simulated.fn}), but introduces {simulated.fp} false alarms.
+                <strong style={{ color: '#FFFFFF' }}>Aggressive Threshold (τ = {threshold.toFixed(2)}):</strong> Prioritizes capturing all positive occurrences (Recall: {(simulated.recall * 100).toFixed(1)}%). Reduces missed cases (FN: {simulated.fn}), but introduces {simulated.fp} false alarms.
               </>
             ) : (
               <>
-                <strong>Standard Balanced Threshold (τ = 0.50):</strong> Optimal operating point assuming equal cost of false positives and false negatives.
+                <strong style={{ color: '#FFFFFF' }}>Standard Balanced Threshold (τ = 0.50):</strong> Optimal operating point assuming equal cost of false positives and false negatives.
               </>
             )}
           </span>
