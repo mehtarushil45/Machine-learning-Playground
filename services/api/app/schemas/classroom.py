@@ -490,6 +490,10 @@ class ParticipantInspectionResponse(BaseModel):
     reproducibility_verified: bool = False
     submission_id: Optional[UUID] = None
     comments: Optional[str] = None
+    score: Optional[float] = None
+    feedback: Optional[str] = None
+    metrics_and_summary: Optional[Dict[str, Any]] = None
+    event_timeline: Optional[List[Dict[str, Any]]] = None
 
 
 class TimeExtensionRequest(BaseModel):

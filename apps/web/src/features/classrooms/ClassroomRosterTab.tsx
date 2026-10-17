@@ -225,7 +225,7 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
           <button
             onClick={() => setShowProjector(true)}
             data-testid="open-projector-btn"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-bold text-[#0B0912] shadow transition-all hover:opacity-90"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-linear-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-bold text-[#0B0912] shadow transition-all hover:opacity-90"
           >
             <Presentation className="w-4 h-4" />
             <span>Projector View</span>
@@ -252,7 +252,7 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
 
       {/* Filter and Search Bar (Part G1) */}
       <div className="rounded-2xl p-4 bg-[#151026] border border-[rgba(107,92,166,0.25)] flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+        <div className="flex items-center gap-2 flex-1 min-w-60">
           <div className="relative flex-1">
             <Search className="w-4 h-4 absolute left-3 top-2.5 text-[#9E93B8]" />
             <input
@@ -486,6 +486,7 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
           userId={inspectUserId}
           onClose={() => setInspectUserId(null)}
           onShowToast={onShowToast}
+          onGradeSaved={fetchRoster}
         />
       )}
 

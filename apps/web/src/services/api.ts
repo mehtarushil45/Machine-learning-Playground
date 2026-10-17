@@ -433,22 +433,27 @@ export interface RosterPaginationResponse {
 }
 
 export interface ParticipantInspectionResponse {
-  classroom_id: string;
+  classroom_id?: string;
   user_id: string;
-  full_name: string;
+  full_name?: string | null;
   enrollment_number?: string | null;
   division?: string | null;
   batch?: string | null;
   status: string;
-  starter_code: string;
-  final_code: string;
-  rubric_breakdown: Record<string, any>;
-  metrics_and_summary: Record<string, any>;
-  event_timeline: Array<{ event: string; timestamp: string; details?: any }>;
+  starter_code?: string | null;
+  final_code?: string | null;
+  rubric_breakdown?: Record<string, any> | null;
+  metrics_summary?: Record<string, any> | null;
+  metrics_and_summary?: Record<string, any> | null;
+  timeline?: Array<{ event: string; timestamp: string; details?: any }>;
+  event_timeline?: Array<{ event: string; timestamp: string; details?: any }>;
   reproducibility_verified?: boolean | null;
   reproduced_score?: number | null;
+  grade_score?: number | null;
   score?: number | null;
+  comments?: string | null;
   feedback?: string | null;
+  submission_id?: string | null;
 }
 
 export const ClassroomService = {
@@ -568,6 +573,12 @@ export const ClassroomService = {
 
   inspectParticipant: (classroomId: string, userId: string) =>
     request<ParticipantInspectionResponse>(`/classrooms/${classroomId}/participants/${userId}/inspect`),
+
+  gradeParticipant: (classroomId: string, userId: string, data: { score: number; comments: string }) =>
+    request<any>(`/classrooms/${classroomId}/participants/${userId}/grade`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   resetJoinCode: (classroomId: string) =>
     request<{ join_code: string; message: string }>(`/classrooms/${classroomId}/reset-code`, {

@@ -5,7 +5,13 @@ import { JoinClassroomModal, normalizeCodeInput } from '../features/classrooms/J
 import { StudentDetailsModal } from '../features/classrooms/StudentDetailsModal';
 import { ProjectorViewModal } from '../features/classrooms/ProjectorViewModal';
 import { ClassroomRosterTab } from '../features/classrooms/ClassroomRosterTab';
+import { ParticipantInspectionModal } from '../features/classrooms/ParticipantInspectionModal';
 import { ClassroomService } from '../services/api';
+
+vi.mock('@monaco-editor/react', () => ({
+  DiffEditor: () => <div data-testid="mock-diff-editor">Monaco Diff Editor</div>,
+  Editor: () => <div data-testid="mock-editor">Monaco Editor</div>,
+}));
 
 vi.mock('../services/api', async () => {
   const actual = await vi.importActual<any>('../services/api');
@@ -27,6 +33,8 @@ vi.mock('../services/api', async () => {
       reopenSubmission: vi.fn(),
       removeMember: vi.fn(),
       inspectParticipant: vi.fn(),
+      gradeParticipant: vi.fn(),
+      gradeSubmission: vi.fn(),
     },
   };
 });
@@ -289,6 +297,83 @@ describe('Classroom Entry & Management Flow (Parts B - G)', () => {
       expect(screen.getByText('Export CSV')).toBeInTheDocument();
       expect(screen.getByText('Projector View')).toBeInTheDocument();
       expect(screen.queryByText(/Reset Code/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Part G3: Participant Inspection Modal', () => {
+    it('does not render Run Reproducibility Audit button, allows keyboard entry for final score, and saves grade successfully', async () => {
+      (ClassroomService.inspectParticipant as any).mockResolvedValue({
+        user_id: 'u-123',
+        full_name: 'Priya Patel',
+        enrollment_number: 'CS2026042',
+        status: 'submitted',
+        grade_score: null,
+        score: null,
+        starter_code: '# starter code',
+        final_code: '# final code',
+        rubric_breakdown: { min_accuracy: 0.85, max_latency_ms: 50 },
+        timeline: [{ event: 'Exam Submitted', timestamp: new Date().toISOString() }],
+        submission_id: 'sub-uuid-456',
+      });
+      (ClassroomService.gradeParticipant as any).mockResolvedValue({
+        message: 'Grade and feedback saved successfully.',
+        score: 95.5,
+        comments: 'Excellent model architecture!',
+      });
+
+      const onGradeSavedMock = vi.fn();
+      const onShowToastMock = vi.fn();
+
+      render(
+        <ParticipantInspectionModal
+          classroomId="c-1"
+          userId="u-123"
+          onClose={() => {}}
+          onShowToast={onShowToastMock}
+          onGradeSaved={onGradeSavedMock}
+        />
+      );
+
+      // Verify participant data is loaded
+      await waitFor(() => {
+        expect(screen.getByText('Priya Patel')).toBeInTheDocument();
+      });
+
+      // 1. Verify "Run Reproducibility Audit" button is NOT rendered
+      expect(screen.queryByText(/Run Reproducibility Audit/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Executing Sandbox Audit/i)).not.toBeInTheDocument();
+
+      // 2. Verify Final Score can be entered by keyboard (clearing and typing decimal)
+      const scoreInput = screen.getByLabelText(/Final Score/i) as HTMLInputElement;
+      expect(scoreInput).toBeInTheDocument();
+      expect(scoreInput.value).toBe('');
+
+      // Simulate typing with keyboard
+      fireEvent.change(scoreInput, { target: { value: '95.5' } });
+      expect(scoreInput.value).toBe('95.5');
+
+      const feedbackInput = screen.getByLabelText(/Written Feedback/i);
+      fireEvent.change(feedbackInput, { target: { value: 'Excellent model architecture!' } });
+
+      // 3. Verify Save Grade & Feedback button is clickable and functional
+      const saveButton = screen.getByRole('button', { name: /Save Grade & Feedback/i });
+      expect(saveButton).toBeInTheDocument();
+      expect(saveButton).not.toBeDisabled();
+
+      fireEvent.click(saveButton);
+
+      await waitFor(() => {
+        expect(ClassroomService.gradeParticipant).toHaveBeenCalledWith('c-1', 'u-123', {
+          score: 95.5,
+          comments: 'Excellent model architecture!',
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Grade & feedback recorded successfully/i)).toBeInTheDocument();
+      });
+      expect(onGradeSavedMock).toHaveBeenCalledTimes(1);
+      expect(onShowToastMock).toHaveBeenCalledWith('Grade Saved', expect.stringContaining('95.5'), 'success');
     });
   });
 });

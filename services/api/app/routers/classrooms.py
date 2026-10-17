@@ -2516,7 +2516,109 @@ async def inspect_participant(
         reproducibility_verified=sub.reproducibility_verified if sub else False,
         submission_id=sub.id if sub else None,
         comments=feedback_comments,
+        score=sub.grade_score if sub else None,
+        feedback=feedback_comments,
+        metrics_and_summary=sub.metrics_summary if sub else None,
+        event_timeline=timeline,
     )
+
+
+@router.post(
+    "/{classroom_id}/participants/{user_id}/grade",
+    summary="Manual grade and feedback for a participant in a classroom",
+)
+async def grade_participant(
+    classroom_id: UUID,
+    user_id: UUID,
+    payload: ManualGradeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    check_user_permission(current_user, Permission.SUBMISSION_EVALUATE)
+
+    res_c = await db.execute(select(Classroom).where(Classroom.id == classroom_id))
+    classroom = res_c.scalar_one_or_none()
+    if not classroom:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Classroom not found.")
+
+    if classroom.faculty_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied. Only classroom owners can grade participants.",
+        )
+
+    stmt_m = select(ClassroomMember).where(
+        ClassroomMember.classroom_id == classroom_id,
+        ClassroomMember.user_id == user_id,
+    )
+    member = (await db.execute(stmt_m)).scalar_one_or_none()
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Participant not found.")
+
+    stmt_sub = (
+        select(Submission)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .where(
+            Assignment.classroom_id == classroom_id,
+            Submission.learner_id == user_id,
+        )
+        .order_by(Submission.created_at.desc())
+        .limit(1)
+    )
+    sub = (await db.execute(stmt_sub)).scalar_one_or_none()
+
+    if not sub:
+        stmt_asgn = (
+            select(Assignment)
+            .where(Assignment.classroom_id == classroom_id)
+            .order_by(Assignment.created_at.asc())
+            .limit(1)
+        )
+        asgn = (await db.execute(stmt_asgn)).scalar_one_or_none()
+        if not asgn:
+            asgn = Assignment(
+                organisation_id=classroom.organisation_id,
+                classroom_id=classroom.id,
+                title="Classroom Evaluation",
+                description="Instructor manual evaluation",
+                created_by_id=classroom.faculty_id,
+                rubric={"min_accuracy": 0.8},
+                max_score=100.0,
+                due_date=datetime.now(timezone.utc) + timedelta(days=30),
+            )
+            db.add(asgn)
+            await db.flush()
+
+        sub = Submission(
+            organisation_id=classroom.organisation_id,
+            assignment_id=asgn.id,
+            learner_id=user_id,
+            status=SubmissionStatus.evaluated,
+            grade_score=payload.score,
+        )
+        db.add(sub)
+        await db.flush()
+    else:
+        sub.grade_score = payload.score
+        sub.status = SubmissionStatus.evaluated
+
+    member.status = "evaluated"
+
+    feedback = Feedback(
+        submission_id=sub.id,
+        evaluator_id=current_user.id,
+        score=payload.score,
+        comments=payload.comments,
+    )
+    db.add(feedback)
+    await db.commit()
+
+    return {
+        "message": "Grade and feedback saved successfully.",
+        "submission_id": str(sub.id),
+        "score": payload.score,
+        "comments": payload.comments,
+    }
 
 
 @router.put(
