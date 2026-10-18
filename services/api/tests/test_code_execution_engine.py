@@ -205,6 +205,7 @@ print("KEYS:" + ",".join(sorted(os.environ.keys())))
 
     allowed_and_internal = set(_ALLOWED_ENV_VARS) | {
         "PYTHONPATH", "PYTHONUNBUFFERED", "MLPG_SANDBOX", "PYTHONDONTWRITEBYTECODE",
+        "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS",
     }
     for k in keys_in_subprocess:
         assert k in allowed_and_internal or k.upper() in allowed_and_internal, f"Unexpected key leaked: {k}"

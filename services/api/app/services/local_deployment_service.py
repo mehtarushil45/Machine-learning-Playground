@@ -853,8 +853,6 @@ async def predict_local(
     # 2. Robust Input Normalization & Schema Validation
     sanitized_inputs: Dict[str, Any] = {}
     lower_inputs = {k.lower().strip(): v for k, v in payload.inputs.items()}
-    fallback_sample = getattr(dep, "sample_inputs", None) or (dep.configuration.get("sample_inputs") if isinstance(dep.configuration, dict) else None) or {}
-    lower_fallback = {str(k).lower().strip(): v for k, v in fallback_sample.items()}
 
     for f in dep.feature_columns:
         f_lower = str(f).lower().strip()
@@ -862,12 +860,6 @@ async def predict_local(
             sanitized_inputs[f] = payload.inputs[f]
         elif f_lower in lower_inputs:
             sanitized_inputs[f] = lower_inputs[f_lower]
-        elif f in fallback_sample:
-            sanitized_inputs[f] = fallback_sample[f]
-        elif f_lower in lower_fallback:
-            sanitized_inputs[f] = lower_fallback[f_lower]
-        else:
-            sanitized_inputs[f] = 0.0 if any(num_kw in f_lower for num_kw in ("charge", "tenure", "age", "price", "income", "amount", "count", "num")) else "Default"
 
     missing_features = [f for f in dep.feature_columns if f not in sanitized_inputs]
     if missing_features:
