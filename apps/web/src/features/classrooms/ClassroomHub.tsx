@@ -511,6 +511,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setActiveExam(target);
     setCode(target.starter_code);
     setDeployment(null);
+    setTestInputs({});
     setEvaluationResult(null);
     setPredictionResult(null);
     setSubmissionReceipt(null);
@@ -521,6 +522,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     try {
       const sess = await ClassroomService.getSession(examId);
       if (sess?.code_draft) setCode(sess.code_draft);
+      if (sess?.active_deployment_id) {
+        try {
+          const depData = await ClassroomService.getLabDeployment(examId);
+          if (depData) {
+            setDeployment(depData as any);
+            if (depData.sample_inputs && Object.keys(depData.sample_inputs).length > 0) {
+              setTestInputs(depData.sample_inputs);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
       if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
         setSubmissionReceipt({
           submission_id: sess.submission_receipt.submission_id || 'sub-locked',
@@ -634,7 +648,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     if (!selectedExamId) return;
     setIsDeploying(true);
     try {
-      const depRes = await ClassroomService.deployModel(selectedExamId, registeredModelId || undefined, code);
+      const depRes = await ClassroomService.deployModel(selectedExamId, registeredModelId || undefined, code, activeDatasetId || undefined);
       setDeployment(depRes);
 
       if (depRes.sample_inputs && Object.keys(depRes.sample_inputs).length > 0) {
@@ -2521,27 +2535,63 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
                     {/* Interactive Prediction Playground */}
                     <div className="space-y-3 pt-2 border-t border-[rgba(107,92,166,0.18)]">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-[#F5F1EC]">Test Live Prediction</span>
-                        <span className="text-[10px] text-[#9E93B8] font-mono">Sample Record Input</span>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-[#00D4FF]" />
+                          <span className="text-xs font-bold text-[#F5F1EC]">Test Live Prediction</span>
+                        </div>
+                        <span className="text-[10px] text-[#00D4FF] bg-[rgba(0,212,255,0.1)] px-2 py-0.5 rounded-full border border-[rgba(0,212,255,0.2)] font-mono">
+                          Interactive Test Inputs
+                        </span>
+                      </div>
+
+                      {/* Informative Guidance Banner */}
+                      <div className="p-2.5 rounded-lg bg-[rgba(0,212,255,0.04)] border border-[rgba(0,212,255,0.15)] flex items-start justify-between gap-2">
+                        <p className="text-[11px] text-[#C4BCE3] leading-relaxed">
+                          💡 <strong>Pre-filled with Dataset Row #1:</strong> These are sample input features from your dataset. You can edit any value below and execute live inference to verify your deployed model.
+                        </p>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {deployment?.sample_inputs && Object.keys(deployment.sample_inputs).length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setTestInputs(deployment.sample_inputs || {})}
+                              className="text-[10px] font-mono text-[#00D4FF] hover:underline px-1.5 py-0.5 rounded bg-[rgba(0,212,255,0.1)] transition-colors"
+                              title="Reset inputs to original dataset sample"
+                            >
+                              Reset Row
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setTestInputs(Object.fromEntries(Object.keys(testInputs).map((k) => [k, ''])))}
+                            className="text-[10px] font-mono text-[#9E93B8] hover:text-[#F5F1EC] px-1.5 py-0.5 rounded bg-[rgba(107,92,166,0.2)] transition-colors"
+                            title="Clear input fields"
+                          >
+                            Clear
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-xs max-h-56 overflow-y-auto pr-1">
                         {Object.keys(testInputs).map((key) => (
-                          <div key={key}>
-                            <label className="text-[10px] text-[#9E93B8] font-mono block truncate mb-1">
-                              {key}
-                            </label>
+                          <div key={key} className="space-y-0.5">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] text-[#A599C2] font-mono block truncate" title={key}>
+                                {key}
+                              </label>
+                              <span className="text-[9px] text-[#6B5CA6] font-mono">feature</span>
+                            </div>
                             <input
                               type="text"
                               value={testInputs[key] ?? ''}
+                              placeholder="Enter value..."
                               onChange={(e) =>
                                 setTestInputs((prev) => ({
                                   ...prev,
                                   [key]: isNaN(Number(e.target.value)) || e.target.value.trim() === '' ? e.target.value : Number(e.target.value),
                                 }))
                               }
-                              className="w-full px-2.5 py-1.5 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] font-mono focus:outline-none focus:border-[#00D4FF]"
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] font-mono focus:outline-none focus:border-[#00D4FF] focus:ring-1 focus:ring-[#00D4FF]/30 transition-all placeholder:text-[#524675]"
                             />
                           </div>
                         ))}
@@ -2572,10 +2622,13 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
                       {/* Prediction Output Card */}
                       {predictionResult && (
-                        <div className="p-3 rounded-xl bg-[#090614] border border-[rgba(107,92,166,0.3)] space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-[#9E93B8]">Model Output:</span>
-                            <span className="font-bold font-mono text-[#00F5A0] text-sm">
+                        <div className="p-3 rounded-xl bg-[#090614] border border-[#00F5A0]/30 space-y-2 shadow-lg shadow-[#00F5A0]/5">
+                          <div className="flex items-center justify-between text-xs border-b border-[rgba(107,92,166,0.2)] pb-1.5">
+                            <span className="text-[#9E93B8] flex items-center gap-1 font-medium">
+                              <Sparkles className="w-3 h-3 text-[#00F5A0]" />
+                              Model Output:
+                            </span>
+                            <span className="font-bold font-mono text-[#00F5A0] text-sm px-2 py-0.5 rounded bg-[rgba(0,245,160,0.1)] border border-[#00F5A0]/30">
                               {String(predictionResult.prediction)}
                             </span>
                           </div>

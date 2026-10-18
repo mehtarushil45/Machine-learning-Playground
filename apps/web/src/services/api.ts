@@ -488,10 +488,10 @@ export const ClassroomService = {
       method: 'POST',
     }),
 
-  deployModel: (examId: string, modelId?: string, code?: string) =>
+  deployModel: (examId: string, modelId?: string, code?: string, datasetId?: string) =>
     request<LabDeployResponse>(`/classrooms/exams/${examId}/deploy`, {
       method: 'POST',
-      body: JSON.stringify({ model_id: modelId, code }),
+      body: JSON.stringify({ model_id: modelId, code, dataset_id: datasetId }),
     }),
 
   evaluateModel: (examId: string, deploymentId: string) =>

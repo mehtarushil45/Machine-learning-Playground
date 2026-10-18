@@ -202,6 +202,7 @@ class LabDeployRequest(BaseModel):
     model_id: Optional[str] = Field(None, description="Registered model ID from code execution")
     code: Optional[str] = Field(None, description="Current student Python code")
     name: Optional[str] = Field(None, description="Deployment slot display name")
+    dataset_id: Optional[str] = Field(None, description="Active dataset identifier or filename")
 
 
 class LabDeployResponse(BaseModel):

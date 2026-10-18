@@ -296,85 +296,266 @@ _STUDENT_LAB_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _ASSIGNMENT_TEMPLATES: Dict[str, Dict[str, Any]] = {}
 
 
-def tailor_exam_for_dataset(exam_id: str, dataset_id: str) -> Optional[Dict[str, Any]]:
-    """Dynamically adapt an exam specification to work on any uploaded or ready-made CSV dataset."""
-    from services.worker.core.dataset_loader import find_dataset_path
-    csv_path: Optional[str] = None
+def _resolve_dataset_filepath(dataset_id_or_name: Optional[str], code: Optional[str] = None) -> Optional[str]:
+    """Dynamically resolve the filesystem path for any dataset identifier, filename, or code reference."""
+    target = (dataset_id_or_name or "").strip()
+
+    # 1. If target is empty, try to extract a csv/parquet filename from code
+    if not target and code:
+        match = re.search(r'''pd\.read_(?:csv|parquet)\(\s*['"]([^'"]+)['"]\s*\)''', code)
+        if match:
+            target = match.group(1).strip()
+
+    if not target:
+        return None
+
+    # 2. Direct absolute or relative path check
+    if os.path.isfile(target):
+        return os.path.abspath(target)
+
+    # 3. Use dataset_loader's find_dataset_path
     try:
-        csv_path = find_dataset_path(dataset_id)
+        from services.worker.core.dataset_loader import find_dataset_path
+        found = find_dataset_path(target)
+        if found and os.path.isfile(found):
+            return os.path.abspath(found)
     except Exception:
-        csv_path = None
+        pass
 
-    if not csv_path or not os.path.isfile(csv_path):
-        cand = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", os.path.basename(dataset_id)))
+    # 4. Search uploads directory and its subdirectories
+    uploads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
+    if os.path.exists(uploads_dir):
+        # Direct basename check
+        cand = os.path.join(uploads_dir, os.path.basename(target))
         if os.path.isfile(cand):
-            csv_path = cand
+            return cand
 
-    if not csv_path or not os.path.isfile(csv_path):
+        # Partial or stripped match in uploads root
+        clean_target = os.path.basename(target).lower()
+        for fname in os.listdir(uploads_dir):
+            fpath = os.path.join(uploads_dir, fname)
+            if os.path.isfile(fpath) and fname.lower().endswith((".csv", ".parquet", ".pq")):
+                if clean_target in fname.lower() or fname.lower() in clean_target:
+                    return fpath
+
+        # Search subdirectories of uploads
+        for root, dirs, files in os.walk(uploads_dir):
+            if any(skip in root for skip in ("hidden_benchmarks", "prediction_logs")):
+                continue
+            for f in files:
+                if f.lower().endswith((".csv", ".parquet", ".pq")):
+                    if clean_target == f.lower() or (clean_target in f.lower() and len(clean_target) > 3):
+                        return os.path.join(root, f)
+
+    # 5. Extract filename from code if target couldn't be resolved
+    if code and not os.path.isabs(target):
+        match = re.search(r'''pd\.read_(?:csv|parquet)\(\s*['"]([^'"]+)['"]\s*\)''', code)
+        if match:
+            extracted = match.group(1).strip()
+            if extracted != target:
+                return _resolve_dataset_filepath(extracted, None)
+
+    return None
+
+
+def get_dataset_features_and_target(
+    dataset_id_or_name: Optional[str],
+    code: Optional[str] = None,
+    preferred_target: Optional[str] = None,
+    preferred_problem_type: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Inspect the dataset file to return genuine feature columns, target column, problem type, and sample row 0 inputs."""
+    fpath = _resolve_dataset_filepath(dataset_id_or_name, code)
+    if not fpath or not os.path.isfile(fpath):
         return None
 
     try:
-        df = pd.read_csv(csv_path)
-        base_name = os.path.basename(csv_path)
+        if fpath.lower().endswith((".parquet", ".pq")):
+            df = pd.read_parquet(fpath)
+        else:
+            df = pd.read_csv(fpath)
 
-        target_candidates = ["churn", "target", "label", "loan_status", "species", "median_house_value", "charges", "price"]
-        matched = [c for c in df.columns if c.lower() in target_candidates]
-        target_col = matched[0] if matched else df.columns[-1]
+        if df.empty or len(df.columns) < 2:
+            return None
 
+        # Clean column names (strip whitespace)
+        df.columns = [c.strip() for c in df.columns]
+
+        # 1. Target Column Detection
+        target_col: Optional[str] = None
+        if preferred_target and preferred_target in df.columns:
+            target_col = preferred_target
+        else:
+            target_candidates = [
+                "churn", "target", "label", "loan_status", "species", "median_house_value",
+                "charges", "price", "outcome", "class", "y", "salary", "sales", "revenue",
+                "fraud", "default", "status", "risk", "attrition", "diabetes", "survived"
+            ]
+            col_map = {c.lower(): c for c in df.columns}
+            for cand in target_candidates:
+                if cand in col_map:
+                    target_col = col_map[cand]
+                    break
+
+        if not target_col or target_col not in df.columns:
+            target_col = df.columns[-1]
+
+        # 2. Feature Columns
         feature_cols = [c for c in df.columns if c != target_col]
 
-        y_sample = df[target_col].dropna()
-        is_regression = False
-        if pd.api.types.is_numeric_dtype(y_sample):
-            if y_sample.nunique() > 10:
-                is_regression = True
-        problem_type = "regression" if is_regression else "classification"
+        # 3. Problem Type Detection
+        problem_type = preferred_problem_type
+        if not problem_type or problem_type not in ("classification", "regression"):
+            y_sample = df[target_col].dropna()
+            is_regression = False
+            if pd.api.types.is_numeric_dtype(y_sample):
+                if y_sample.nunique() > 10:
+                    is_regression = True
+            problem_type = "regression" if is_regression else "classification"
 
-        starter = build_exam_starter_code(
-            dataset_name=base_name,
-            target_col=target_col,
-            feature_cols=feature_cols,
-            problem_type=problem_type,
-        )
+        # 4. Genuine Sample Inputs from Row 0
+        sample_inputs: Dict[str, Any] = {}
+        first_row = df.iloc[0].to_dict()
+        for col in feature_cols:
+            val = first_row.get(col)
+            if pd.isna(val):
+                sample_inputs[col] = 0.0 if any(kw in col.lower() for kw in ("charge", "tenure", "age", "price", "income", "amount", "count", "num")) else "Default"
+            elif isinstance(val, (np.integer, int)):
+                sample_inputs[col] = int(val)
+            elif isinstance(val, (np.floating, float)):
+                sample_inputs[col] = round(float(val), 2)
+            elif isinstance(val, (bool, np.bool_)):
+                sample_inputs[col] = bool(val)
+            else:
+                sample_inputs[col] = str(val)
 
-        rubric = {
-            "min_r2": 0.70,
-            "max_latency_ms": 100.0,
-            "max_score": 100.0,
-        } if is_regression else {
-            "min_accuracy": 0.75,
-            "min_f1": 0.70,
-            "max_latency_ms": 100.0,
-            "max_score": 100.0,
-        }
-
-        exam_dict = {
-            "id": exam_id,
-            "title": f"Lab Exam: {base_name.replace('.csv', '').replace('_', ' ').title()} Pipeline",
-            "course_code": "CS401 - Machine Learning Lab",
-            "duration_minutes": 90,
-            "problem_type": problem_type,
-            "dataset_name": base_name,
-            "dataset_id": base_name,
+        return {
+            "filepath": fpath,
+            "filename": os.path.basename(fpath),
             "target_column": target_col,
             "feature_columns": feature_cols,
-            "copilot_policy": "explain-only",
-            "learning_aids_enabled": True,
-            "open_time": None,
-            "close_time": None,
-            "protected_regions": [
-                f"# [PROTECTED: START - TARGET & SPLIT]\ntarget = '{target_col}'\nX = df.drop(columns=[target])\ny = df[target]\n# [PROTECTED: END - TARGET & SPLIT]",
-                "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\njoblib.dump(pipeline, 'trained_model_pipeline.joblib')\n# [PROTECTED: END - MANDATORY PIPELINE EXPORT]",
-            ],
-            "description": f"Build, train, evaluate, and deploy an end-to-end {problem_type} pipeline on '{base_name}' for target '{target_col}'.",
-            "rubric": rubric,
-            "starter_code": starter,
+            "problem_type": problem_type,
+            "sample_inputs": sample_inputs,
+            "row_count": len(df),
         }
-        CURATED_LAB_EXAMS[exam_id] = exam_dict
-        return exam_dict
     except Exception as exc:
-        logger.warning("Could not tailor exam for dataset %s: %s", dataset_id, exc)
+        logger.warning("Error reading dataset schema for %s: %s", dataset_id_or_name, exc)
         return None
+
+
+def tailor_exam_for_dataset(exam_id: str, dataset_id: str) -> Optional[Dict[str, Any]]:
+    """Dynamically adapt an exam specification to work on any uploaded or ready-made CSV dataset."""
+    schema_info = get_dataset_features_and_target(dataset_id)
+    if not schema_info:
+        return None
+
+    target_col = schema_info["target_column"]
+    feature_cols = schema_info["feature_columns"]
+    problem_type = schema_info["problem_type"]
+    base_name = schema_info["filename"]
+    is_regression = (problem_type == "regression")
+
+    starter = build_exam_starter_code(
+        dataset_name=base_name,
+        target_col=target_col,
+        feature_cols=feature_cols,
+        problem_type=problem_type,
+    )
+
+    rubric = {
+        "min_r2": 0.70,
+        "max_latency_ms": 100.0,
+        "max_score": 100.0,
+    } if is_regression else {
+        "min_accuracy": 0.75,
+        "min_f1": 0.70,
+        "max_latency_ms": 100.0,
+        "max_score": 100.0,
+    }
+
+    exam_dict = {
+        "id": exam_id,
+        "title": f"Lab Exam: {base_name.replace('.csv', '').replace('_', ' ').title()} Pipeline",
+        "course_code": "CS401 - Machine Learning Lab",
+        "duration_minutes": 90,
+        "problem_type": problem_type,
+        "dataset_name": base_name,
+        "dataset_id": dataset_id,
+        "target_column": target_col,
+        "feature_columns": feature_cols,
+        "copilot_policy": "explain-only",
+        "learning_aids_enabled": True,
+        "open_time": None,
+        "close_time": None,
+        "protected_regions": [
+            f"# [PROTECTED: START - TARGET & SPLIT]\ntarget = '{target_col}'\nX = df.drop(columns=[target])\ny = df[target]\n# [PROTECTED: END - TARGET & SPLIT]",
+            "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\njoblib.dump(pipeline, 'trained_model_pipeline.joblib')\n# [PROTECTED: END - MANDATORY PIPELINE EXPORT]",
+        ],
+        "description": f"Build, train, evaluate, and deploy an end-to-end {problem_type} pipeline on '{base_name}' for target '{target_col}'.",
+        "rubric": rubric,
+        "starter_code": starter,
+    }
+    CURATED_LAB_EXAMS[exam_id] = exam_dict
+    return exam_dict
+
+
+def build_exam_from_assignment(asgn: Assignment, rubric_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Construct an exam dictionary dynamically introspecting the assignment's dataset."""
+    rubric = rubric_dict or asgn.rubric or {}
+    exam_id = f"exam-{asgn.id}"
+    dataset_file = asgn.dataset_id or rubric.get("dataset_id") or rubric.get("dataset_name") or "telecom_churn.csv"
+
+    # Introspect schema from the actual dataset file
+    schema_info = get_dataset_features_and_target(
+        dataset_id_or_name=dataset_file,
+        preferred_target=rubric.get("target_column"),
+        preferred_problem_type=rubric.get("problem_type"),
+    )
+
+    if schema_info:
+        target_col = schema_info["target_column"]
+        feature_cols = schema_info["feature_columns"]
+        problem_type = schema_info["problem_type"]
+        resolved_filename = schema_info["filename"]
+    else:
+        target_col = rubric.get("target_column", "churn")
+        feature_cols = rubric.get("feature_columns", ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"])
+        problem_type = rubric.get("problem_type", "classification")
+        resolved_filename = dataset_file
+
+    starter_code = build_exam_starter_code(
+        dataset_name=resolved_filename,
+        target_col=target_col,
+        feature_cols=feature_cols,
+        problem_type=problem_type,
+    )
+
+    exam_dict = {
+        "id": exam_id,
+        "title": asgn.title,
+        "course_code": "CS401",
+        "duration_minutes": int(rubric.get("duration_minutes", 90)),
+        "problem_type": problem_type,
+        "dataset_name": resolved_filename,
+        "dataset_id": dataset_file,
+        "target_column": target_col,
+        "feature_columns": feature_cols,
+        "description": asgn.description or f"Practical ML Lab Exam for {resolved_filename}",
+        "rubric": rubric,
+        "starter_code": starter_code,
+        "copilot_policy": "off",
+        "learning_aids_enabled": False,
+        "protected_regions": [
+            f"# [PROTECTED: START - TARGET & SPLIT]\ntarget = '{target_col}'\nX = df.drop(columns=[target])\ny = df[target]\n# [PROTECTED: END - TARGET & SPLIT]",
+            "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\njoblib.dump(pipeline, 'trained_model_pipeline.joblib')\n# [PROTECTED: END - MANDATORY PIPELINE EXPORT]",
+        ],
+        "start_date": rubric.get("start_date"),
+        "end_date": rubric.get("end_date"),
+        "open_time": rubric.get("start_date"),
+        "close_time": rubric.get("end_date"),
+        "is_closed": False,
+    }
+    return exam_dict
 
 
 # ---------------------------------------------------------------------------
@@ -389,35 +570,42 @@ def _get_hidden_test_cases(exam_id: str, dataset_id: Optional[str] = None) -> Li
     safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', f"{exam_id}_{target_ds}")
     file_path = os.path.join(hidden_dir, f"{safe_name}_hidden.json")
 
+    csv_path = _resolve_dataset_filepath(target_ds)
+
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 cases = json.load(f)
                 if isinstance(cases, list) and len(cases) > 0:
-                    return cases
+                    if csv_path and os.path.isfile(csv_path):
+                        first_sample = cases[0].get("inputs", {})
+                        if first_sample:
+                            cached_cols = set(first_sample.keys())
+                            if csv_path.lower().endswith((".parquet", ".pq")):
+                                df_check = pd.read_parquet(csv_path)
+                            else:
+                                df_check = pd.read_csv(csv_path, nrows=2)
+                            actual_cols = set(df_check.columns)
+                            if cached_cols.issubset(actual_cols):
+                                return cases
+                    else:
+                        return cases
         except Exception:
             pass
 
-    from services.worker.core.dataset_loader import find_dataset_path
-    csv_path: Optional[str] = None
-    try:
-        csv_path = find_dataset_path(target_ds)
-    except Exception:
-        csv_path = None
-
     if not csv_path or not os.path.isfile(csv_path):
-        cand = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", os.path.basename(target_ds)))
-        if os.path.isfile(cand):
-            csv_path = cand
-
-    if not csv_path or not os.path.isfile(csv_path):
-        cand = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "telecom_churn.csv"))
-        if os.path.isfile(cand):
-            csv_path = cand
+        if target_ds == "telecom_churn.csv":
+            cand = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "telecom_churn.csv"))
+            if os.path.isfile(cand):
+                csv_path = cand
 
     if csv_path and os.path.isfile(csv_path):
         try:
-            df = pd.read_csv(csv_path)
+            if csv_path.lower().endswith((".parquet", ".pq")):
+                df = pd.read_parquet(csv_path)
+            else:
+                df = pd.read_csv(csv_path)
+
             exam = CURATED_LAB_EXAMS.get(exam_id, {})
             target_col = exam.get("target_column")
             if not target_col or target_col not in df.columns:
@@ -547,32 +735,9 @@ async def list_lab_exams(dataset_id: Optional[str] = None, db: AsyncSession = De
         for asgn in db_asgns:
             exam_id = f"exam-{asgn.id}"
             if exam_id not in CURATED_LAB_EXAMS:
-                rubric_dict = asgn.rubric or {}
-                dataset_file = asgn.dataset_id or "telecom_churn.csv"
-                starter_code = build_exam_starter_code(
-                    dataset_name=dataset_file,
-                    target_col=rubric_dict.get("target_column", "churn"),
-                    problem_type=rubric_dict.get("problem_type", "classification"),
-                )
-                CURATED_LAB_EXAMS[exam_id] = {
-                    "id": exam_id,
-                    "title": asgn.title,
-                    "course_code": "CS401",
-                    "duration_minutes": int(rubric_dict.get("duration_minutes", 90)),
-                    "problem_type": rubric_dict.get("problem_type", "classification"),
-                    "dataset_name": dataset_file,
-                    "dataset_id": dataset_file,
-                    "target_column": rubric_dict.get("target_column", "churn"),
-                    "feature_columns": ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"],
-                    "description": asgn.description,
-                    "rubric": rubric_dict,
-                    "starter_code": starter_code,
-                    "copilot_policy": "off",
-                    "learning_aids_enabled": False,
-                    "protected_regions": [],
-                    "start_date": rubric_dict.get("start_date"),
-                    "end_date": rubric_dict.get("end_date"),
-                }
+                CURATED_LAB_EXAMS[exam_id] = build_exam_from_assignment(asgn)
+            elif dataset_id and asgn.dataset_id == dataset_id:
+                CURATED_LAB_EXAMS[exam_id] = build_exam_from_assignment(asgn)
     except Exception:
         pass
 
@@ -612,35 +777,9 @@ async def get_lab_exam(exam_id: str, dataset_id: Optional[str] = None, db: Async
             res = await db.execute(stmt)
             asgn = res.scalar_one_or_none()
             if asgn:
-                rubric_dict = asgn.rubric or {}
-                dataset_file = asgn.dataset_id or "telecom_churn.csv"
-                starter_code = build_exam_starter_code(
-                    dataset_name=dataset_file,
-                    target_col=rubric_dict.get("target_column", "churn"),
-                    problem_type=rubric_dict.get("problem_type", "classification"),
-                )
-                exam = {
-                    "id": exam_id,
-                    "title": asgn.title,
-                    "course_code": "CS401",
-                    "duration_minutes": int(rubric_dict.get("duration_minutes", 90)),
-                    "problem_type": rubric_dict.get("problem_type", "classification"),
-                    "dataset_name": dataset_file,
-                    "dataset_id": dataset_file,
-                    "target_column": rubric_dict.get("target_column", "churn"),
-                    "feature_columns": ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"],
-                    "description": asgn.description,
-                    "rubric": rubric_dict,
-                    "starter_code": starter_code,
-                    "copilot_policy": "off",
-                    "learning_aids_enabled": False,
-                    "protected_regions": [],
-                    "start_date": rubric_dict.get("start_date"),
-                    "end_date": rubric_dict.get("end_date"),
-                }
+                exam = build_exam_from_assignment(asgn)
                 CURATED_LAB_EXAMS[exam_id] = exam
         except Exception:
-            pass
             pass
 
     if not exam:
@@ -830,7 +969,21 @@ async def deploy_lab_model(
     Executes in-place hot reload on existing deployment slot. Rejects if exam is submitted or past deadline.
     Validates server-side protected regions.
     """
-    exam = CURATED_LAB_EXAMS.get(exam_id)
+    exam: Optional[Dict[str, Any]] = CURATED_LAB_EXAMS.get(exam_id)
+    if not exam and exam_id.startswith("exam-"):
+        try:
+            from uuid import UUID
+            asgn_id = UUID(exam_id.replace("exam-", ""))
+            stmt = select(Assignment).where(Assignment.id == asgn_id)
+            res = await db.execute(stmt)
+            asgn = res.scalar_one_or_none()
+            if asgn:
+                built_exam = build_exam_from_assignment(asgn)
+                CURATED_LAB_EXAMS[exam_id] = built_exam
+                exam = built_exam
+        except Exception as exc:
+            logger.warning("Could not dynamically resolve exam %s from DB in deploy_lab_model: %s", exam_id, exc)
+
     if not exam:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lab exam '{exam_id}' not found.")
 
@@ -858,13 +1011,15 @@ async def deploy_lab_model(
         from app.ml.model_registry import list_versions, get_latest_model
 
         if not target_model_id:
-            code_to_run = (payload.code or session_data.get("code_draft") or exam.get("starter_code") or "").strip()
+            raw_code = payload.code or session_data.get("code_draft") or exam.get("starter_code") or ""
+            code_to_run = str(raw_code).strip()
             if code_to_run:
                 from app.services.code_execution_service import start_execution
+                dataset_id_arg: Optional[str] = str(exam.get("dataset_id")) if exam.get("dataset_id") else None
                 try:
                     rec = await start_execution(
                         code=code_to_run,
-                        dataset_id=exam.get("dataset_id"),
+                        dataset_id=dataset_id_arg,
                         filename="lab_exam.py",
                         prefer_celery=False,
                     )
@@ -887,7 +1042,8 @@ async def deploy_lab_model(
 
             if not target_model_id:
                 # Only check models registered specifically for this exam's dataset
-                versions = list_versions(dataset_id=exam.get("dataset_id"))
+                ds_id_lookup: Optional[str] = str(exam.get("dataset_id")) if exam.get("dataset_id") else None
+                versions = list_versions(dataset_id=ds_id_lookup)
                 if versions:
                     target_model_id = versions[0].get("model_id")
 
@@ -909,8 +1065,39 @@ async def deploy_lab_model(
             is_updated_in_place = False
             version_count = 1
 
-        # Ensure model registry has feature schema populated
+        # Resolve active dataset: payload.dataset_id -> code match -> exam dataset
+        raw_code_for_ds = payload.code or session_data.get("code_draft") or exam.get("starter_code") or ""
+        active_dataset: Optional[str] = payload.dataset_id
+        if not active_dataset and raw_code_for_ds:
+            m = re.search(r'''pd\.read_(?:csv|parquet)\(\s*['"]([^'"]+)['"]\s*\)''', str(raw_code_for_ds))
+            if m:
+                active_dataset = m.group(1).strip()
+        if not active_dataset:
+            active_dataset = str(exam.get("dataset_name") or exam.get("dataset_id") or "telecom_churn.csv")
+
+        schema_info = get_dataset_features_and_target(
+            dataset_id_or_name=active_dataset,
+            code=str(raw_code_for_ds),
+            preferred_target=exam.get("target_column"),
+            preferred_problem_type=exam.get("problem_type"),
+        )
+
         actual_features: List[str] = []
+        sample_inputs: Dict[str, Any] = {}
+        target_col: str = exam.get("target_column", "churn")
+
+        if schema_info:
+            actual_features = schema_info["feature_columns"]
+            sample_inputs = dict(schema_info["sample_inputs"])
+            target_col = schema_info["target_column"]
+            exam["feature_columns"] = actual_features
+            exam["target_column"] = target_col
+            exam["dataset_name"] = schema_info["filename"]
+            exam["dataset_id"] = active_dataset
+        else:
+            exam_feature_cols_raw = exam.get("feature_columns")
+            actual_features = [str(f) for f in exam_feature_cols_raw] if isinstance(exam_feature_cols_raw, (list, tuple)) else []
+
         if target_model_id:
             try:
                 from app.ml.model_registry import _read_metadata, _write_metadata, _update_index_entry
@@ -918,32 +1105,29 @@ async def deploy_lab_model(
                 reg_meta = _read_metadata(target_model_id)
                 if reg_meta:
                     trained_feats = reg_meta.get("feature_columns") or []
-                    if trained_feats:
+                    if trained_feats and set(trained_feats).issubset(set(actual_features)):
                         actual_features = [str(f) for f in trained_feats]
                     else:
-                        actual_features = [str(f) for f in exam.get("feature_columns", [])]
                         reg_meta["feature_columns"] = actual_features
-                    reg_meta["target_column"] = exam.get("target_column", "churn")
+                    reg_meta["target_column"] = target_col
                     _write_metadata(target_model_id, reg_meta)
                     _update_index_entry(target_model_id, {"feature_columns": reg_meta["feature_columns"], "target_column": reg_meta["target_column"]})
                 clear_model_cache()
             except Exception as reg_exc:
                 logger.warning("Could not patch registry metadata: %s", reg_exc)
 
-        if not actual_features:
-            actual_features = [str(f) for f in exam.get("feature_columns", [])]
+        # Ensure sample_inputs contains an entry for every feature in actual_features
+        for col in actual_features:
+            if col not in sample_inputs:
+                sample_inputs[col] = 42.0 if any(kw in col.lower() for kw in ("charges", "tenure", "age", "price", "income", "amount", "count", "num")) else "Standard"
+
+        # Prune sample_inputs to strictly include actual_features
+        sample_inputs = {c: sample_inputs[c] for c in actual_features if c in sample_inputs}
 
         ret_schema = {
             c: {"type": "numeric" if any(kw in c.lower() for kw in ("charges", "tenure", "age", "price", "income", "amount", "count", "num")) else "categorical"}
             for c in actual_features
         }
-        hidden_cases = _get_hidden_test_cases(exam_id)
-        base_sample = hidden_cases[0]["inputs"] if hidden_cases else {}
-        sample_inputs = dict(base_sample)
-        for col in actual_features:
-            if col not in sample_inputs:
-                col_l = col.lower()
-                sample_inputs[col] = 42.0 if any(kw in col_l for kw in ("charges", "tenure", "age", "price", "income", "amount", "count", "num")) else "Standard"
 
         now_iso = datetime.now(timezone.utc).isoformat()
         lab_deployment = {
@@ -1085,21 +1269,30 @@ async def get_exam_dataset_preview(
 ) -> Dict[str, Any]:
     """Return dataset preview rows, columns, and shape for the active exam."""
     exam = CURATED_LAB_EXAMS.get(exam_id)
+    if not exam and exam_id.startswith("exam-"):
+        try:
+            from uuid import UUID
+            asgn_id = UUID(exam_id.replace("exam-", ""))
+            stmt = select(Assignment).where(Assignment.id == asgn_id)
+            res = await db.execute(stmt)
+            asgn = res.scalar_one_or_none()
+            if asgn:
+                exam = build_exam_from_assignment(asgn)
+                CURATED_LAB_EXAMS[exam_id] = exam
+        except Exception:
+            pass
+
     if not exam:
         raise HTTPException(status_code=404, detail=f"Lab exam '{exam_id}' not found.")
     dataset_name = exam.get("dataset_name") or exam.get("dataset_id") or "telecom_churn.csv"
-    from services.worker.core.dataset_loader import find_dataset_path
-    path = find_dataset_path(dataset_name)
-    if not path or not os.path.exists(path):
-        uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
-        candidate = os.path.join(uploads_dir, os.path.basename(dataset_name))
-        if os.path.exists(candidate):
-            path = candidate
+    path = _resolve_dataset_filepath(dataset_name)
     if not path or not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Dataset file '{dataset_name}' not found on server.")
 
-    import pandas as pd
-    df = pd.read_csv(path)
+    if path.lower().endswith((".parquet", ".pq")):
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
     preview_df = df.head(100).fillna("")
     return {
         "file_name": os.path.basename(path),
@@ -3327,31 +3520,7 @@ async def create_assignment(
 
     # Register exam in CURATED_LAB_EXAMS for live runtime evaluation
     exam_id = f"exam-{assignment.id}"
-    dataset_file = payload.dataset_id or "telecom_churn.csv"
-    starter_code = build_exam_starter_code(
-        dataset_name=dataset_file,
-        target_col=rubric_dict.get("target_column", "churn"),
-        problem_type=rubric_dict.get("problem_type", "classification"),
-    )
-    CURATED_LAB_EXAMS[exam_id] = {
-        "id": exam_id,
-        "title": assignment.title,
-        "course_code": "CS401",
-        "duration_minutes": int(rubric_dict.get("duration_minutes", 90)),
-        "problem_type": rubric_dict.get("problem_type", "classification"),
-        "dataset_name": dataset_file,
-        "dataset_id": dataset_file,
-        "target_column": rubric_dict.get("target_column", "churn"),
-        "feature_columns": ["age", "tenure", "monthly_charges", "total_charges", "contract_type", "internet_service"],
-        "description": assignment.description,
-        "rubric": rubric_dict,
-        "starter_code": starter_code,
-        "copilot_policy": "off",
-        "learning_aids_enabled": False,
-        "protected_regions": [],
-        "start_date": payload.start_date.isoformat() if payload.start_date else None,
-        "end_date": payload.end_date.isoformat() if payload.end_date else None,
-    }
+    CURATED_LAB_EXAMS[exam_id] = build_exam_from_assignment(assignment, rubric_dict)
 
     return AssignmentResponse.model_validate(assignment)
 
