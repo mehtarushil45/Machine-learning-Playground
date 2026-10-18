@@ -3079,7 +3079,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            className="fixed inset-0 z-9999 flex items-center justify-center p-4"
             style={{ background: 'rgba(11,9,18,0.92)', backdropFilter: 'blur(14px)' }}
           >
             <motion.div

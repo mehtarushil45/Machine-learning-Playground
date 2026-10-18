@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SafeExamViolationOverlay — Floating warning banner shown when a violation is recorded.
  *
  * - Appears for 4 seconds then fades out automatically.
@@ -50,7 +50,7 @@ export const SafeExamViolationOverlay: React.FC<SafeExamViolationOverlayProps> =
   return (
     <>
       {/* Violation Toast Stack — top right */}
-      <div className="fixed top-4 right-4 z-[10001] space-y-3 pointer-events-none" style={{ maxWidth: 360 }}>
+      <div className="fixed top-4 right-4 z-10001 space-y-3 pointer-events-none" style={{ maxWidth: 360 }}>
         <AnimatePresence>
           {events.map((evt) => (
             <motion.div
@@ -72,7 +72,7 @@ export const SafeExamViolationOverlay: React.FC<SafeExamViolationOverlayProps> =
             >
               <div className="px-4 py-3 flex items-start gap-3">
                 <div
-                  className="mt-0.5 p-1.5 rounded-lg flex-shrink-0"
+                  className="mt-0.5 p-1.5 rounded-lg shrink-0"
                   style={{
                     background: evt.critical ? 'rgba(239,68,68,0.25)' : 'rgba(245,158,11,0.2)',
                     border: `1px solid ${evt.critical ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.3)'}`,
@@ -99,7 +99,7 @@ export const SafeExamViolationOverlay: React.FC<SafeExamViolationOverlayProps> =
                 {!evt.critical && (
                   <button
                     onClick={() => setEvents((prev) => prev.filter((e) => e.id !== evt.id))}
-                    className="p-1 rounded text-[#9E93B8] hover:text-white transition-colors flex-shrink-0"
+                    className="p-1 rounded text-[#9E93B8] hover:text-white transition-colors shrink-0"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -137,14 +137,14 @@ export const SafeExamViolationOverlay: React.FC<SafeExamViolationOverlayProps> =
             initial={{ opacity: 0, y: -60 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -60 }}
-            className="fixed top-0 left-0 right-0 z-[10000] flex items-center justify-center gap-3 px-6 py-2.5"
+            className="fixed top-0 left-0 right-0 z-10000 flex items-center justify-center gap-3 px-6 py-2.5"
             style={{
               background: 'linear-gradient(90deg, #7F1D1D 0%, #991B1B 50%, #7F1D1D 100%)',
               borderBottom: '1px solid rgba(239,68,68,0.6)',
               boxShadow: '0 4px 24px rgba(239,68,68,0.3)',
             }}
           >
-            <Shield className="w-4 h-4 text-red-300 flex-shrink-0" />
+            <Shield className="w-4 h-4 text-red-300 shrink-0" />
             <p className="text-xs font-bold text-red-200">
               SESSION FLAGGED — Proctors will review this session. Submit your exam to complete it.
             </p>

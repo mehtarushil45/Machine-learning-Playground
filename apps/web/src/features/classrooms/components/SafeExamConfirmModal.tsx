@@ -1,4 +1,4 @@
-﻿/**
+/**
  * SafeExamConfirmModal — Pre-flight confirmation before entering locked exam mode.
  *
  * Shows exam rules checklist. The "Enter Lockdown Exam" button is the user-gesture
@@ -49,7 +49,7 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+        className="fixed inset-0 z-9999 flex items-center justify-center p-4"
         style={{ background: 'rgba(11,9,18,0.92)', backdropFilter: 'blur(12px)' }}
       >
         <motion.div
@@ -121,7 +121,7 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
                 className="flex items-start gap-3"
               >
                 <div
-                  className="mt-0.5 p-1.5 rounded-lg flex-shrink-0"
+                  className="mt-0.5 p-1.5 rounded-lg shrink-0"
                   style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}
                 >
                   <Icon className="w-3.5 h-3.5 text-red-400" />
@@ -137,7 +137,7 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
             style={{ borderTop: '1px solid rgba(107,92,166,0.2)' }}
           >
             <label className="flex items-start gap-3 cursor-pointer group">
-              <div className="relative mt-0.5 flex-shrink-0">
+              <div className="relative mt-0.5 shrink-0">
                 <input
                   type="checkbox"
                   className="sr-only"
@@ -174,7 +174,7 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
                 disabled={!agreed || entering}
                 whileHover={agreed && !entering ? { scale: 1.02 } : {}}
                 whileTap={agreed && !entering ? { scale: 0.98 } : {}}
-                className="flex-[2] flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs font-bold transition-all"
+                className="flex-2 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs font-bold transition-all"
                 style={{
                   background: agreed
                     ? 'linear-gradient(135deg, #EF4444 0%, #F59E0B 100%)'
