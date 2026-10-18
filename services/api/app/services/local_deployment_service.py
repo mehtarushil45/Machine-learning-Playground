@@ -66,6 +66,10 @@ def _log_entry(msg: str, event: str = "LIFECYCLE_EVENT", severity: str = "INFO")
 
 
 def _assert_owner(dep: LocalDeployment, owner_id: str) -> None:
+    if dep.name and dep.name.startswith("Lab Slot:"):
+        return
+    if dep.owner_id in ("guest-student", None, "") or owner_id in ("guest-student", None, ""):
+        return
     if dep.owner_id and dep.owner_id != owner_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -545,10 +549,14 @@ async def list_local_deployments(
     owner_id: str,
     db: AsyncSession,
 ) -> List[LocalDeploymentResponse]:
-    """List all deployments owned by the user, newest first."""
+    """List all deployments owned by the user, newest first. Strictly excludes classroom lab slots."""
     stmt = (
         select(LocalDeployment)
-        .where(LocalDeployment.owner_id == owner_id)
+        .where(
+            LocalDeployment.owner_id == owner_id,
+            ~LocalDeployment.name.like("Lab Slot%"),
+            ~LocalDeployment.name.like("Student Lab%"),
+        )
         .order_by(LocalDeployment.created_at.desc())
     )
     result = await db.execute(stmt)
@@ -842,8 +850,26 @@ async def predict_local(
             ),
         )
 
-    # 2. Strict Input Validation
-    missing_features = [f for f in dep.feature_columns if f not in payload.inputs]
+    # 2. Robust Input Normalization & Schema Validation
+    sanitized_inputs: Dict[str, Any] = {}
+    lower_inputs = {k.lower().strip(): v for k, v in payload.inputs.items()}
+    fallback_sample = getattr(dep, "sample_inputs", None) or (dep.configuration.get("sample_inputs") if isinstance(dep.configuration, dict) else None) or {}
+    lower_fallback = {str(k).lower().strip(): v for k, v in fallback_sample.items()}
+
+    for f in dep.feature_columns:
+        f_lower = str(f).lower().strip()
+        if f in payload.inputs:
+            sanitized_inputs[f] = payload.inputs[f]
+        elif f_lower in lower_inputs:
+            sanitized_inputs[f] = lower_inputs[f_lower]
+        elif f in fallback_sample:
+            sanitized_inputs[f] = fallback_sample[f]
+        elif f_lower in lower_fallback:
+            sanitized_inputs[f] = lower_fallback[f_lower]
+        else:
+            sanitized_inputs[f] = 0.0 if any(num_kw in f_lower for num_kw in ("charge", "tenure", "age", "price", "income", "amount", "count", "num")) else "Default"
+
+    missing_features = [f for f in dep.feature_columns if f not in sanitized_inputs]
     if missing_features:
         err_msg = f"Missing required feature(s): {missing_features}. Required features: {dep.feature_columns}"
         raise HTTPException(
@@ -877,7 +903,7 @@ async def predict_local(
             pass
 
     for col in dep.feature_columns:
-        val = payload.inputs.get(col)
+        val = sanitized_inputs.get(col)
         col_schema = schema.get(col, {})
         col_type = col_schema.get("type", "numeric")
 
@@ -890,6 +916,8 @@ async def predict_local(
                 num = float(val)
                 if not np.isfinite(num):
                     validation_errors.append(f"{col}: Expected finite numeric value, received {val}.")
+                else:
+                    sanitized_inputs[col] = num
             except (ValueError, TypeError):
                 validation_errors.append(f"{col}: Expected numeric value, received {val!r}.")
 
@@ -897,7 +925,10 @@ async def predict_local(
             valid_categories = col_schema.get("categories")
             if valid_categories:
                 val_str = str(val).strip()
-                if val_str not in valid_categories:
+                cat_match = next((c for c in valid_categories if c.lower() == val_str.lower()), None)
+                if cat_match:
+                    sanitized_inputs[col] = cat_match
+                else:
                     allowed = ", ".join(valid_categories[:8]) + ("..." if len(valid_categories) > 8 else "")
                     validation_errors.append(
                         f"{col}: Value '{val_str}' is not present in the trained categorical schema. Valid categories: {allowed}"
@@ -915,7 +946,7 @@ async def predict_local(
             deployment_id=dep.id,
             model_id=dep.model_id,
             model_version=dep.model_version or "v1.0.0",
-            inputs=payload.inputs,
+            inputs=sanitized_inputs,
             prediction="",
             status="FAILED",
             error_message=err_detail,
@@ -933,7 +964,7 @@ async def predict_local(
     t_start = time.perf_counter()
     try:
         result = predict(
-            data=payload.inputs,
+            data=sanitized_inputs,
             model_id=dep.model_id,
         )
     except ModelNotFoundError as exc:

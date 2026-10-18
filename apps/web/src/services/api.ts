@@ -506,6 +506,20 @@ export const ClassroomService = {
       body: JSON.stringify({ code, deployment_id: deploymentId }),
     }),
 
+  getExamDatasetPreview: (examId: string) =>
+    request<{ file_name: string; columns: string[]; rows: Record<string, any>[]; row_count: number }>(
+      `/classrooms/exams/${examId}/dataset-preview`
+    ),
+
+  predictModel: (examId: string, deploymentId: string, inputs: Record<string, any>) =>
+    request<any>(`/classrooms/exams/${examId}/predict`, {
+      method: 'POST',
+      body: JSON.stringify({ deployment_id: deploymentId, inputs }),
+    }),
+
+  getLabDeployment: (examId: string) =>
+    request<any>(`/classrooms/exams/${examId}/deployment`),
+
   // Enhanced Classroom Entry & Management Methods (Parts B-I)
   listMyClassrooms: () => request<MyClassroomsResponse>('/classrooms/my'),
 

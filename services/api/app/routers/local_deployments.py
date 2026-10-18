@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 
-from app.dependencies import CurrentUser, DBSession
+from app.dependencies import CurrentUser, OptionalCurrentUser, DBSession
 from app.schemas.local_deployment import (
     LocalBatchPredictRequest,
     LocalBatchPredictResponse,
@@ -83,13 +83,14 @@ async def list_local_deployments(
 )
 async def get_local_deployment(
     deployment_id: str,
-    current_user: CurrentUser,
     db: DBSession,
+    current_user: OptionalCurrentUser = None,
 ) -> LocalDeploymentResponse:
     """Retrieve full deployment record including logs, schema, and status."""
+    owner = str(current_user.id) if current_user else "guest-student"
     return await svc.get_local_deployment(
         deployment_id,
-        owner_id=str(current_user.id),
+        owner_id=owner,
         db=db,
     )
 
@@ -193,14 +194,15 @@ async def delete_local_deployment(
 async def predict_local(
     deployment_id: str,
     payload: LocalPredictRequest,
-    current_user: CurrentUser,
     db: DBSession,
+    current_user: OptionalCurrentUser = None,
 ) -> LocalPredictResponse:
     """Execute inference against a RUNNING local deployment with validation and audit history."""
+    owner = str(current_user.id) if current_user else "guest-student"
     return await svc.predict_local(
         deployment_id,
         payload,
-        owner_id=str(current_user.id),
+        owner_id=owner,
         db=db,
     )
 

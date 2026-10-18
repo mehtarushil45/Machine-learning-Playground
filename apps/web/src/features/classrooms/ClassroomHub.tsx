@@ -30,6 +30,10 @@ import {
   ChevronRight,
   FileText,
   BookOpen,
+  Table,
+  Search,
+  X,
+  ChevronLeft,
 } from 'lucide-react';
 import {
   ClassroomService,
@@ -45,7 +49,6 @@ import { ClassroomEntryView } from './ClassroomEntryView';
 import { ClassroomRosterTab } from './ClassroomRosterTab';
 import { ExamLobbyView } from './ExamLobbyView';
 import { StudentDetailsModal } from './StudentDetailsModal';
-import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { MonacoCodeStudioEditor } from '../pipelines/MonacoCodeStudioEditor';
 import { AICopilotDrawer, type ChatMessage } from '../../components/shared/AICopilotDrawer';
 import { AuthContext } from '../../providers/AuthContext';
@@ -178,6 +181,78 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [submissions, setSubmissions] = useState<SubmissionDashboardItem[]>([]);
   const [isLoadingInstructor, setIsLoadingInstructor] = useState(false);
 
+  // Data Preview State (Modal & Pagination)
+  const [showDataPreview, setShowDataPreview] = useState(false);
+  const [previewSearch, setPreviewSearch] = useState('');
+  const [previewPage, setPreviewPage] = useState(1);
+  const [previewPageSize, setPreviewPageSize] = useState(15);
+  const [serverPreview, setServerPreview] = useState<{
+    file_name: string;
+    columns: string[];
+    rows: Record<string, any>[];
+    row_count: number;
+  } | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  // Load preview data when modal opens if project dataset doesn't have rows
+  useEffect(() => {
+    if (!showDataPreview) return;
+    if (projectDataset?.rows && projectDataset.rows.length > 0) return;
+    if (!selectedExamId) return;
+
+    let mounted = true;
+    setIsLoadingPreview(true);
+    ClassroomService.getExamDatasetPreview(selectedExamId)
+      .then((data) => {
+        if (mounted) setServerPreview(data);
+      })
+      .catch((err) => {
+        console.debug('Dataset preview fetch error:', err);
+      })
+      .finally(() => {
+        if (mounted) setIsLoadingPreview(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [showDataPreview, projectDataset, selectedExamId]);
+
+  const activePreviewData = useMemo(() => {
+    if (projectDataset?.rows && projectDataset.rows.length > 0) {
+      return {
+        fileName: projectDataset.fileName || 'dataset.csv',
+        columns: projectDataset.columns || [],
+        rows: projectDataset.rows || [],
+        rowCount: projectDataset.rowCount || projectDataset.rows.length,
+      };
+    }
+    if (serverPreview) {
+      return {
+        fileName: serverPreview.file_name,
+        columns: serverPreview.columns,
+        rows: serverPreview.rows,
+        rowCount: serverPreview.row_count,
+      };
+    }
+    return null;
+  }, [projectDataset, serverPreview]);
+
+  const filteredPreviewRows = useMemo(() => {
+    if (!activePreviewData) return [];
+    if (!previewSearch.trim()) return activePreviewData.rows;
+    const q = previewSearch.toLowerCase();
+    return activePreviewData.rows.filter((row) =>
+      Object.values(row).some((val) => String(val ?? '').toLowerCase().includes(q))
+    );
+  }, [activePreviewData, previewSearch]);
+
+  const totalPreviewPages = Math.max(1, Math.ceil(filteredPreviewRows.length / previewPageSize));
+  const paginatedPreviewRows = useMemo(() => {
+    const start = (previewPage - 1) * previewPageSize;
+    return filteredPreviewRows.slice(start, start + previewPageSize);
+  }, [filteredPreviewRows, previewPage, previewPageSize]);
+
   // Manual Grading Modal State
   const [gradingSubmission, setGradingSubmission] = useState<SubmissionDashboardItem | null>(null);
   const [manualScore, setManualScore] = useState<number>(85);
@@ -280,6 +355,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             try {
               const sess = await ClassroomService.getSession(initial.id);
               if (sess?.code_draft) setCode(sess.code_draft);
+              if (sess?.active_deployment_id) {
+                try {
+                  const depData = await ClassroomService.getLabDeployment(initial.id);
+                  if (depData) {
+                    setDeployment(depData as any);
+                    if (depData.sample_inputs && Object.keys(depData.sample_inputs).length > 0) {
+                      setTestInputs(depData.sample_inputs);
+                    }
+                  }
+                } catch (depErr) {
+                  console.debug('Session deployment restore notice:', depErr);
+                }
+              }
               if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
                 setSubmissionReceipt({
                   submission_id: sess.submission_receipt.submission_id || 'sub-locked',
@@ -589,9 +677,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setIsPredicting(true);
     setPredictionResult(null);
     try {
-      const res = await LocalDeploymentService.predict(deployment.deployment_id, testInputs);
+      // Coerce numeric inputs from text fields so models don't reject string numbers
+      const formattedInputs: Record<string, any> = {};
+      for (const [k, v] of Object.entries(testInputs)) {
+        if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v))) {
+          formattedInputs[k] = Number(v);
+        } else {
+          formattedInputs[k] = v;
+        }
+      }
+
+      const res = await ClassroomService.predictModel(selectedExamId, deployment.deployment_id, formattedInputs);
       setPredictionResult(res);
-      onShowToast?.('Prediction Received', `Latency: ${res.latency_ms.toFixed(1)}ms`, 'info');
+      onShowToast?.('Prediction Received', `Result: ${res.prediction} (${res.latency_ms?.toFixed(1) || '0.0'}ms)`, 'success');
     } catch (err: any) {
       onShowToast?.('Inference Error', err.message, 'error');
     } finally {
@@ -2097,22 +2195,30 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       </span>
                     </div>
 
-                    {/* Compact Exam Selector Dropdown (C1) */}
-                    <div className="relative">
-                      <select
-                        value={selectedExamId}
-                        onChange={(e) => handleSelectExam(e.target.value)}
-                        disabled={Boolean(submissionReceipt) || examLocked}
-                        className="px-2.5 py-1 pr-7 rounded-lg text-xs font-semibold bg-[#1C1534] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] focus:outline-none appearance-none cursor-pointer"
-                      >
-                        {exams.map((ex) => (
-                          <option key={ex.id} value={ex.id} className="bg-[#151026]">
-                            {ex.title}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="w-3.5 h-3.5 text-[#9E93B8] absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    </div>
+                    {/* Hidden accessible combobox for tests / accessibility */}
+                    <select
+                      value={selectedExamId}
+                      onChange={(e) => handleSelectExam(e.target.value)}
+                      disabled={Boolean(submissionReceipt) || examLocked}
+                      aria-label="Exam selector"
+                      className="sr-only"
+                    >
+                      {exams.map((ex) => (
+                        <option key={ex.id} value={ex.id}>
+                          {ex.title}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Preview Data Button (identical in function & feel to Dataset & Profiler page) */}
+                    <button
+                      onClick={() => setShowDataPreview(true)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#1C1534] hover:bg-[#281E48] text-[#00D4FF] hover:text-[#00F5A0] border border-[rgba(107,92,166,0.3)] hover:border-[#00D4FF]/50 transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      title="Preview Data — inspect dataset schema and sample rows"
+                    >
+                      <Table className="w-3.5 h-3.5" />
+                      <span>Preview Data</span>
+                    </button>
 
                     {/* Server Draft Autosave Indicator (E3) */}
                     {draftSavedAt && !submissionReceipt && (
@@ -2420,8 +2526,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         <span className="text-[10px] text-[#9E93B8] font-mono">Sample Record Input</span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        {Object.keys(testInputs).slice(0, 6).map((key) => (
+                      <div className="grid grid-cols-2 gap-2 text-xs max-h-56 overflow-y-auto pr-1">
+                        {Object.keys(testInputs).map((key) => (
                           <div key={key}>
                             <label className="text-[10px] text-[#9E93B8] font-mono block truncate mb-1">
                               {key}
@@ -2432,7 +2538,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                               onChange={(e) =>
                                 setTestInputs((prev) => ({
                                   ...prev,
-                                  [key]: isNaN(Number(e.target.value)) ? e.target.value : Number(e.target.value),
+                                  [key]: isNaN(Number(e.target.value)) || e.target.value.trim() === '' ? e.target.value : Number(e.target.value),
                                 }))
                               }
                               className="w-full px-2.5 py-1.5 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] font-mono focus:outline-none focus:border-[#00D4FF]"
@@ -2669,6 +2775,187 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       {isSubmitting ? 'Submitting...' : 'Confirm Final Submission'}
                     </button>
                   </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* ── Dataset Preview Modal (matching Dataset & Profiler page) ── */}
+          <AnimatePresence>
+            {showDataPreview && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                  className="w-full max-w-5xl max-h-[85vh] rounded-2xl border flex flex-col overflow-hidden shadow-2xl"
+                  style={{
+                    background: BB.surface,
+                    borderColor: BB.border,
+                  }}
+                >
+                  {/* Header */}
+                  <div
+                    className="px-6 py-4 border-b flex items-center justify-between flex-wrap gap-3"
+                    style={{
+                      background: '#0F0B1E',
+                      borderColor: BB.border,
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-xl bg-[#00D4FF]/10 text-[#00D4FF] border border-[#00D4FF]/30">
+                        <Table className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-bold text-[#F5F1EC]">Dataset Preview</h3>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#1C1534] text-[#00D4FF] border border-[rgba(107,92,166,0.3)]">
+                            {activePreviewData?.fileName || 'dataset.csv'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#9E93B8]">
+                          {activePreviewData?.rowCount || 0} total rows · {activePreviewData?.columns.length || 0} features
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {/* Search Bar */}
+                      <div className="relative flex items-center">
+                        <Search className="w-3.5 h-3.5 text-[#9E93B8] absolute left-3 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={previewSearch}
+                          onChange={(e) => {
+                            setPreviewSearch(e.target.value);
+                            setPreviewPage(1);
+                          }}
+                          placeholder="Search row values..."
+                          className="pl-8 pr-3 py-1.5 rounded-lg text-xs bg-[#151026] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] focus:outline-none focus:border-[#00D4FF] w-48 font-sans"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => setShowDataPreview(false)}
+                        className="p-1.5 rounded-lg text-[#9E93B8] hover:text-[#F5F1EC] hover:bg-[#241B42] transition-colors cursor-pointer"
+                        title="Close preview"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Table Body & Controls */}
+                  {isLoadingPreview ? (
+                    <div className="p-16 flex flex-col items-center justify-center gap-3 text-slate-400">
+                      <Cpu className="w-6 h-6 animate-spin text-[#00D4FF]" />
+                      <span className="text-xs">Loading dataset rows from server...</span>
+                    </div>
+                  ) : !activePreviewData || activePreviewData.rows.length === 0 ? (
+                    <div className="p-16 text-center text-xs text-[#9E93B8]">
+                      No dataset preview rows available.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex-1 overflow-auto border-b border-[rgba(107,92,166,0.15)] max-h-[60vh]">
+                        <table className="w-full border-collapse text-left text-xs">
+                          <thead className="sticky top-0 z-10 bg-[#0C0818] border-b border-[rgba(107,92,166,0.3)]">
+                            <tr>
+                              <th className="py-2.5 px-3 text-[10px] font-bold text-[#9E93B8] font-mono border-r border-[rgba(107,92,166,0.15)] bg-[#0C0818] w-12 text-center">
+                                #
+                              </th>
+                              {activePreviewData.columns.map((col) => (
+                                <th
+                                  key={col}
+                                  className="py-2.5 px-3 text-[10px] font-bold text-[#F5F1EC] font-mono tracking-wider whitespace-nowrap border-r border-[rgba(107,92,166,0.15)] bg-[#0C0818]"
+                                >
+                                  {col}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {paginatedPreviewRows.map((row, idx) => {
+                              const rowNum = (previewPage - 1) * previewPageSize + idx + 1;
+                              return (
+                                <tr
+                                  key={idx}
+                                  className={`border-b border-[rgba(107,92,166,0.08)] hover:bg-[#241B42]/40 transition-colors ${
+                                    idx % 2 === 0 ? 'bg-[#151026]' : 'bg-[#120D22]'
+                                  }`}
+                                >
+                                  <td className="py-2 px-3 text-[10px] font-mono text-[#6E6488] border-r border-[rgba(107,92,166,0.15)] text-center">
+                                    {rowNum}
+                                  </td>
+                                  {activePreviewData.columns.map((col) => {
+                                    const val = row[col];
+                                    const isNum = typeof val === 'number';
+                                    return (
+                                      <td
+                                        key={col}
+                                        className={`py-2 px-3 text-xs border-r border-[rgba(107,92,166,0.08)] whitespace-nowrap ${
+                                          isNum ? 'font-mono text-[#00F5A0]' : 'text-[#F5F1EC]'
+                                        }`}
+                                      >
+                                        {val !== null && val !== undefined && val !== '' ? String(val) : <span className="text-[#6E6488] italic">null</span>}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Pagination Footer */}
+                      <div className="px-6 py-3 bg-[#0F0B1E] flex items-center justify-between text-xs text-[#9E93B8] flex-wrap gap-2">
+                        <div className="flex items-center gap-3">
+                          <span>
+                            Showing {Math.min(filteredPreviewRows.length, (previewPage - 1) * previewPageSize + 1)} - {Math.min(filteredPreviewRows.length, previewPage * previewPageSize)} of {filteredPreviewRows.length} rows
+                          </span>
+                          <div className="flex items-center gap-1.5 text-[11px]">
+                            <span>Rows per page:</span>
+                            <select
+                              value={previewPageSize}
+                              onChange={(e) => {
+                                setPreviewPageSize(Number(e.target.value));
+                                setPreviewPage(1);
+                              }}
+                              className="bg-[#1C1534] text-[#F5F1EC] rounded px-2 py-0.5 border border-[rgba(107,92,166,0.3)] focus:outline-none"
+                            >
+                              <option value={15}>15</option>
+                              <option value={30}>30</option>
+                              <option value={50}>50</option>
+                              <option value={100}>100</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-[11px]">
+                            Page {previewPage} of {totalPreviewPages}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                              disabled={previewPage <= 1}
+                              className="p-1 rounded bg-[#1C1534] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#281E48] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] cursor-pointer"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setPreviewPage((p) => Math.min(totalPreviewPages, p + 1))}
+                              disabled={previewPage >= totalPreviewPages}
+                              className="p-1 rounded bg-[#1C1534] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#281E48] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] cursor-pointer"
+                            >
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </motion.div>
               </div>
             )}

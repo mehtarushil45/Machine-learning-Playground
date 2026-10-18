@@ -15,6 +15,8 @@ vi.mock('../services/api', async () => {
       deployModel: vi.fn(),
       evaluateModel: vi.fn(),
       submitExam: vi.fn(),
+      getExamDatasetPreview: vi.fn(),
+      predictModel: vi.fn(),
     },
     CodeExecutionService: {
       execute: vi.fn(),
@@ -23,6 +25,17 @@ vi.mock('../services/api', async () => {
     },
   };
 });
+
+vi.mock('../services/localDeploymentService', () => ({
+  LocalDeploymentService: {
+    get: vi.fn(),
+    predict: vi.fn().mockResolvedValue({
+      prediction: 1,
+      latency_ms: 8.2,
+      probabilities: { '0': 0.1, '1': 0.9 },
+    }),
+  },
+}));
 
 const mockExams = [
   {
@@ -244,6 +257,74 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
     await waitFor(() => {
       expect(screen.getByText('Exam Locked & Submitted (95/100)')).toBeInTheDocument();
       expect(screen.getByText('sub-lab-888')).toBeInTheDocument();
+    });
+  });
+
+  it('renders Preview Data button and opens the dataset preview modal', async () => {
+    (ClassroomService.getExamDatasetPreview as any).mockResolvedValue({
+      file_name: 'telecom_churn.csv',
+      columns: ['tenure', 'monthly_charges', 'churn'],
+      rows: [
+        { tenure: 12, monthly_charges: 65.5, churn: 0 },
+        { tenure: 48, monthly_charges: 89.0, churn: 1 },
+      ],
+      row_count: 2,
+    });
+
+    render(<ClassroomHub />);
+    await waitForExamLoaded();
+
+    // Verify Preview Data button is present
+    const previewBtn = screen.getByText('Preview Data');
+    expect(previewBtn).toBeInTheDocument();
+
+    // Click Preview Data
+    fireEvent.click(previewBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Dataset Preview')).toBeInTheDocument();
+      expect(screen.getByText('telecom_churn.csv')).toBeInTheDocument();
+      expect(screen.getByText(/2 total rows/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Search row values...')).toBeInTheDocument();
+    });
+  });
+
+  it('executes live test prediction and displays model output', async () => {
+    (ClassroomService.deployModel as any).mockResolvedValue({
+      deployment_id: 'dep-singleton-123',
+      model_id: 'model-exec-001',
+      model_version: 'v1.0.0',
+      is_updated_in_place: false,
+      status: 'RUNNING',
+      endpoint_path: '/api/v1/local-deployments/dep-singleton-123/predict',
+      sample_inputs: { tenure: 12, monthly_charges: 65.5 },
+      input_schema: { tenure: { type: 'numeric' }, monthly_charges: { type: 'numeric' } },
+      metrics: { accuracy: 0.91 },
+      version_count: 1,
+      logs: [],
+    });
+
+    (ClassroomService.predictModel as any).mockResolvedValue({
+      prediction: '1',
+      latency_ms: 12.4,
+      probabilities: { '0': 0.15, '1': 0.85 },
+    });
+
+    render(<ClassroomHub />);
+    await waitForExamLoaded();
+
+    // Deploy model
+    fireEvent.click(screen.getByTitle(/Deploy newly trained model/i));
+    await screen.findByText(/Slot: Lab-01/i);
+
+    // Click Run Test Prediction
+    const predictBtn = screen.getByText('Run Test Prediction');
+    fireEvent.click(predictBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Model Output:')).toBeInTheDocument();
+      expect(screen.getByText('Inference Latency:')).toBeInTheDocument();
+      expect(screen.getByText(/12\.40 ms/i)).toBeInTheDocument();
     });
   });
 });

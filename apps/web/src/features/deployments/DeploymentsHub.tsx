@@ -123,7 +123,13 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
   const fetchDeployments = useCallback(async () => {
     try {
       const data = await LocalDeploymentService.list();
-      setDeployments(data);
+      const filtered = (data || []).filter(
+        (d) =>
+          !d.name.toLowerCase().startsWith('lab slot') &&
+          !d.name.toLowerCase().startsWith('student lab') &&
+          !d.name.toLowerCase().includes('exam')
+      );
+      setDeployments(filtered);
     } catch (err: any) {
       if (isActive) {
         onShowToastRef.current?.('Failed to Load Deployments', err?.detail || err?.message, 'error');
