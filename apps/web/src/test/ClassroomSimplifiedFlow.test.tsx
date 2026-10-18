@@ -41,8 +41,8 @@ const mockExamList = [
     course_code: 'CS401',
     duration_minutes: 90,
     problem_type: 'classification',
-    dataset_name: 'churn_lab_dataset.csv',
-    dataset_id: 'churn_lab_dataset.csv',
+    dataset_name: 'telecom_churn.csv',
+    dataset_id: 'telecom_churn.csv',
     target_column: 'churn',
     feature_columns: ['tenure', 'monthly_charges'],
     description: 'Build and deploy customer churn model.',
@@ -139,7 +139,7 @@ describe('Simplified Classroom & Assignment Flow', () => {
           id: 'asgn-1',
           title: 'Customer Churn Classification Lab Exam',
           description: 'Build an end-to-end churn model and deploy it to meet minimum 80% accuracy.',
-          dataset_id: 'churn_lab_dataset.csv',
+          dataset_id: 'telecom_churn.csv',
           start_date: '2026-10-12T10:00:00Z',
           end_date: '2026-10-12T12:00:00Z',
           rubric: {
@@ -233,7 +233,7 @@ describe('Simplified Classroom & Assignment Flow', () => {
           classroom_id: 'c-100',
           title: 'Classification Benchmark Lab',
           description: 'Build scikit-learn model with min 85% accuracy.',
-          dataset_id: 'churn_lab_dataset.csv',
+          dataset_id: 'telecom_churn.csv',
           rubric: {
             problem_type: 'classification',
             min_accuracy: 0.85,

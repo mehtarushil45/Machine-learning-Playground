@@ -49,6 +49,7 @@ import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { MonacoCodeStudioEditor } from '../pipelines/MonacoCodeStudioEditor';
 import { AICopilotDrawer, type ChatMessage } from '../../components/shared/AICopilotDrawer';
 import { AuthContext } from '../../providers/AuthContext';
+import { useOptionalProject } from '../../providers/ProjectContext';
 import { useLearning, PanelLearningCollapsible } from '../learning';
 
 /* ── Enterprise Design Tokens ─────────────────────────────────────────── */
@@ -102,6 +103,9 @@ export interface ClassroomHubProps {
 export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initialView }) => {
   const authCtx = useContext(AuthContext);
   const user = authCtx?.user;
+  const project = useOptionalProject();
+  const projectDataset = project?.dataset;
+  const activeDatasetId = projectDataset?.fileName || projectDataset?.datasetId;
 
   // Role Detection: faculty, lab coordinator, admin can view Instructor Side
   const isFacultyRole = useMemo(() => {
@@ -160,6 +164,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [submissionReceipt, setSubmissionReceipt] = useState<LabSubmitResponse | null>(null);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
 
+  // Safe Browser Lock: prevents navigation during active exam
+  const [examLocked, setExamLocked] = useState(false);
+
   // AI Copilot State (Server Enforced)
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const [copilotChat, setCopilotChat] = useState<ChatMessage[]>([]);
@@ -183,7 +190,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [newAssignmentStartDate, setNewAssignmentStartDate] = useState('');
   const [newAssignmentEndDate, setNewAssignmentEndDate] = useState('');
   const [newAssignmentType, setNewAssignmentType] = useState('classification');
-  const [newAssignmentDataset, setNewAssignmentDataset] = useState('churn_lab_dataset.csv');
+  const [newAssignmentDataset, setNewAssignmentDataset] = useState(activeDatasetId || 'telecom_churn.csv');
 
   // Helper: Format ISO date string for display
   const formatExamDate = useCallback((dateStr?: string | null): string => {
@@ -217,13 +224,49 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
+  // ── Safe Browser Lock (Exam Mode) ──────────────────────────────────────
+  // Activates when student starts an exam, releases on submission.
+  // Temporarily allows copy-paste for code testing.
+  useEffect(() => {
+    if (!examLocked) return;
+
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Your exam is in progress. Leaving this page will interrupt your session. Are you sure?';
+      return e.returnValue;
+    };
+
+    // Push a history entry so the back button is intercepted
+    window.history.pushState({ examLocked: true }, '', window.location.href);
+
+    const handlePopState = (_e: PopStateEvent) => {
+      if (examLocked) {
+        // Re-push so the back button stays blocked
+        window.history.pushState({ examLocked: true }, '', window.location.href);
+        onShowToast?.(
+          '⚠️ Exam In Progress',
+          'Navigation is locked during your exam. Submit first to leave.',
+          'error'
+        );
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [examLocked, onShowToast]);
+
   // 1. Initial Load: Exams & Student Session
   useEffect(() => {
     let mounted = true;
     async function loadExams() {
       try {
         setIsLoadingExams(true);
-        const data = await ClassroomService.listExams();
+        const data = await ClassroomService.listExams(activeDatasetId);
         if (mounted) {
           setExams(data);
           if (data.length > 0) {
@@ -442,7 +485,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       const exec = await CodeExecutionService.execute({
         code,
         filename: 'lab_exam.py',
-        dataset_id: activeExam?.dataset_id || 'churn_lab_dataset.csv',
+        dataset_id: activeExam?.dataset_id || activeDatasetId || 'telecom_churn.csv',
         timeout: 90,
       });
 
@@ -586,6 +629,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       const receipt = await ClassroomService.submitExam(selectedExamId, code, deployment?.deployment_id);
       setSubmissionReceipt(receipt);
       setShowConfirmSubmit(false);
+      // Release exam lock on successful submission
+      setExamLocked(false);
       setOutputLines((prev) => [
         ...prev,
         '─────────────────────────────────────────────────────────────',
@@ -940,6 +985,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   if (targetCid) {
                     ClassroomService.enterExamWorkspace(targetCid).catch(() => {});
                   }
+                  // Activate safe browser lock (released on submission)
+                  setExamLocked(true);
                   setViewMode('student');
                 }}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs text-[#0B0912] shadow transition-all hover:opacity-90 shrink-0"
@@ -970,7 +1017,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     <span>Assigned Dataset</span>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-xs">
-                    <span className="font-mono text-[#F5F1EC]">{selectedClassroomAssignment.dataset_id || 'churn_lab_dataset.csv'}</span>
+                    <span className="font-mono text-[#F5F1EC]">{selectedClassroomAssignment.dataset_id || activeDatasetId || 'telecom_churn.csv'}</span>
                     <span className="text-[11px] text-[#9E93B8]">Pre-loaded in workspace</span>
                   </div>
                 </div>
@@ -1090,6 +1137,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       if (targetCid) {
                         ClassroomService.enterExamWorkspace(targetCid).catch(() => {});
                       }
+                      // Activate safe browser lock (released on submission)
+                      setExamLocked(true);
                       setViewMode('student');
                     }}
                     className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-xs text-[#0B0912] shadow-lg transition-all hover:opacity-90 active:scale-[0.98]"
@@ -1506,7 +1555,14 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     onChange={(e) => setNewAssignmentDataset(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
                   >
-                    <option value="churn_lab_dataset.csv">Default: Customer Churn (1,000 rows)</option>
+                    {projectDataset?.fileName && (
+                      <option value={projectDataset.fileName}>Active Uploaded Dataset: {projectDataset.fileName}</option>
+                    )}
+                    <option value="telecom_churn.csv">Ready-Made: Telecom Customer Churn</option>
+                    <option value="housing_prices.csv">Ready-Made: California Housing Valuation</option>
+                    <option value="credit_risk.csv">Ready-Made: Credit Risk & Default Assessment</option>
+                    <option value="iris_species.csv">Ready-Made: Iris Flower Taxonomy Benchmark</option>
+                    <option value="insurance_charges.csv">Ready-Made: Healthcare Insurance Charges</option>
                     <option value="story_churn_leakage.csv">Story: Churn with Target Leakage (Leakage Pitfall)</option>
                     <option value="story_credit_imbalance.csv">Story: Credit Default (95/5 Class Imbalance)</option>
                     <option value="story_housing_multicollinearity.csv">Story: Housing (Multicollinearity Pitfall)</option>
@@ -1940,6 +1996,10 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
           <div className="flex items-center justify-between border-b border-[rgba(107,92,166,0.2)] pb-2 flex-wrap gap-2">
             <button
               onClick={() => {
+                if (examLocked) {
+                  onShowToast?.('⚠️ Exam In Progress', 'Submit your exam before leaving the workspace.', 'error');
+                  return;
+                }
                 if (activeClassroom) {
                   setSelectedClassroomAssignment(null);
                   setViewMode('classroom');
@@ -1947,20 +2007,43 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   setViewMode('entry');
                 }
               }}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#1C1534] hover:bg-[#241B42] text-[#9E93B8] hover:text-white transition-colors border border-[rgba(107,92,166,0.3)] flex items-center gap-1.5"
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors border flex items-center gap-1.5 ${
+                examLocked
+                  ? 'bg-[#1C1534] text-[#3D3558] border-[rgba(107,92,166,0.15)] cursor-not-allowed opacity-50'
+                  : 'bg-[#1C1534] hover:bg-[#241B42] text-[#9E93B8] hover:text-white border-[rgba(107,92,166,0.3)]'
+              }`}
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>{activeClassroom ? 'Back to Classroom' : 'Back to All Classrooms'}</span>
             </button>
-            {activeClassroom && (
+
+            {/* Exam Lock Status Banner */}
+            {examLocked && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/40 text-[#EF4444] text-xs font-bold">
+                <Lock className="w-3.5 h-3.5" />
+                <span>EXAM IN PROGRESS — Navigation Locked</span>
+              </div>
+            )}
+
+            {activeClassroom && !examLocked && (
               <div className="text-xs font-mono text-[#00D4FF]">
                 Classroom: <strong className="text-[#F5F1EC]">{activeClassroom.name}</strong>
               </div>
             )}
             {isFacultyRole && (
               <button
-                onClick={() => setViewMode('instructor')}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[#241B42] text-[#00D4FF] border border-[#00D4FF]/30 hover:bg-[#2E2254] transition-colors"
+                onClick={() => {
+                  if (examLocked) {
+                    onShowToast?.('⚠️ Exam In Progress', 'Submit your exam before switching views.', 'error');
+                    return;
+                  }
+                  setViewMode('instructor');
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
+                  examLocked
+                    ? 'bg-[#241B42] text-[#3D3558] border-[#00D4FF]/10 cursor-not-allowed opacity-40'
+                    : 'bg-[#241B42] text-[#00D4FF] border-[#00D4FF]/30 hover:bg-[#2E2254]'
+                }`}
               >
                 Instructor Hub
               </button>
@@ -2019,7 +2102,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       <select
                         value={selectedExamId}
                         onChange={(e) => handleSelectExam(e.target.value)}
-                        disabled={Boolean(submissionReceipt)}
+                        disabled={Boolean(submissionReceipt) || examLocked}
                         className="px-2.5 py-1 pr-7 rounded-lg text-xs font-semibold bg-[#1C1534] text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] focus:outline-none appearance-none cursor-pointer"
                       >
                         {exams.map((ex) => (
@@ -2041,9 +2124,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     {/* Faculty Toggle to Instructor Portal */}
                     {isFacultyRole && (
                       <button
-                        onClick={() => setViewMode('instructor')}
-                        className="px-2 py-1 rounded-lg text-xs font-semibold bg-[#C9A24B]/20 text-[#C9A24B] hover:bg-[#C9A24B]/30 border border-[#C9A24B]/40 transition-colors flex items-center gap-1 shadow-sm"
-                        title="Switch to Instructor Portal"
+                        onClick={() => {
+                          if (examLocked) {
+                            onShowToast?.('⚠️ Exam In Progress', 'Submit your exam before switching to Instructor Portal.', 'error');
+                            return;
+                          }
+                          setViewMode('instructor');
+                        }}
+                        className={`px-2 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1 shadow-sm transition-colors ${
+                          examLocked
+                            ? 'bg-[#C9A24B]/10 text-[#C9A24B]/30 border-[#C9A24B]/20 cursor-not-allowed opacity-40'
+                            : 'bg-[#C9A24B]/20 text-[#C9A24B] hover:bg-[#C9A24B]/30 border-[#C9A24B]/40'
+                        }`}
+                        title={examLocked ? 'Submit exam first' : 'Switch to Instructor Portal'}
                       >
                         <Settings className="w-3.5 h-3.5" />
                         <span>Instructor Portal</span>

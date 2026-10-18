@@ -458,9 +458,11 @@ export interface ParticipantInspectionResponse {
 
 export const ClassroomService = {
   // Student Lab Exam Methods
-  listExams: () => request<LabExamInfo[]>('/classrooms/exams'),
+  listExams: (datasetId?: string) =>
+    request<LabExamInfo[]>(datasetId ? `/classrooms/exams?dataset_id=${encodeURIComponent(datasetId)}` : '/classrooms/exams'),
 
-  getExam: (examId: string) => request<LabExamInfo>(`/classrooms/exams/${examId}`),
+  getExam: (examId: string, datasetId?: string) =>
+    request<LabExamInfo>(datasetId ? `/classrooms/exams/${examId}?dataset_id=${encodeURIComponent(datasetId)}` : `/classrooms/exams/${examId}`),
 
   getSession: (examId: string) => request<LabExamSession>(`/classrooms/exams/${examId}/session`),
 

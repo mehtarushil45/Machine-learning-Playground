@@ -23,6 +23,7 @@ import io
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
@@ -143,6 +144,72 @@ def _resolve_student_id(request: Optional[Request] = None, current_user: Optiona
 # ---------------------------------------------------------------------------
 # Curated Lab Exams Catalog & Protected Regions (Parts B2, B4)
 # ---------------------------------------------------------------------------
+# Dynamic Exam Starter Code & Catalog Generator
+# ---------------------------------------------------------------------------
+
+def build_exam_starter_code(
+    dataset_name: str,
+    target_col: str,
+    feature_cols: Optional[List[str]] = None,
+    problem_type: str = "classification",
+) -> str:
+    """Dynamically generate clean, robust scikit-learn starter code for any dataset."""
+    is_regression = problem_type.lower() == "regression"
+    model_import = "from sklearn.ensemble import RandomForestRegressor" if is_regression else "from sklearn.ensemble import RandomForestClassifier"
+    model_inst = "RandomForestRegressor(n_estimators=100, random_state=42)" if is_regression else "RandomForestClassifier(n_estimators=100, random_state=42)"
+    metric_import = "from sklearn.metrics import r2_score" if is_regression else "from sklearn.metrics import accuracy_score, f1_score"
+    eval_code = (
+        "r2 = r2_score(y_test, pipeline.predict(X_test))\n"
+        "print(f'[Lab Metrics] Test R2 Score: {r2:.4f}')"
+    ) if is_regression else (
+        "preds = pipeline.predict(X_test)\n"
+        "acc = accuracy_score(y_test, preds)\n"
+        "f1 = f1_score(y_test, preds, average='weighted')\n"
+        "print(f'[Lab Metrics] Accuracy: {acc:.4f} | Weighted F1: {f1:.4f}')"
+    )
+
+    return (
+        "import pandas as pd\n"
+        "import numpy as np\n"
+        "import joblib\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "from sklearn.pipeline import Pipeline\n"
+        "from sklearn.compose import ColumnTransformer\n"
+        "from sklearn.preprocessing import StandardScaler, OneHotEncoder\n"
+        "from sklearn.impute import SimpleImputer\n"
+        f"{model_import}\n"
+        f"{metric_import}\n\n"
+        "# 1. Load the Lab Dataset\n"
+        f"df = pd.read_csv('{dataset_name}')\n"
+        "print(f'[Lab] Loaded dataset: {df.shape[0]} samples, {df.shape[1]} columns')\n\n"
+        "# [PROTECTED: START - TARGET & SPLIT]\n"
+        f"target = '{target_col}'\n"
+        "X = df.drop(columns=[target])\n"
+        "y = df[target]\n"
+        "# [PROTECTED: END - TARGET & SPLIT]\n\n"
+        "# 3. Train-Test Split (Fixed seed for reproducibility)\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\n\n"
+        "# 4. Build Pipeline with Preprocessing\n"
+        "num_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()\n"
+        "cat_cols = X_train.select_dtypes(exclude=[np.number]).columns.tolist()\n\n"
+        "preprocessor = ColumnTransformer([\n"
+        "    ('num', Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())]), num_cols),\n"
+        "    ('cat', Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('ohe', OneHotEncoder(handle_unknown='ignore'))]), cat_cols),\n"
+        "])\n\n"
+        "pipeline = Pipeline([\n"
+        "    ('preprocessor', preprocessor),\n"
+        f"    ('classifier', {model_inst}),\n"
+        "])\n\n"
+        "# 5. Fit Pipeline\n"
+        "pipeline.fit(X_train, y_train)\n\n"
+        "# 6. Evaluate Model Metrics\n"
+        f"{eval_code}\n\n"
+        "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\n"
+        "joblib.dump(pipeline, 'trained_model_pipeline.joblib')\n"
+        "# [PROTECTED: END - MANDATORY PIPELINE EXPORT]\n"
+        "print('[Lab] Exported model pipeline to trained_model_pipeline.joblib successfully!')\n"
+    )
+
 
 CURATED_LAB_EXAMS: Dict[str, Dict[str, Any]] = {
     "lab-exam-01": {
@@ -151,12 +218,12 @@ CURATED_LAB_EXAMS: Dict[str, Dict[str, Any]] = {
         "course_code": "CS401 - Machine Learning Lab",
         "duration_minutes": 90,
         "problem_type": "classification",
-        "dataset_name": "churn_lab_dataset.csv",
-        "dataset_id": "churn_lab_dataset.csv",
+        "dataset_name": "telecom_churn.csv",
+        "dataset_id": "telecom_churn.csv",
         "target_column": "churn",
-        "feature_columns": ["tenure", "monthly_charges", "total_charges", "contract", "tech_support"],
+        "feature_columns": ["age", "tenure_months", "monthly_charges", "total_charges", "contract", "tech_support"],
         "copilot_policy": "explain-only",  # off | explain-only | full
-        "learning_aids_enabled": True,  # Instructors can toggle learning aids off
+        "learning_aids_enabled": True,
         "open_time": None,
         "close_time": None,
         "protected_regions": [
@@ -177,49 +244,11 @@ CURATED_LAB_EXAMS: Dict[str, Dict[str, Any]] = {
             "max_latency_ms": 100.0,
             "max_score": 100.0,
         },
-        "starter_code": (
-            "import pandas as pd\n"
-            "import numpy as np\n"
-            "import joblib\n"
-            "from sklearn.model_selection import train_test_split\n"
-            "from sklearn.pipeline import Pipeline\n"
-            "from sklearn.compose import ColumnTransformer\n"
-            "from sklearn.preprocessing import StandardScaler, OneHotEncoder\n"
-            "from sklearn.impute import SimpleImputer\n"
-            "from sklearn.ensemble import RandomForestClassifier\n"
-            "from sklearn.metrics import accuracy_score, f1_score\n\n"
-            "# 1. Load the Lab Dataset\n"
-            "df = pd.read_csv('churn_lab_dataset.csv')\n"
-            "print(f'[Lab] Loaded dataset: {df.shape[0]} samples, {df.shape[1]} columns')\n\n"
-            "# [PROTECTED: START - TARGET & SPLIT]\n"
-            "target = 'churn'\n"
-            "X = df.drop(columns=[target])\n"
-            "y = df[target]\n"
-            "# [PROTECTED: END - TARGET & SPLIT]\n\n"
-            "# 3. Train-Test Split (Fixed seed for reproducibility)\n"
-            "X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)\n\n"
-            "# 4. Build Pipeline with Preprocessing\n"
-            "num_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()\n"
-            "cat_cols = X_train.select_dtypes(exclude=[np.number]).columns.tolist()\n\n"
-            "preprocessor = ColumnTransformer([\n"
-            "    ('num', Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())]), num_cols),\n"
-            "    ('cat', Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('ohe', OneHotEncoder(handle_unknown='ignore'))]), cat_cols),\n"
-            "])\n\n"
-            "pipeline = Pipeline([\n"
-            "    ('preprocessor', preprocessor),\n"
-            "    ('classifier', RandomForestClassifier(n_estimators=100, random_state=42)),\n"
-            "])\n\n"
-            "# 5. Fit Pipeline\n"
-            "pipeline.fit(X_train, y_train)\n\n"
-            "# 6. Evaluate Model Metrics\n"
-            "preds = pipeline.predict(X_test)\n"
-            "acc = accuracy_score(y_test, preds)\n"
-            "f1 = f1_score(y_test, preds, average='weighted')\n"
-            "print(f'[Lab Metrics] Accuracy: {acc:.4f} | Weighted F1: {f1:.4f}')\n\n"
-            "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\n"
-            "joblib.dump(pipeline, 'trained_model_pipeline.joblib')\n"
-            "# [PROTECTED: END - MANDATORY PIPELINE EXPORT]\n"
-            "print('[Lab] Exported model pipeline to trained_model_pipeline.joblib successfully!')\n"
+        "starter_code": build_exam_starter_code(
+            "telecom_churn.csv",
+            "churn",
+            ["age", "tenure_months", "monthly_charges", "total_charges", "contract", "tech_support"],
+            "classification",
         ),
     },
     "lab-exam-02": {
@@ -228,16 +257,16 @@ CURATED_LAB_EXAMS: Dict[str, Dict[str, Any]] = {
         "course_code": "CS401 - Machine Learning Lab",
         "duration_minutes": 90,
         "problem_type": "regression",
-        "dataset_name": "sample_dataset.csv",
-        "dataset_id": "sample_dataset.csv",
-        "target_column": "target",
-        "feature_columns": ["feature1", "feature2", "category"],
+        "dataset_name": "housing_prices.csv",
+        "dataset_id": "housing_prices.csv",
+        "target_column": "median_house_value",
+        "feature_columns": ["median_income", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households"],
         "copilot_policy": "full",
         "learning_aids_enabled": True,
         "open_time": None,
         "close_time": None,
         "protected_regions": [
-            "# [PROTECTED: START - TARGET & SPLIT]\ntarget = 'target'\nX = df.drop(columns=[target])\ny = df[target]\n# [PROTECTED: END - TARGET & SPLIT]",
+            "# [PROTECTED: START - TARGET & SPLIT]\ntarget = 'median_house_value'\nX = df.drop(columns=[target])\ny = df[target]\n# [PROTECTED: END - TARGET & SPLIT]",
             "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\njoblib.dump(pipeline, 'trained_model_pipeline.joblib')\n# [PROTECTED: END - MANDATORY PIPELINE EXPORT]",
         ],
         "description": (
@@ -250,44 +279,11 @@ CURATED_LAB_EXAMS: Dict[str, Dict[str, Any]] = {
             "max_latency_ms": 100.0,
             "max_score": 100.0,
         },
-        "starter_code": (
-            "import pandas as pd\n"
-            "import numpy as np\n"
-            "import joblib\n"
-            "from sklearn.model_selection import train_test_split\n"
-            "from sklearn.pipeline import Pipeline\n"
-            "from sklearn.compose import ColumnTransformer\n"
-            "from sklearn.preprocessing import StandardScaler, OneHotEncoder\n"
-            "from sklearn.impute import SimpleImputer\n"
-            "from sklearn.ensemble import RandomForestRegressor\n"
-            "from sklearn.metrics import r2_score\n\n"
-            "# 1. Load Dataset\n"
-            "df = pd.read_csv('sample_dataset.csv')\n\n"
-            "# [PROTECTED: START - TARGET & SPLIT]\n"
-            "target = 'target'\n"
-            "X = df.drop(columns=[target])\n"
-            "y = df[target]\n"
-            "# [PROTECTED: END - TARGET & SPLIT]\n\n"
-            "# 2. Split\n"
-            "X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)\n\n"
-            "# 3. Pipeline\n"
-            "num_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()\n"
-            "cat_cols = X_train.select_dtypes(exclude=[np.number]).columns.tolist()\n\n"
-            "prep = ColumnTransformer([\n"
-            "    ('num', Pipeline([('imp', SimpleImputer(strategy='mean')), ('scaler', StandardScaler())]), num_cols),\n"
-            "    ('cat', Pipeline([('imp', SimpleImputer(strategy='most_frequent')), ('ohe', OneHotEncoder(handle_unknown='ignore'))]), cat_cols),\n"
-            "])\n\n"
-            "pipeline = Pipeline([\n"
-            "    ('preprocessor', prep),\n"
-            "    ('regressor', RandomForestRegressor(n_estimators=100, random_state=42)),\n"
-            "])\n"
-            "pipeline.fit(X_train, y_train)\n"
-            "r2 = r2_score(y_test, pipeline.predict(X_test))\n"
-            "print(f'[Lab Metrics] Test R2 Score: {r2:.4f}')\n\n"
-            "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\n"
-            "joblib.dump(pipeline, 'trained_model_pipeline.joblib')\n"
-            "# [PROTECTED: END - MANDATORY PIPELINE EXPORT]\n"
-            "print('[Lab] Model artifact saved to trained_model_pipeline.joblib')\n"
+        "starter_code": build_exam_starter_code(
+            "housing_prices.csv",
+            "median_house_value",
+            ["median_income", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households"],
+            "regression",
         ),
     },
 }
@@ -300,84 +296,178 @@ _STUDENT_LAB_SESSIONS: Dict[str, Dict[str, Any]] = {}
 _ASSIGNMENT_TEMPLATES: Dict[str, Dict[str, Any]] = {}
 
 
+def tailor_exam_for_dataset(exam_id: str, dataset_id: str) -> Optional[Dict[str, Any]]:
+    """Dynamically adapt an exam specification to work on any uploaded or ready-made CSV dataset."""
+    from services.worker.core.dataset_loader import find_dataset_path
+    csv_path: Optional[str] = None
+    try:
+        csv_path = find_dataset_path(dataset_id)
+    except Exception:
+        csv_path = None
+
+    if not csv_path or not os.path.isfile(csv_path):
+        cand = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", os.path.basename(dataset_id)))
+        if os.path.isfile(cand):
+            csv_path = cand
+
+    if not csv_path or not os.path.isfile(csv_path):
+        return None
+
+    try:
+        df = pd.read_csv(csv_path)
+        base_name = os.path.basename(csv_path)
+
+        target_candidates = ["churn", "target", "label", "loan_status", "species", "median_house_value", "charges", "price"]
+        matched = [c for c in df.columns if c.lower() in target_candidates]
+        target_col = matched[0] if matched else df.columns[-1]
+
+        feature_cols = [c for c in df.columns if c != target_col]
+
+        y_sample = df[target_col].dropna()
+        is_regression = False
+        if pd.api.types.is_numeric_dtype(y_sample):
+            if y_sample.nunique() > 10:
+                is_regression = True
+        problem_type = "regression" if is_regression else "classification"
+
+        starter = build_exam_starter_code(
+            dataset_name=base_name,
+            target_col=target_col,
+            feature_cols=feature_cols,
+            problem_type=problem_type,
+        )
+
+        rubric = {
+            "min_r2": 0.70,
+            "max_latency_ms": 100.0,
+            "max_score": 100.0,
+        } if is_regression else {
+            "min_accuracy": 0.75,
+            "min_f1": 0.70,
+            "max_latency_ms": 100.0,
+            "max_score": 100.0,
+        }
+
+        exam_dict = {
+            "id": exam_id,
+            "title": f"Lab Exam: {base_name.replace('.csv', '').replace('_', ' ').title()} Pipeline",
+            "course_code": "CS401 - Machine Learning Lab",
+            "duration_minutes": 90,
+            "problem_type": problem_type,
+            "dataset_name": base_name,
+            "dataset_id": base_name,
+            "target_column": target_col,
+            "feature_columns": feature_cols,
+            "copilot_policy": "explain-only",
+            "learning_aids_enabled": True,
+            "open_time": None,
+            "close_time": None,
+            "protected_regions": [
+                f"# [PROTECTED: START - TARGET & SPLIT]\ntarget = '{target_col}'\nX = df.drop(columns=[target])\ny = df[target]\n# [PROTECTED: END - TARGET & SPLIT]",
+                "# [PROTECTED: START - MANDATORY PIPELINE EXPORT]\njoblib.dump(pipeline, 'trained_model_pipeline.joblib')\n# [PROTECTED: END - MANDATORY PIPELINE EXPORT]",
+            ],
+            "description": f"Build, train, evaluate, and deploy an end-to-end {problem_type} pipeline on '{base_name}' for target '{target_col}'.",
+            "rubric": rubric,
+            "starter_code": starter,
+        }
+        CURATED_LAB_EXAMS[exam_id] = exam_dict
+        return exam_dict
+    except Exception as exc:
+        logger.warning("Could not tailor exam for dataset %s: %s", dataset_id, exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Hidden Test Dataset & Benchmarks Generator (Part D1)
 # ---------------------------------------------------------------------------
 
-def _ensure_lab_dataset_exists():
-    """Ensure churn_lab_dataset.csv exists in uploads for student training."""
-    uploads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads"))
-    os.makedirs(uploads_dir, exist_ok=True)
-    target_path = os.path.join(uploads_dir, "churn_lab_dataset.csv")
-    if not os.path.exists(target_path):
-        import pandas as pd
-        np.random.seed(42)
-        n = 150
-        tenure = np.random.randint(1, 72, size=n)
-        monthly = np.random.uniform(20.0, 115.0, size=n).round(2)
-        total = (tenure * monthly * np.random.uniform(0.9, 1.1, size=n)).round(2)
-        contracts = np.random.choice(["month-to-month", "one-year", "two-year"], size=n, p=[0.55, 0.25, 0.20])
-        tech_support = np.random.choice(["yes", "no"], size=n, p=[0.4, 0.6])
-        churn_prob = 0.2 + (contracts == "month-to-month") * 0.35 + (monthly > 70.0) * 0.2
-        churn = (np.random.rand(n) < churn_prob).astype(int)
-
-        df = pd.DataFrame({
-            "tenure": tenure,
-            "monthly_charges": monthly,
-            "total_charges": total,
-            "contract": contracts,
-            "tech_support": tech_support,
-            "churn": churn,
-        })
-        df.to_csv(target_path, index=False)
-
-
-def _get_hidden_test_cases(exam_id: str) -> List[Dict[str, Any]]:
-    """Return hidden benchmark test cases stored safely outside student sandbox access (D1)."""
+def _get_hidden_test_cases(exam_id: str, dataset_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return hidden benchmark test cases dynamically generated from the actual dataset (D1)."""
     hidden_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "hidden_benchmarks"))
     os.makedirs(hidden_dir, exist_ok=True)
-    file_path = os.path.join(hidden_dir, f"{exam_id}_hidden.json")
+    target_ds = dataset_id or CURATED_LAB_EXAMS.get(exam_id, {}).get("dataset_id") or "telecom_churn.csv"
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', f"{exam_id}_{target_ds}")
+    file_path = os.path.join(hidden_dir, f"{safe_name}_hidden.json")
 
     if os.path.exists(file_path):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                cases = json.load(f)
+                if isinstance(cases, list) and len(cases) > 0:
+                    return cases
         except Exception:
             pass
 
-    # Deterministically generate 30 held-out test cases with ground-truth
-    rng = np.random.RandomState(999)
-    cases = []
-    for _ in range(30):
-        tenure = rng.randint(2, 70)
-        monthly = round(float(rng.uniform(22.0, 110.0)), 2)
-        total = round(tenure * monthly * float(rng.uniform(0.92, 1.08)), 2)
-        contract = str(rng.choice(["month-to-month", "one-year", "two-year"], p=[0.5, 0.3, 0.2]))
-        tech_support = str(rng.choice(["yes", "no"], p=[0.45, 0.55]))
-        p_churn = 0.15 + (contract == "month-to-month") * 0.40 + (monthly > 75.0) * 0.25 - (tech_support == "yes") * 0.15
-        true_label = 1 if rng.rand() < p_churn else 0
-
-        cases.append({
-            "inputs": {
-                "tenure": tenure,
-                "monthly_charges": monthly,
-                "total_charges": total,
-                "contract": contract,
-                "tech_support": tech_support,
-            },
-            "ground_truth": true_label,
-        })
-
+    from services.worker.core.dataset_loader import find_dataset_path
+    csv_path: Optional[str] = None
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(cases, f, indent=2)
-    except Exception as exc:
-        logger.warning("Could not persist hidden test cases: %s", exc)
+        csv_path = find_dataset_path(target_ds)
+    except Exception:
+        csv_path = None
 
-    return cases
+    if not csv_path or not os.path.isfile(csv_path):
+        cand = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", os.path.basename(target_ds)))
+        if os.path.isfile(cand):
+            csv_path = cand
 
+    if not csv_path or not os.path.isfile(csv_path):
+        cand = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "telecom_churn.csv"))
+        if os.path.isfile(cand):
+            csv_path = cand
 
-_ensure_lab_dataset_exists()
+    if csv_path and os.path.isfile(csv_path):
+        try:
+            df = pd.read_csv(csv_path)
+            exam = CURATED_LAB_EXAMS.get(exam_id, {})
+            target_col = exam.get("target_column")
+            if not target_col or target_col not in df.columns:
+                target_candidates = ["churn", "target", "label", "loan_status", "species", "median_house_value", "charges", "price"]
+                matched = [c for c in df.columns if c.lower() in target_candidates]
+                target_col = matched[0] if matched else df.columns[-1]
+
+            feature_cols = [c for c in df.columns if c != target_col]
+            sample_size = min(30, len(df))
+            sample_df = df.sample(n=sample_size, random_state=999) if len(df) >= sample_size else df
+
+            cases: List[Dict[str, Any]] = []
+            for idx, (_, row) in enumerate(sample_df.iterrows(), 1):
+                inputs: Dict[str, Any] = {}
+                for f in feature_cols:
+                    val = row[f]
+                    if pd.isna(val):
+                        inputs[f] = None
+                    elif isinstance(val, (np.integer, int)):
+                        inputs[f] = int(val)
+                    elif isinstance(val, (np.floating, float)):
+                        inputs[f] = round(float(val), 4)
+                    else:
+                        inputs[f] = str(val)
+
+                gt_raw = row[target_col]
+                if pd.isna(gt_raw):
+                    gt: Any = 0
+                elif isinstance(gt_raw, (np.integer, int)):
+                    gt = int(gt_raw)
+                elif isinstance(gt_raw, (np.floating, float)):
+                    gt = round(float(gt_raw), 4)
+                else:
+                    gt = str(gt_raw)
+
+                cases.append({
+                    "case_id": f"tc-{idx:03d}",
+                    "inputs": inputs,
+                    "ground_truth": gt,
+                    "weight": 1.0,
+                })
+
+            if cases:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(cases, f, indent=2)
+                return cases
+        except Exception as exc:
+            logger.warning("Could not generate dynamic hidden test cases from %s: %s", csv_path, exc)
+
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -445,20 +535,25 @@ def _run_data_quality_guardrails(code: str, features: List[str], target_col: str
 # ---------------------------------------------------------------------------
 
 @router.get("/exams", response_model=List[LabExamInfo], summary="List available practical ML lab exams")
-async def list_lab_exams(db: AsyncSession = Depends(get_db)) -> List[LabExamInfo]:
+async def list_lab_exams(dataset_id: Optional[str] = None, db: AsyncSession = Depends(get_db)) -> List[LabExamInfo]:
     """Return all active lab exams with problem statements, datasets, and starter templates."""
+    if dataset_id:
+        tailor_exam_for_dataset("lab-exam-01", dataset_id)
+
     try:
         stmt = select(Assignment).limit(50)
         res = await db.execute(stmt)
         db_asgns = res.scalars().all()
-        default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
         for asgn in db_asgns:
             exam_id = f"exam-{asgn.id}"
             if exam_id not in CURATED_LAB_EXAMS:
                 rubric_dict = asgn.rubric or {}
-                dataset_file = asgn.dataset_id or "churn_lab_dataset.csv"
-                default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
-                starter_code = default_starter.replace("churn_lab_dataset.csv", dataset_file) if (default_starter and dataset_file != "churn_lab_dataset.csv") else default_starter
+                dataset_file = asgn.dataset_id or "telecom_churn.csv"
+                starter_code = build_exam_starter_code(
+                    dataset_name=dataset_file,
+                    target_col=rubric_dict.get("target_column", "churn"),
+                    problem_type=rubric_dict.get("problem_type", "classification"),
+                )
                 CURATED_LAB_EXAMS[exam_id] = {
                     "id": exam_id,
                     "title": asgn.title,
@@ -503,8 +598,11 @@ async def list_lab_exams(db: AsyncSession = Depends(get_db)) -> List[LabExamInfo
 
 
 @router.get("/exams/{exam_id}", response_model=LabExamInfo, summary="Get lab exam problem statement & rubric")
-async def get_lab_exam(exam_id: str, db: AsyncSession = Depends(get_db)) -> LabExamInfo:
+async def get_lab_exam(exam_id: str, dataset_id: Optional[str] = None, db: AsyncSession = Depends(get_db)) -> LabExamInfo:
     """Retrieve full lab exam problem specification, constraints, and rubric."""
+    if dataset_id:
+        tailor_exam_for_dataset(exam_id, dataset_id)
+
     exam = CURATED_LAB_EXAMS.get(exam_id)
     if not exam and exam_id.startswith("exam-"):
         try:
@@ -515,9 +613,12 @@ async def get_lab_exam(exam_id: str, db: AsyncSession = Depends(get_db)) -> LabE
             asgn = res.scalar_one_or_none()
             if asgn:
                 rubric_dict = asgn.rubric or {}
-                dataset_file = asgn.dataset_id or "churn_lab_dataset.csv"
-                default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
-                starter_code = default_starter.replace("churn_lab_dataset.csv", dataset_file) if (default_starter and dataset_file != "churn_lab_dataset.csv") else default_starter
+                dataset_file = asgn.dataset_id or "telecom_churn.csv"
+                starter_code = build_exam_starter_code(
+                    dataset_name=dataset_file,
+                    target_col=rubric_dict.get("target_column", "churn"),
+                    problem_type=rubric_dict.get("problem_type", "classification"),
+                )
                 exam = {
                     "id": exam_id,
                     "title": asgn.title,
@@ -539,6 +640,7 @@ async def get_lab_exam(exam_id: str, db: AsyncSession = Depends(get_db)) -> LabE
                 }
                 CURATED_LAB_EXAMS[exam_id] = exam
         except Exception:
+            pass
             pass
 
     if not exam:
@@ -3122,9 +3224,12 @@ async def create_assignment(
 
     # Register exam in CURATED_LAB_EXAMS for live runtime evaluation
     exam_id = f"exam-{assignment.id}"
-    dataset_file = payload.dataset_id or "churn_lab_dataset.csv"
-    default_starter = CURATED_LAB_EXAMS.get("lab-exam-01", {}).get("starter_code", "")
-    starter_code = default_starter.replace("churn_lab_dataset.csv", dataset_file) if (default_starter and dataset_file != "churn_lab_dataset.csv") else default_starter
+    dataset_file = payload.dataset_id or "telecom_churn.csv"
+    starter_code = build_exam_starter_code(
+        dataset_name=dataset_file,
+        target_col=rubric_dict.get("target_column", "churn"),
+        problem_type=rubric_dict.get("problem_type", "classification"),
+    )
     CURATED_LAB_EXAMS[exam_id] = {
         "id": exam_id,
         "title": assignment.title,

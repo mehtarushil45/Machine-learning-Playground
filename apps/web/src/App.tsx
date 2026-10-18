@@ -803,14 +803,14 @@ function AppContent() {
                Once initializeProject() is called, isProjectInitialized becomes
                true and we drop through to the studio pages below.
           ─────────────────────────────────────────────────────────────────── */}
-          {activeTab === 'classroom' ? (
+          {!isProjectInitialized ? (
+            <ProjectGatekeeper onNavigate={handleNavigate} />
+          ) : activeTab === 'classroom' ? (
             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '10px 16px', width: '100%' }}>
               <ErrorBoundary key="classroom" onReset={() => handleNavigate('classroom')}>
                 <ClassroomHub onShowToast={showToast} />
               </ErrorBoundary>
             </div>
-          ) : !isProjectInitialized ? (
-            <ProjectGatekeeper onNavigate={handleNavigate} />
           ) : (
             <>
               <div style={{ display: activeTab === 'workspace' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>

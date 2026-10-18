@@ -529,3 +529,8 @@ export function useProject(): ProjectContextValue {
   }
   return ctx;
 }
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOptionalProject(): ProjectContextValue | null {
+  return useContext(ProjectContext);
+}
