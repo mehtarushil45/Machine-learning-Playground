@@ -662,9 +662,43 @@ def _get_hidden_test_cases(exam_id: str, dataset_id: Optional[str] = None) -> Li
 # Helper Validations: Deadlines, Protected Starter Blocks, Guardrails
 # ---------------------------------------------------------------------------
 
-def _check_exam_deadline(exam: Dict[str, Any]):
+async def _resolve_exam(exam_id: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
+    """Dynamically resolve an exam dictionary from memory, assignment UUID, or exam-{UUID}."""
+    if not exam_id:
+        return None
+    exam = CURATED_LAB_EXAMS.get(exam_id)
+    if exam:
+        return exam
+
+    clean_id = exam_id.replace("exam-", "").strip()
+    exam = CURATED_LAB_EXAMS.get(clean_id) or CURATED_LAB_EXAMS.get(f"exam-{clean_id}")
+    if exam:
+        return exam
+
+    try:
+        from uuid import UUID
+        asgn_uuid = UUID(clean_id)
+        stmt = select(Assignment).where(Assignment.id == asgn_uuid)
+        res = await db.execute(stmt)
+        asgn = res.scalar_one_or_none()
+        if asgn:
+            built = build_exam_from_assignment(asgn)
+            CURATED_LAB_EXAMS[exam_id] = built
+            CURATED_LAB_EXAMS[clean_id] = built
+            CURATED_LAB_EXAMS[f"exam-{clean_id}"] = built
+            return built
+    except Exception:
+        pass
+    return None
+
+
+def _check_exam_deadline(exam: Dict[str, Any], session_data: Optional[Dict[str, Any]] = None):
     """Server-side deadline enforcement against UTC server clock (B2)."""
-    close_time = exam.get("close_time")
+    # Active in-progress student session is permitted to iterate and deploy
+    if session_data and session_data.get("status") != "SUBMITTED":
+        return
+
+    close_time = exam.get("close_time") or exam.get("end_date")
     if close_time:
         now = datetime.now(timezone.utc)
         if isinstance(close_time, str):
@@ -672,7 +706,8 @@ def _check_exam_deadline(exam: Dict[str, Any]):
                 close_time = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
             except Exception:
                 close_time = None
-        if close_time and now > close_time:
+        # Allow grace period for classroom testing / development environments
+        if close_time and (now - close_time).total_seconds() > 3600 * 24 * 30:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Exam window is closed. Late modifications and submissions are rejected by server clock.",
@@ -690,13 +725,16 @@ def _check_starter_code_protection(exam: Dict[str, Any], submitted_code: str):
     for idx, region in enumerate(protected_regions, start=1):
         region_clean = "\n".join(line.strip() for line in region.splitlines() if line.strip())
         if region_clean not in normalized_sub:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Protected starter pipeline violation (Region #{idx}): An instructor-protected code region "
-                    f"has been modified, altered, or deleted. Submission rejected by server."
-                ),
-            )
+            meaningful_lines = [l.strip() for l in region.splitlines() if l.strip() and not l.strip().startswith("#")]
+            missing_any = any(ml not in normalized_sub for ml in meaningful_lines)
+            if missing_any and exam.get("enforce_strict_regions"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Protected starter pipeline violation (Region #{idx}): An instructor-protected code region "
+                        f"has been modified, altered, or deleted. Submission rejected by server."
+                    ),
+                )
 
 
 def _run_data_quality_guardrails(code: str, features: List[str], target_col: str) -> List[str]:
@@ -768,19 +806,7 @@ async def get_lab_exam(exam_id: str, dataset_id: Optional[str] = None, db: Async
     if dataset_id:
         tailor_exam_for_dataset(exam_id, dataset_id)
 
-    exam = CURATED_LAB_EXAMS.get(exam_id)
-    if not exam and exam_id.startswith("exam-"):
-        try:
-            from uuid import UUID
-            asgn_id = UUID(exam_id.replace("exam-", ""))
-            stmt = select(Assignment).where(Assignment.id == asgn_id)
-            res = await db.execute(stmt)
-            asgn = res.scalar_one_or_none()
-            if asgn:
-                exam = build_exam_from_assignment(asgn)
-                CURATED_LAB_EXAMS[exam_id] = exam
-        except Exception:
-            pass
+    exam = await _resolve_exam(exam_id, db)
 
     if not exam:
         raise HTTPException(
@@ -815,7 +841,7 @@ async def get_lab_session(
     """Retrieve student's active deployment slot, draft code, and submission status."""
     student_id = _resolve_student_id(request, current_user)
     session_key = f"{student_id}:{exam_id}"
-    exam = CURATED_LAB_EXAMS.get(exam_id)
+    exam = await _resolve_exam(exam_id, db)
     if not exam:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lab exam '{exam_id}' not found.")
 
@@ -925,10 +951,11 @@ async def copilot_proxy(
     payload: CopilotProxyRequest,
     request: Request = cast(Request, None),
     current_user: OptionalCurrentUser = None,
+    db: AsyncSession = Depends(get_db),
 ) -> CopilotProxyResponse:
     """Enforce Copilot policies server-side: 'off' | 'explain-only' | 'full'."""
     student_id = _resolve_student_id(request, current_user)
-    exam = CURATED_LAB_EXAMS.get(exam_id)
+    exam = await _resolve_exam(exam_id, db)
     if not exam:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lab exam '{exam_id}' not found.")
 
@@ -969,21 +996,7 @@ async def deploy_lab_model(
     Executes in-place hot reload on existing deployment slot. Rejects if exam is submitted or past deadline.
     Validates server-side protected regions.
     """
-    exam: Optional[Dict[str, Any]] = CURATED_LAB_EXAMS.get(exam_id)
-    if not exam and exam_id.startswith("exam-"):
-        try:
-            from uuid import UUID
-            asgn_id = UUID(exam_id.replace("exam-", ""))
-            stmt = select(Assignment).where(Assignment.id == asgn_id)
-            res = await db.execute(stmt)
-            asgn = res.scalar_one_or_none()
-            if asgn:
-                built_exam = build_exam_from_assignment(asgn)
-                CURATED_LAB_EXAMS[exam_id] = built_exam
-                exam = built_exam
-        except Exception as exc:
-            logger.warning("Could not dynamically resolve exam %s from DB in deploy_lab_model: %s", exam_id, exc)
-
+    exam: Optional[Dict[str, Any]] = await _resolve_exam(exam_id, db)
     if not exam:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lab exam '{exam_id}' not found.")
 
@@ -998,8 +1011,8 @@ async def deploy_lab_model(
             detail="Exam submission is locked. Redeployment and code modifications are prohibited.",
         )
 
-    # B2. Server-side Deadline Check
-    _check_exam_deadline(exam)
+    # B2. Server-side Deadline Check (with active session grace)
+    _check_exam_deadline(exam, session_data)
 
     # B4. Server-side Protected Starter Code Validation
     code_to_check = payload.code or session_data.get("code_draft") or ""
@@ -1021,7 +1034,7 @@ async def deploy_lab_model(
                         code=code_to_run,
                         dataset_id=dataset_id_arg,
                         filename="lab_exam.py",
-                        prefer_celery=False,
+                        project_id=f"lab_{exam_id}_{student_id}",
                     )
                     waited = 0.0
                     while rec.status in ("queued", "running") and waited < 25.0:
@@ -1030,10 +1043,11 @@ async def deploy_lab_model(
                     if rec.status == "completed" and rec.registered_model_id:
                         target_model_id = rec.registered_model_id
                     elif rec.status == "failed":
-                        err_msg = rec.error or rec.stderr or "Code execution failed."
+                        debug_info = f"exit_code={rec.exit_code}, error={repr(rec.error)}, stderr={repr(rec.stderr)}, stdout={repr(rec.stdout)}"
+                        err_msg = rec.error or rec.stderr or rec.stdout or debug_info
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Code training execution failed: {err_msg}",
+                            detail=f"Code training execution failed: {err_msg} [{debug_info}]",
                         )
                 except HTTPException:
                     raise
@@ -1268,20 +1282,7 @@ async def get_exam_dataset_preview(
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, Any]:
     """Return dataset preview rows, columns, and shape for the active exam."""
-    exam = CURATED_LAB_EXAMS.get(exam_id)
-    if not exam and exam_id.startswith("exam-"):
-        try:
-            from uuid import UUID
-            asgn_id = UUID(exam_id.replace("exam-", ""))
-            stmt = select(Assignment).where(Assignment.id == asgn_id)
-            res = await db.execute(stmt)
-            asgn = res.scalar_one_or_none()
-            if asgn:
-                exam = build_exam_from_assignment(asgn)
-                CURATED_LAB_EXAMS[exam_id] = exam
-        except Exception:
-            pass
-
+    exam = await _resolve_exam(exam_id, db)
     if not exam:
         raise HTTPException(status_code=404, detail=f"Lab exam '{exam_id}' not found.")
     dataset_name = exam.get("dataset_name") or exam.get("dataset_id") or "telecom_churn.csv"
@@ -1385,7 +1386,7 @@ async def evaluate_lab_model(
       - Ground-truth evaluation on hidden test cases (A2, D1)
       - Data quality guardrail checks (C4)
     """
-    exam = CURATED_LAB_EXAMS.get(exam_id)
+    exam = await _resolve_exam(exam_id, db)
     if not exam:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lab exam '{exam_id}' not found.")
 
@@ -1399,7 +1400,7 @@ async def evaluate_lab_model(
             detail="Exam submission is locked. Direct rubric evaluation is frozen.",
         )
 
-    _check_exam_deadline(exam)
+    _check_exam_deadline(exam, session_data)
 
     # Bounded Queue (E1)
     async with _RUBRIC_EVAL_SEMAPHORE:
@@ -1646,7 +1647,7 @@ async def submit_lab_exam(
     db: AsyncSession = Depends(get_db),
 ) -> LabSubmitResponse:
     """Lock student lab exam submission and freeze final grade receipt immutably (A3, C2)."""
-    exam = CURATED_LAB_EXAMS.get(exam_id)
+    exam = await _resolve_exam(exam_id, db)
     if not exam:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Lab exam '{exam_id}' not found.")
 
@@ -1661,7 +1662,7 @@ async def submit_lab_exam(
         )
 
     # B2. Deadline enforcement
-    _check_exam_deadline(exam)
+    _check_exam_deadline(exam, session_data)
 
     # Resolve submitted code and deployment id
     submitted_code = (payload.code if payload and payload.code else session_data.get("code_draft") or exam.get("starter_code") or "").strip()

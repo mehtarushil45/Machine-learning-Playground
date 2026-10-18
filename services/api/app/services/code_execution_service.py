@@ -623,6 +623,7 @@ async def _run_execution(
                     logger.debug("Artifact sync-back error: %s", sync_back_err)
         else:
             rec.status = "failed"
+            rec.error = rec.stderr or rec.stdout or f"Execution failed with exit code {proc.returncode}."
             await rec._queue.put(f"[ML Playground] Failed (exit {proc.returncode}).")
 
     except asyncio.TimeoutError:

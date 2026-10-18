@@ -18,6 +18,7 @@ import {
   PlusCircle,
   RefreshCw,
   Lock,
+  Shield,
   FileCheck,
   Check,
   GraduationCap,
@@ -213,17 +214,16 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   } | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
-  // Load preview data when modal opens if project dataset doesn't have rows
+  // Load preview data when modal opens or exam changes
   useEffect(() => {
     if (!showDataPreview) return;
-    if (projectDataset?.rows && projectDataset.rows.length > 0) return;
     if (!selectedExamId) return;
 
     let mounted = true;
     setIsLoadingPreview(true);
     ClassroomService.getExamDatasetPreview(selectedExamId)
       .then((data) => {
-        if (mounted) setServerPreview(data);
+        if (mounted && data) setServerPreview(data);
       })
       .catch((err) => {
         console.debug('Dataset preview fetch error:', err);
@@ -235,9 +235,17 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     return () => {
       mounted = false;
     };
-  }, [showDataPreview, projectDataset, selectedExamId]);
+  }, [showDataPreview, selectedExamId]);
 
   const activePreviewData = useMemo(() => {
+    if (serverPreview && serverPreview.rows && serverPreview.rows.length > 0) {
+      return {
+        fileName: serverPreview.file_name,
+        columns: serverPreview.columns,
+        rows: serverPreview.rows,
+        rowCount: serverPreview.row_count,
+      };
+    }
     if (projectDataset?.rows && projectDataset.rows.length > 0) {
       return {
         fileName: projectDataset.fileName || 'dataset.csv',
@@ -246,16 +254,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
         rowCount: projectDataset.rowCount || projectDataset.rows.length,
       };
     }
-    if (serverPreview) {
-      return {
-        fileName: serverPreview.file_name,
-        columns: serverPreview.columns,
-        rows: serverPreview.rows,
-        rowCount: serverPreview.row_count,
-      };
-    }
     return null;
-  }, [projectDataset, serverPreview]);
+  }, [serverPreview, projectDataset]);
 
   const filteredPreviewRows = useMemo(() => {
     if (!activePreviewData) return [];
@@ -603,46 +603,99 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       const sse = new EventSource(CodeExecutionService.streamUrl(exec.exec_id));
       eventSourceRef.current = sse;
 
+      let executionFinished = false;
+
       sse.onmessage = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.line) {
+          if (data.type === 'stdout' || data.type === 'stderr' || data.type === 'system') {
+            const text = data.data ?? data.line ?? '';
+            if (text) {
+              const lines = String(text).split('\n');
+              setOutputLines((prev) => [...prev, ...lines]);
+            }
+          } else if (data.type === 'exit') {
+            executionFinished = true;
+            setIsExecuting(false);
+            if (data.status === 'completed' || data.exit_code === 0) {
+              setOutputLines((prev) => [
+                ...prev,
+                `[ML Playground] Execution completed in ${data.duration_seconds?.toFixed(2) || '0.00'}s.`,
+              ]);
+              if (data.model_id) {
+                setRegisteredModelId(data.model_id);
+                setOutputLines((prev) => [
+                  ...prev,
+                  `[Artifact] Registered model pipeline: ${data.model_id}`,
+                  `[Ready] Model is ready for in-place deployment to your lab slot!`,
+                ]);
+                onShowToast?.('Model Artifact Created!', 'Click "Deploy to Lab Slot" to activate your model.', 'success');
+              }
+            } else {
+              setOutputLines((prev) => [
+                ...prev,
+                `[Execution Error] ${data.error || `Process exited with code ${data.exit_code}`}`,
+              ]);
+              onShowToast?.('Execution Failed', data.error || 'Check terminal for traceback.', 'error');
+            }
+          } else if (data.line) {
             setOutputLines((prev) => [...prev, data.line]);
+          } else if (data.data) {
+            setOutputLines((prev) => [...prev, String(data.data)]);
           }
         } catch {
-          if (event.data) setOutputLines((prev) => [...prev, event.data]);
+          if (event.data) setOutputLines((prev) => [...prev, String(event.data)]);
         }
       };
 
       sse.onerror = async () => {
         sse.close();
-        try {
-          const result = await CodeExecutionService.getResult(exec.exec_id);
-          setIsExecuting(false);
-          if (result.status === 'completed') {
-            setOutputLines((prev) => [
-              ...prev,
-              `[ML Playground] Execution completed in ${result.duration_seconds?.toFixed(2) || '0.00'}s.`,
-            ]);
-            if (result.model_id) {
-              setRegisteredModelId(result.model_id);
+        if (executionFinished) return;
+
+        let attempts = 0;
+        const maxAttempts = 15;
+        const poll = async () => {
+          try {
+            const result = await CodeExecutionService.getResult(exec.exec_id);
+            if (result.status === 'completed') {
+              executionFinished = true;
+              setIsExecuting(false);
               setOutputLines((prev) => [
                 ...prev,
-                `[Artifact] Registered model pipeline: ${result.model_id}`,
-                `[Ready] Model is ready for in-place deployment to your lab slot!`,
+                `[ML Playground] Execution completed in ${result.duration_seconds?.toFixed(2) || '0.00'}s.`,
               ]);
-              onShowToast?.('Model Artifact Created!', 'Click "Deploy to Lab Slot" to activate your model.', 'success');
+              if (result.model_id) {
+                setRegisteredModelId(result.model_id);
+                setOutputLines((prev) => [
+                  ...prev,
+                  `[Artifact] Registered model pipeline: ${result.model_id}`,
+                  `[Ready] Model is ready for in-place deployment to your lab slot!`,
+                ]);
+                onShowToast?.('Model Artifact Created!', 'Click "Deploy to Lab Slot" to activate your model.', 'success');
+              }
+              return;
+            } else if (result.status === 'failed') {
+              executionFinished = true;
+              setIsExecuting(false);
+              setOutputLines((prev) => [
+                ...prev,
+                `[Execution Error] ${result.error || result.stderr || 'Execution failed.'}`,
+              ]);
+              onShowToast?.('Execution Failed', result.error || 'Check terminal for traceback.', 'error');
+              return;
             }
-          } else {
-            setOutputLines((prev) => [
-              ...prev,
-              `[Execution Error] ${result.error || result.stderr || 'Execution failed.'}`,
-            ]);
-            onShowToast?.('Execution Failed', result.error || 'Check terminal for traceback.', 'error');
+
+            attempts++;
+            if (attempts < maxAttempts) {
+              setTimeout(poll, 600);
+            } else {
+              setIsExecuting(false);
+            }
+          } catch {
+            setIsExecuting(false);
           }
-        } catch {
-          setIsExecuting(false);
-        }
+        };
+        poll();
       };
     } catch (err: any) {
       setIsExecuting(false);
@@ -656,7 +709,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     if (!selectedExamId) return;
     setIsDeploying(true);
     try {
-      const depRes = await ClassroomService.deployModel(selectedExamId, registeredModelId || undefined, code, activeDatasetId || undefined);
+      const effectiveDatasetId = activeExam?.dataset_id || activeExam?.dataset_name || activeDatasetId || undefined;
+      const depRes = await ClassroomService.deployModel(selectedExamId, registeredModelId || undefined, code, effectiveDatasetId);
       setDeployment(depRes);
 
       if (depRes.sample_inputs && Object.keys(depRes.sample_inputs).length > 0) {
@@ -978,6 +1032,33 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     );
   }
 
+  // ── Safe Exam Browser — Pre-flight Confirmation Modal Helper ──
+  const renderSebModal = () => {
+    if (!showSebModal || !sebPendingExamInfo) return null;
+    return (
+      <SafeExamConfirmModal
+        examTitle={sebPendingExamInfo.examTitle}
+        durationMinutes={sebPendingExamInfo.durationMinutes}
+        onConfirm={async () => {
+          await seb.acquireFullscreen();
+          await sebPendingExamInfo.applyExamState();
+          if (sebPendingExamInfo.targetCid) {
+            ClassroomService.enterExamWorkspace(sebPendingExamInfo.targetCid).catch(() => {});
+          }
+          setExamLocked(true);
+          setSebFlagged(false);
+          setViewMode('student');
+          setShowSebModal(false);
+          setSebPendingExamInfo(null);
+        }}
+        onCancel={() => {
+          setShowSebModal(false);
+          setSebPendingExamInfo(null);
+        }}
+      />
+    );
+  };
+
   // ── Classroom Dashboard: Student sees their assignments or assignment details ──
   if (viewMode === 'classroom') {
     return (
@@ -1202,76 +1283,15 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   </div>
                 </div>
 
-                {/* Big Action Box */}
-                <div className="p-4 rounded-xl bg-linear-to-b from-[#1C1534] to-[#140E2A] border border-[#00D4FF]/30 space-y-3 text-center">
-                  <p className="text-xs text-[#9E93B8]">
-                    Ready to begin? Click below to open your coding environment and start solving.
+                {/* Monitored Exam Info Box (single Start Exam button in header above) */}
+                <div className="p-4 rounded-xl bg-linear-to-b from-[#1C1534] to-[#140E2A] border border-[rgba(107,92,166,0.3)] space-y-2 text-center">
+                  <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-[#00D4FF]">
+                    <Shield className="w-4 h-4 text-red-400" />
+                    <span>Safe Exam Browser Monitored</span>
+                  </div>
+                  <p className="text-[11px] text-[#9E93B8] leading-relaxed">
+                    Review your constraints, then click <strong className="text-[#00F5A0]">Start Exam</strong> above to enter fullscreen lockdown.
                   </p>
-                  <button
-                    onClick={() => {
-                      // Open SEB modal instantly — heavy async work runs only on confirm
-                      const examId = `exam-${selectedClassroomAssignment.id}`;
-                      const targetCid = selectedClassroomId || activeClassroom?.id || '';
-                      setSebPendingExamInfo({
-                        examTitle: selectedClassroomAssignment.title || 'Lab Exam',
-                        durationMinutes: selectedClassroomAssignment.rubric?.duration_minutes,
-                        targetCid,
-                        applyExamState: async () => {
-                          let latestExams = exams;
-                          try {
-                            latestExams = await ClassroomService.listExams();
-                            setExams(latestExams);
-                          } catch {}
-                          let targetExam = latestExams.find((e) => e.id === examId || e.id.includes(selectedClassroomAssignment.id));
-                          if (!targetExam) {
-                            try {
-                              const fetched = await ClassroomService.getExam(examId);
-                              if (fetched) {
-                                targetExam = fetched;
-                                setExams([...latestExams, fetched]);
-                              }
-                            } catch {}
-                          }
-                          const finalExam = targetExam || (latestExams.length > 0 ? latestExams[0] : null);
-                          if (finalExam) {
-                            setActiveExam(finalExam);
-                            setSelectedExamId(finalExam.id);
-                            setCode(finalExam.starter_code);
-                            setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
-                            setDeployment(null);
-                            setEvaluationResult(null);
-                            setPredictionResult(null);
-                            setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
-                            try {
-                              const sess = await ClassroomService.getSession(finalExam.id);
-                              if (sess?.code_draft) setCode(sess.code_draft);
-                              if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
-                                setSubmissionReceipt({
-                                  submission_id: sess.submission_receipt.submission_id || 'sub-locked',
-                                  status: 'SUBMITTED',
-                                  grade_score: sess.grade_score || 85.0,
-                                  percentage: sess.grade_score || 85.0,
-                                  passed: (sess.grade_score || 0) >= 60.0,
-                                  submitted_at: sess.submitted_at || new Date().toISOString(),
-                                  code_sha256: sess.submission_receipt.code_sha256,
-                                  model_sha256: sess.submission_receipt.model_sha256,
-                                  rubric_snapshot: sess.submission_receipt.rubric_snapshot,
-                                  guardrail_flags: sess.submission_receipt.guardrail_flags || [],
-                                  message: 'Exam submission locked.',
-                                });
-                              }
-                            } catch {}
-                          }
-                        },
-                      });
-                      setShowSebModal(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-xs text-[#0B0912] shadow-lg transition-all hover:opacity-90 active:scale-[0.98]"
-                    style={{ background: 'linear-gradient(135deg, #00D4FF 0%, #00F5A0 100%)' }}
-                  >
-                    <Play className="w-4 h-4 fill-current" />
-                    <span>Start Exam</span>
-                  </button>
                 </div>
               </div>
             </div>
@@ -1379,6 +1399,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             )}
           </div>
         )}
+
+        {renderSebModal()}
       </div>
     );
   }
@@ -3047,30 +3069,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       />
 
       {/* ── Safe Exam Browser — Pre-flight Confirmation Modal ── */}
-      {showSebModal && sebPendingExamInfo && (
-        <SafeExamConfirmModal
-          examTitle={sebPendingExamInfo.examTitle}
-          durationMinutes={sebPendingExamInfo.durationMinutes}
-          onConfirm={async () => {
-            // User gesture: request fullscreen, apply exam state, enter lockdown
-            await seb.acquireFullscreen();
-            await sebPendingExamInfo.applyExamState();
-            if (sebPendingExamInfo.targetCid) {
-              ClassroomService.enterExamWorkspace(sebPendingExamInfo.targetCid).catch(() => {});
-            }
-            setExamLocked(true);
-            setSebFlagged(false);
-            setViewMode('student');
-            setShowSebModal(false);
-            setSebPendingExamInfo(null);
-          }}
-          onCancel={() => {
-            // Cancel: just close modal, do NOT change viewMode or examLocked
-            setShowSebModal(false);
-            setSebPendingExamInfo(null);
-          }}
-        />
-      )}
+      {renderSebModal()}
 
       {/* ── Safe Exam Browser — Post-Submit Release Confirm ── */}
       {showSebReleaseModal && pendingReceipt && (

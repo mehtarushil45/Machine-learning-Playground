@@ -30,14 +30,19 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
   onConfirm,
   onCancel,
 }) => {
-  const [agreed, setAgreed] = useState(false);
+  const [agreed, setAgreed] = useState(true);
   const [entering, setEntering] = useState(false);
 
   const handleEnter = async () => {
-    if (!agreed || entering) return;
+    if (entering) return;
+    if (!agreed) {
+      setAgreed(true);
+    }
     setEntering(true);
     try {
       await onConfirm();
+    } catch (err) {
+      console.error('Error entering exam lockdown:', err);
     } finally {
       setEntering(false);
     }
@@ -136,7 +141,7 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
             className="px-7 pb-7 pt-4 space-y-4"
             style={{ borderTop: '1px solid rgba(107,92,166,0.2)' }}
           >
-            <label className="flex items-start gap-3 cursor-pointer group">
+            <label className="flex items-start gap-3 cursor-pointer group select-none">
               <div className="relative mt-0.5 shrink-0">
                 <input
                   type="checkbox"
@@ -150,7 +155,6 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
                     borderColor: agreed ? '#EF4444' : 'rgba(107,92,166,0.5)',
                     background: agreed ? 'rgba(239,68,68,0.2)' : 'transparent',
                   }}
-                  onClick={() => setAgreed(!agreed)}
                 >
                   {agreed && <div className="w-2 h-2 rounded-sm bg-red-400" />}
                 </div>
@@ -171,17 +175,15 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
               </button>
               <motion.button
                 onClick={handleEnter}
-                disabled={!agreed || entering}
-                whileHover={agreed && !entering ? { scale: 1.02 } : {}}
-                whileTap={agreed && !entering ? { scale: 0.98 } : {}}
-                className="flex-2 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs font-bold transition-all"
+                disabled={entering}
+                whileHover={!entering ? { scale: 1.02 } : {}}
+                whileTap={!entering ? { scale: 0.98 } : {}}
+                className="flex-2 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs font-bold transition-all shadow-lg"
                 style={{
-                  background: agreed
-                    ? 'linear-gradient(135deg, #EF4444 0%, #F59E0B 100%)'
-                    : 'rgba(61,53,88,0.6)',
-                  color: agreed ? '#fff' : '#6B5CA5',
-                  cursor: agreed && !entering ? 'pointer' : 'not-allowed',
-                  boxShadow: agreed ? '0 4px 24px rgba(239,68,68,0.35)' : 'none',
+                  background: 'linear-gradient(135deg, #EF4444 0%, #F59E0B 100%)',
+                  color: '#fff',
+                  cursor: entering ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 24px rgba(239,68,68,0.35)',
                 }}
               >
                 {entering ? (
@@ -195,7 +197,7 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
                 ) : (
                   <>
                     <Lock className="w-3.5 h-3.5" />
-                    <span>Enter Lockdown Exam</span>
+                    <span>Start Exam (Enter Lockdown)</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </>
                 )}

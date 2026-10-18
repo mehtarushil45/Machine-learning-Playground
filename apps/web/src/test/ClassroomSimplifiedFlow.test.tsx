@@ -178,8 +178,14 @@ describe('Simplified Classroom & Assignment Flow', () => {
       const startBtns = screen.getAllByRole('button', { name: /start/i });
       expect(startBtns.length).toBeGreaterThan(0);
 
-      // Click Start Exam
+      // Click Start Exam (opens Safe Exam Browser pre-flight modal)
       fireEvent.click(startBtns[0]);
+
+      // If Safe Exam Browser pre-flight modal appears, confirm lockdown
+      const confirmBtn = screen.queryByRole('button', { name: /start exam \(enter lockdown\)|enter lockdown/i });
+      if (confirmBtn) {
+        fireEvent.click(confirmBtn);
+      }
 
       // Should transition to Student Workspace
       await waitFor(() => {
