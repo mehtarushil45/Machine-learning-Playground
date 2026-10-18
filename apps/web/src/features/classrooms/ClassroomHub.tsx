@@ -54,6 +54,9 @@ import { AICopilotDrawer, type ChatMessage } from '../../components/shared/AICop
 import { AuthContext } from '../../providers/AuthContext';
 import { useOptionalProject } from '../../providers/ProjectContext';
 import { useLearning, PanelLearningCollapsible } from '../learning';
+import { useSafeExamBrowser } from './hooks/useSafeExamBrowser';
+import { SafeExamConfirmModal } from './components/SafeExamConfirmModal';
+import { SafeExamViolationOverlay } from './components/SafeExamViolationOverlay';
 
 /* ── Enterprise Design Tokens ─────────────────────────────────────────── */
 const BB = {
@@ -169,6 +172,14 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
   // Safe Browser Lock: prevents navigation during active exam
   const [examLocked, setExamLocked] = useState(false);
+  // SEB Confirm Modal state
+  const [showSebModal, setShowSebModal] = useState(false);
+  const [sebPendingExamInfo, setSebPendingExamInfo] = useState<{
+    finalExam: any;
+    targetCid: string;
+  } | null>(null);
+  // SEB Flagged (max violations)
+  const [sebFlagged, setSebFlagged] = useState(false);
 
   // AI Copilot State (Server Enforced)
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
@@ -299,41 +310,25 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
-  // ── Safe Browser Lock (Exam Mode) ──────────────────────────────────────
-  // Activates when student starts an exam, releases on submission.
-  // Temporarily allows copy-paste for code testing.
-  useEffect(() => {
-    if (!examLocked) return;
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = 'Your exam is in progress. Leaving this page will interrupt your session. Are you sure?';
-      return e.returnValue;
-    };
-
-    // Push a history entry so the back button is intercepted
-    window.history.pushState({ examLocked: true }, '', window.location.href);
-
-    const handlePopState = (_e: PopStateEvent) => {
-      if (examLocked) {
-        // Re-push so the back button stays blocked
-        window.history.pushState({ examLocked: true }, '', window.location.href);
-        onShowToast?.(
-          '⚠️ Exam In Progress',
-          'Navigation is locked during your exam. Submit first to leave.',
-          'error'
-        );
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('popstate', handlePopState);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, [examLocked, onShowToast]);
+  // ── Safe Exam Browser Hook ──────────────────────────────────────────────
+  const seb = useSafeExamBrowser(
+    examLocked,
+    (count) => {
+      onShowToast?.(
+        `⚠️ Violation Detected (${count}/3)`,
+        'Tab switch or window blur detected. Proctors will be notified.',
+        'error',
+      );
+    },
+    () => {
+      setSebFlagged(true);
+      onShowToast?.(
+        '🚨 Session Flagged',
+        'Maximum violations reached. Proctors will review this session.',
+        'error',
+      );
+    },
+  );
 
   // 1. Initial Load: Exams & Student Session
   useEffect(() => {
@@ -741,8 +736,10 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       const receipt = await ClassroomService.submitExam(selectedExamId, code, deployment?.deployment_id);
       setSubmissionReceipt(receipt);
       setShowConfirmSubmit(false);
-      // Release exam lock on successful submission
+      // Release exam lockdown (fullscreen + all listeners)
       setExamLocked(false);
+      seb.release();
+      setSebFlagged(false);
       setOutputLines((prev) => [
         ...prev,
         '─────────────────────────────────────────────────────────────',
@@ -1246,12 +1243,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         } catch {}
                       }
                       const targetCid = selectedClassroomId || activeClassroom?.id || '';
-                      if (targetCid) {
-                        ClassroomService.enterExamWorkspace(targetCid).catch(() => {});
-                      }
-                      // Activate safe browser lock (released on submission)
-                      setExamLocked(true);
-                      setViewMode('student');
+                      // Open pre-flight SEB confirm modal instead of locking immediately
+                      setSebPendingExamInfo({ finalExam, targetCid });
+                      setShowSebModal(true);
                     }}
                     className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-xs text-[#0B0912] shadow-lg transition-all hover:opacity-90 active:scale-[0.98]"
                     style={{ background: 'linear-gradient(135deg, #00D4FF 0%, #00F5A0 100%)' }}
@@ -3032,6 +3026,46 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             : 'Ask AI Copilot for pipeline assistance...'
         }
       />
+
+      {/* ── Safe Exam Browser — Pre-flight Confirmation Modal ── */}
+      {showSebModal && sebPendingExamInfo && (
+        <SafeExamConfirmModal
+          examTitle={
+            sebPendingExamInfo.finalExam?.title ||
+            selectedClassroomAssignment?.title ||
+            'Lab Exam'
+          }
+          durationMinutes={
+            sebPendingExamInfo.finalExam?.duration_minutes ||
+            selectedClassroomAssignment?.rubric?.duration_minutes
+          }
+          onConfirm={async () => {
+            // This click IS the user gesture — request fullscreen here
+            await seb.acquireFullscreen();
+            // Enter lockdown workspace
+            if (sebPendingExamInfo.targetCid) {
+              ClassroomService.enterExamWorkspace(sebPendingExamInfo.targetCid).catch(() => {});
+            }
+            setExamLocked(true);
+            setSebFlagged(false);
+            setViewMode('student');
+            setShowSebModal(false);
+            setSebPendingExamInfo(null);
+          }}
+          onCancel={() => {
+            setShowSebModal(false);
+            setSebPendingExamInfo(null);
+          }}
+        />
+      )}
+
+      {/* ── Safe Exam Browser — Violation Overlay ── */}
+      {examLocked && (
+        <SafeExamViolationOverlay
+          violations={seb.violations}
+          flagged={sebFlagged}
+        />
+      )}
     </div>
   );
 };
