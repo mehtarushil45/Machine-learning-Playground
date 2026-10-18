@@ -214,9 +214,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   } | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
-  // Load preview data when modal opens or exam changes
+  // Load preview data when active exam changes or preview modal opens
   useEffect(() => {
-    if (!showDataPreview) return;
+    setServerPreview(null);
     if (!selectedExamId) return;
 
     let mounted = true;
@@ -235,7 +235,28 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     return () => {
       mounted = false;
     };
-  }, [showDataPreview, selectedExamId]);
+  }, [selectedExamId]);
+
+  // Refetch if modal opened and preview is not yet loaded
+  useEffect(() => {
+    if (!showDataPreview || !selectedExamId || serverPreview) return;
+    let mounted = true;
+    setIsLoadingPreview(true);
+    ClassroomService.getExamDatasetPreview(selectedExamId)
+      .then((data) => {
+        if (mounted && data) setServerPreview(data);
+      })
+      .catch((err) => {
+        console.debug('Dataset preview fetch error:', err);
+      })
+      .finally(() => {
+        if (mounted) setIsLoadingPreview(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [showDataPreview, selectedExamId, serverPreview]);
 
   const activePreviewData = useMemo(() => {
     if (serverPreview && serverPreview.rows && serverPreview.rows.length > 0) {
@@ -246,16 +267,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
         rowCount: serverPreview.row_count,
       };
     }
-    if (projectDataset?.rows && projectDataset.rows.length > 0) {
-      return {
-        fileName: projectDataset.fileName || 'dataset.csv',
-        columns: projectDataset.columns || [],
-        rows: projectDataset.rows || [],
-        rowCount: projectDataset.rowCount || projectDataset.rows.length,
-      };
-    }
     return null;
-  }, [serverPreview, projectDataset]);
+  }, [serverPreview]);
 
   const filteredPreviewRows = useMemo(() => {
     if (!activePreviewData) return [];
@@ -518,10 +531,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setSelectedExamId(examId);
     setActiveExam(target);
     setCode(target.starter_code);
+    setServerPreview(null);
     setDeployment(null);
     setTestInputs({});
     setEvaluationResult(null);
     setPredictionResult(null);
+    setRegisteredModelId(null);
     setSubmissionReceipt(null);
     setOutputLines([`[System] Switched to ${target.title}. Starter pipeline loaded.`]);
     onShowToast?.('Exam Switched', `Switched to ${target.title}`, 'info');
@@ -753,13 +768,20 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setIsPredicting(true);
     setPredictionResult(null);
     try {
-      // Coerce numeric inputs from text fields so models don't reject string numbers
+      // Coerce inputs according to deployment schema types
       const formattedInputs: Record<string, any> = {};
       for (const [k, v] of Object.entries(testInputs)) {
-        if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v))) {
-          formattedInputs[k] = Number(v);
+        const schemaType = deployment.input_schema?.[k]?.type || 'numeric';
+        if (schemaType === 'numeric') {
+          if (typeof v === 'number') {
+            formattedInputs[k] = v;
+          } else if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v))) {
+            formattedInputs[k] = Number(v);
+          } else {
+            formattedInputs[k] = deployment.sample_inputs?.[k] ?? 0;
+          }
         } else {
-          formattedInputs[k] = v;
+          formattedInputs[k] = String(v ?? deployment.sample_inputs?.[k] ?? '');
         }
       }
 
@@ -1164,10 +1186,14 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         setActiveExam(finalExam);
                         setSelectedExamId(finalExam.id);
                         setCode(finalExam.starter_code);
+                        setServerPreview(null);
                         setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
                         setDeployment(null);
+                        setTestInputs({});
+                        setRegisteredModelId(null);
                         setEvaluationResult(null);
                         setPredictionResult(null);
+                        setSubmissionReceipt(null);
                         setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
                         try {
                           const sess = await ClassroomService.getSession(finalExam.id);
@@ -2608,28 +2634,34 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-xs max-h-56 overflow-y-auto pr-1">
-                        {Object.keys(testInputs).map((key) => (
-                          <div key={key} className="space-y-0.5">
-                            <div className="flex items-center justify-between">
-                              <label className="text-[10px] text-[#A599C2] font-mono block truncate" title={key}>
-                                {key}
-                              </label>
-                              <span className="text-[9px] text-[#6B5CA6] font-mono">feature</span>
+                        {Object.keys(testInputs).map((key) => {
+                          const schemaType = deployment?.input_schema?.[key]?.type || 'numeric';
+                          return (
+                            <div key={key} className="space-y-0.5">
+                              <div className="flex items-center justify-between">
+                                <label className="text-[10px] text-[#A599C2] font-mono block truncate" title={key}>
+                                  {key}
+                                </label>
+                                <span className={`text-[9px] font-mono px-1 rounded ${schemaType === 'numeric' ? 'text-[#00D4FF] bg-[#00D4FF]/10' : 'text-[#F59E0B] bg-[#F59E0B]/10'}`}>
+                                  {schemaType}
+                                </span>
+                              </div>
+                              <input
+                                type={schemaType === 'numeric' ? 'number' : 'text'}
+                                step="any"
+                                value={testInputs[key] ?? ''}
+                                placeholder={schemaType === 'numeric' ? 'e.g. 0.0' : 'text...'}
+                                onChange={(e) =>
+                                  setTestInputs((prev) => ({
+                                    ...prev,
+                                    [key]: schemaType === 'numeric' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value,
+                                  }))
+                                }
+                                className="w-full px-2.5 py-1.5 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] font-mono focus:outline-none focus:border-[#00D4FF] focus:ring-1 focus:ring-[#00D4FF]/30 transition-all placeholder:text-[#524675]"
+                              />
                             </div>
-                            <input
-                              type="text"
-                              value={testInputs[key] ?? ''}
-                              placeholder="Enter value..."
-                              onChange={(e) =>
-                                setTestInputs((prev) => ({
-                                  ...prev,
-                                  [key]: isNaN(Number(e.target.value)) || e.target.value.trim() === '' ? e.target.value : Number(e.target.value),
-                                }))
-                              }
-                              className="w-full px-2.5 py-1.5 rounded-lg bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-xs text-[#F5F1EC] font-mono focus:outline-none focus:border-[#00D4FF] focus:ring-1 focus:ring-[#00D4FF]/30 transition-all placeholder:text-[#524675]"
-                            />
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       <button

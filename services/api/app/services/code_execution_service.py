@@ -358,49 +358,50 @@ async def _run_execution(
 
     # Stage dataset CSV into execution sandbox so pd.read_csv resolves correctly
     try:
-        from services.worker.core.dataset_loader import find_dataset_path, UPLOADS_DIR
+        from services.worker.core.dataset_loader import find_dataset_path
 
-        src_csv: Optional[str] = None
+        csv_refs = re.findall(r'[\'"]([^\'"]+\.(?:csv|parquet|pq))[\'"]', rec.code)
+        staged_files: set[str] = set()
+        primary_csv: Optional[str] = None
+
         if rec.dataset_id:
             try:
-                src_csv = find_dataset_path(rec.dataset_id)
+                primary_csv = find_dataset_path(rec.dataset_id)
+                if primary_csv and os.path.isfile(primary_csv):
+                    bname = os.path.basename(primary_csv)
+                    shutil.copy2(primary_csv, os.path.join(sandbox, bname))
+                    staged_files.add(bname)
+                    # Also stage as canonical dataset.csv
+                    shutil.copy2(primary_csv, os.path.join(sandbox, "dataset.csv"))
+                    staged_files.add("dataset.csv")
             except Exception as d_exc:
                 logger.debug("Dataset path lookup failed for %s: %s", rec.dataset_id, d_exc)
 
-        # Inspect Python source for referenced CSV filenames (e.g. pd.read_csv('housing.csv'))
-        csv_refs = re.findall(r'[\'"]([^\'"]+\.csv)[\'"]', rec.code)
+        # Inspect Python source for any referenced dataset filenames (e.g. pd.read_csv('housing.csv'))
+        for ref in csv_refs:
+            ref_base = os.path.basename(ref)
+            if ref_base in staged_files and os.path.exists(os.path.join(sandbox, ref_base)):
+                continue
+            try:
+                found_ref = find_dataset_path(ref_base)
+                if found_ref and os.path.isfile(found_ref):
+                    shutil.copy2(found_ref, os.path.join(sandbox, ref_base))
+                    staged_files.add(ref_base)
+                    if not primary_csv:
+                        primary_csv = found_ref
+                        shutil.copy2(found_ref, os.path.join(sandbox, "dataset.csv"))
+                        staged_files.add("dataset.csv")
+            except Exception as ref_exc:
+                logger.debug("Could not resolve referenced dataset %s: %s", ref_base, ref_exc)
 
-        if not src_csv and csv_refs and os.path.exists(UPLOADS_DIR):
+        # If code references a CSV but we only found primary_csv under another name, copy primary to ref name
+        if primary_csv and os.path.isfile(primary_csv):
             for ref in csv_refs:
                 ref_base = os.path.basename(ref)
-                cand = os.path.join(UPLOADS_DIR, ref_base)
-                if os.path.isfile(cand):
-                    src_csv = cand
-                    break
-                for fname in os.listdir(UPLOADS_DIR):
-                    if fname.endswith(".csv") and (ref_base in fname or fname in ref_base):
-                        src_csv = os.path.join(UPLOADS_DIR, fname)
-                        break
-                if src_csv:
-                    break
-
-        if src_csv and os.path.isfile(src_csv):
-            base_name = os.path.basename(src_csv)
-            dest_base = os.path.join(sandbox, base_name)
-            if not os.path.exists(dest_base):
-                shutil.copy2(src_csv, dest_base)
-
-            # Ensure generic 'dataset.csv' fallback exists
-            dest_canonical = os.path.join(sandbox, "dataset.csv")
-            if not os.path.exists(dest_canonical):
-                shutil.copy2(src_csv, dest_canonical)
-
-            # Ensure all CSV names referenced in code are present
-            for ref in csv_refs:
-                ref_name = os.path.basename(ref)
-                ref_dest = os.path.join(sandbox, ref_name)
-                if not os.path.exists(ref_dest):
-                    shutil.copy2(src_csv, ref_dest)
+                dest = os.path.join(sandbox, ref_base)
+                if not os.path.exists(dest):
+                    shutil.copy2(primary_csv, dest)
+                    staged_files.add(ref_base)
     except Exception as stage_exc:
         logger.warning("Error staging dataset files into execution sandbox: %s", stage_exc)
 

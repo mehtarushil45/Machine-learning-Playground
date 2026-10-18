@@ -32,38 +32,114 @@ def _read_dataframe_from_path(file_path: str) -> pd.DataFrame:
 
 
 def find_dataset_path(dataset_id: str) -> str:
-    """Find CSV or Parquet file path in uploads directory corresponding to dataset_id.
+    """Find CSV or Parquet file path in uploads directory or storage backend corresponding to dataset_id.
 
-    Searches both the root upload directory and organisation-scoped subdirectories.
+    Searches storage backend (MinIO / S3) first for uploaded datasets, database dataset records,
+    and root upload directories (excluding execution sandboxes, workspaces, and hidden benchmarks).
 
     Raises:
         FileNotFoundError: If no matching CSV or Parquet dataset file is found for dataset_id.
     """
-    if os.path.exists(dataset_id) and any(dataset_id.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
-        return dataset_id
+    if not dataset_id:
+        raise FileNotFoundError("Empty dataset_id provided to find_dataset_path.")
 
-    if os.path.exists(UPLOADS_DIR):
-        # 1. Search root upload directory
-        for fname in os.listdir(UPLOADS_DIR):
-            fpath = os.path.join(UPLOADS_DIR, fname)
-            if os.path.isfile(fpath) and dataset_id in fname and any(fname.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
-                return fpath
-            # 2. Search organisation-scoped subdirectories
-            if os.path.isdir(fpath):
-                for sub_fname in os.listdir(fpath):
-                    if dataset_id in sub_fname and any(sub_fname.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
-                        return os.path.join(fpath, sub_fname)
+    target = dataset_id.strip()
 
-    # 3. Check MinIO / S3 Object Storage backend
+    # 1. Direct path check
+    if os.path.exists(target) and any(target.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
+        return os.path.abspath(target)
+
+    # 2. Check MinIO / S3 Object Storage backend first (primary storage for uploaded datasets)
     try:
         from app.ingestion.storage_backend import get_configured_backend
         backend: Any = get_configured_backend()
         if backend is not None and hasattr(backend, "download_to_temp"):
-            temp_path = backend.download_to_temp(dataset_id=dataset_id)
+            temp_path = backend.download_to_temp(dataset_id=target)
             if temp_path and os.path.exists(temp_path):
                 return temp_path
     except Exception as exc:
         logger.debug("MinIO temp lookup in find_dataset_path: %s", exc)
+
+    # 3. Check PostgreSQL database records for Dataset.file_path
+    try:
+        from sqlalchemy import create_engine, text
+        db_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mlplatform")
+        if "asyncpg" in db_url:
+            db_url = db_url.replace("+asyncpg", "")
+        engine = create_engine(db_url, connect_args={"connect_timeout": 2})
+        with engine.connect() as conn:
+            stmt = text("SELECT file_path FROM datasets WHERE id::text = :ds_id OR name = :name LIMIT 1")
+            res = conn.execute(stmt, {"ds_id": target, "name": os.path.basename(target)})
+            row = res.fetchone()
+            if row and row[0]:
+                stored_path = row[0]
+                if os.path.exists(stored_path):
+                    return stored_path
+                # Try downloading from MinIO using the stored object key
+                try:
+                    from app.ingestion.storage_backend import get_configured_backend
+                    backend_db: Any = get_configured_backend()
+                    if backend_db is not None and hasattr(backend_db, "download_to_temp"):
+                        temp_p = backend_db.download_to_temp(dataset_id=target, filename=os.path.basename(stored_path))
+                        if temp_p and os.path.exists(temp_p):
+                            return temp_p
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 4. Gather candidate upload roots (excluding workspaces/sandboxes)
+    candidate_roots = []
+    if os.path.exists(UPLOADS_DIR):
+        candidate_roots.append(UPLOADS_DIR)
+
+    alt_dirs = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "api", "uploads")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads")),
+        os.path.abspath("uploads"),
+        os.path.abspath("/app/services/api/uploads"),
+        os.path.abspath("/app/uploads"),
+    ]
+    for d in alt_dirs:
+        if os.path.exists(d) and d not in candidate_roots:
+            candidate_roots.append(d)
+
+    clean_target = os.path.basename(target).lower()
+    clean_target_stem = os.path.splitext(clean_target)[0]
+
+    EXCLUDED_DIRS = ("hidden_benchmarks", "prediction_logs", "workspaces", ".git", "__pycache__", "sandboxes")
+
+    # Pass A: Exact filename match across all subdirectories
+    for root_dir in candidate_roots:
+        for root, _, files in os.walk(root_dir):
+            if any(skip in root for skip in EXCLUDED_DIRS):
+                continue
+            for f in files:
+                if any(f.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
+                    if f.lower() == clean_target:
+                        return os.path.join(root, f)
+
+    # Pass B: Exact stem match (e.g. "telecom_churn" matches "telecom_churn.csv")
+    for root_dir in candidate_roots:
+        for root, _, files in os.walk(root_dir):
+            if any(skip in root for skip in EXCLUDED_DIRS):
+                continue
+            for f in files:
+                if any(f.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
+                    f_stem = os.path.splitext(f.lower())[0]
+                    if f_stem == clean_target_stem:
+                        return os.path.join(root, f)
+
+    # Pass C: Substring in filename
+    for root_dir in candidate_roots:
+        for root, _, files in os.walk(root_dir):
+            if any(skip in root for skip in EXCLUDED_DIRS):
+                continue
+            for f in files:
+                if any(f.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
+                    f_lower = f.lower()
+                    if len(clean_target_stem) >= 4 and clean_target_stem in f_lower:
+                        return os.path.join(root, f)
 
     raise FileNotFoundError(
         f"No dataset file found for dataset_id='{dataset_id}'. "

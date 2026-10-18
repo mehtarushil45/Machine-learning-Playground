@@ -192,10 +192,12 @@ def build_exam_starter_code(
         "# 4. Build Pipeline with Preprocessing\n"
         "num_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()\n"
         "cat_cols = X_train.select_dtypes(exclude=[np.number]).columns.tolist()\n\n"
-        "preprocessor = ColumnTransformer([\n"
-        "    ('num', Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())]), num_cols),\n"
-        "    ('cat', Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('ohe', OneHotEncoder(handle_unknown='ignore'))]), cat_cols),\n"
-        "])\n\n"
+        "transformers = []\n"
+        "if len(num_cols) > 0:\n"
+        "    transformers.append(('num', Pipeline([('imputer', SimpleImputer(strategy='median')), ('scaler', StandardScaler())]), num_cols))\n"
+        "if len(cat_cols) > 0:\n"
+        "    transformers.append(('cat', Pipeline([('imputer', SimpleImputer(strategy='most_frequent')), ('ohe', OneHotEncoder(handle_unknown='ignore'))]), cat_cols))\n\n"
+        "preprocessor = ColumnTransformer(transformers=transformers) if transformers else 'passthrough'\n\n"
         "pipeline = Pipeline([\n"
         "    ('preprocessor', preprocessor),\n"
         f"    ('classifier', {model_inst}),\n"
@@ -413,27 +415,35 @@ def get_dataset_features_and_target(
                     is_regression = True
             problem_type = "regression" if is_regression else "classification"
 
-        # 4. Genuine Sample Inputs from Row 0
+        # 4. Genuine Dtypes & Sample Inputs from First Non-Null Rows
+        column_types: Dict[str, str] = {}
         sample_inputs: Dict[str, Any] = {}
-        first_row = df.iloc[0].to_dict()
+
         for col in feature_cols:
-            val = first_row.get(col)
-            if pd.isna(val):
-                sample_inputs[col] = 0.0 if any(kw in col.lower() for kw in ("charge", "tenure", "age", "price", "income", "amount", "count", "num")) else "Default"
-            elif isinstance(val, (np.integer, int)):
-                sample_inputs[col] = int(val)
-            elif isinstance(val, (np.floating, float)):
-                sample_inputs[col] = round(float(val), 2)
-            elif isinstance(val, (bool, np.bool_)):
-                sample_inputs[col] = bool(val)
+            col_series = df[col]
+            is_num = pd.api.types.is_numeric_dtype(col_series)
+            column_types[col] = "numeric" if is_num else "categorical"
+
+            valid_vals = col_series.dropna()
+            if not valid_vals.empty:
+                val = valid_vals.iloc[0]
+                if isinstance(val, (np.integer, int)):
+                    sample_inputs[col] = int(val)
+                elif isinstance(val, (np.floating, float)):
+                    sample_inputs[col] = round(float(val), 2)
+                elif isinstance(val, (bool, np.bool_)):
+                    sample_inputs[col] = bool(val)
+                else:
+                    sample_inputs[col] = str(val)
             else:
-                sample_inputs[col] = str(val)
+                sample_inputs[col] = 0.0 if is_num else "sample"
 
         return {
             "filepath": fpath,
             "filename": os.path.basename(fpath),
             "target_column": target_col,
             "feature_columns": feature_cols,
+            "column_types": column_types,
             "problem_type": problem_type,
             "sample_inputs": sample_inputs,
             "row_count": len(df),
@@ -666,15 +676,10 @@ async def _resolve_exam(exam_id: str, db: AsyncSession) -> Optional[Dict[str, An
     """Dynamically resolve an exam dictionary from memory, assignment UUID, or exam-{UUID}."""
     if not exam_id:
         return None
-    exam = CURATED_LAB_EXAMS.get(exam_id)
-    if exam:
-        return exam
 
     clean_id = exam_id.replace("exam-", "").strip()
-    exam = CURATED_LAB_EXAMS.get(clean_id) or CURATED_LAB_EXAMS.get(f"exam-{clean_id}")
-    if exam:
-        return exam
 
+    # Prioritize database Assignment record so custom datasets and rubric changes are immediately reflected
     try:
         from uuid import UUID
         asgn_uuid = UUID(clean_id)
@@ -689,6 +694,11 @@ async def _resolve_exam(exam_id: str, db: AsyncSession) -> Optional[Dict[str, An
             return built
     except Exception:
         pass
+
+    exam = CURATED_LAB_EXAMS.get(exam_id) or CURATED_LAB_EXAMS.get(clean_id) or CURATED_LAB_EXAMS.get(f"exam-{clean_id}")
+    if exam:
+        return exam
+
     return None
 
 
@@ -1099,11 +1109,13 @@ async def deploy_lab_model(
         actual_features: List[str] = []
         sample_inputs: Dict[str, Any] = {}
         target_col: str = exam.get("target_column", "churn")
+        col_types: Dict[str, str] = {}
 
         if schema_info:
             actual_features = schema_info["feature_columns"]
             sample_inputs = dict(schema_info["sample_inputs"])
             target_col = schema_info["target_column"]
+            col_types = schema_info.get("column_types", {})
             exam["feature_columns"] = actual_features
             exam["target_column"] = target_col
             exam["dataset_name"] = schema_info["filename"]
@@ -1130,18 +1142,20 @@ async def deploy_lab_model(
             except Exception as reg_exc:
                 logger.warning("Could not patch registry metadata: %s", reg_exc)
 
+        # Build ret_schema dynamically from verified dataset column types
+        ret_schema = {
+            c: {"type": col_types.get(c, "numeric")}
+            for c in actual_features
+        }
+
         # Ensure sample_inputs contains an entry for every feature in actual_features
         for col in actual_features:
             if col not in sample_inputs:
-                sample_inputs[col] = 42.0 if any(kw in col.lower() for kw in ("charges", "tenure", "age", "price", "income", "amount", "count", "num")) else "Standard"
+                is_num = ret_schema.get(col, {}).get("type") == "numeric"
+                sample_inputs[col] = 0.0 if is_num else "sample"
 
         # Prune sample_inputs to strictly include actual_features
         sample_inputs = {c: sample_inputs[c] for c in actual_features if c in sample_inputs}
-
-        ret_schema = {
-            c: {"type": "numeric" if any(kw in c.lower() for kw in ("charges", "tenure", "age", "price", "income", "amount", "count", "num")) else "categorical"}
-            for c in actual_features
-        }
 
         now_iso = datetime.now(timezone.utc).isoformat()
         lab_deployment = {
@@ -1223,25 +1237,31 @@ async def predict_lab_slot(
     lower_sample = {str(k).lower().strip(): v for k, v in sample_inputs.items()}
 
     sanitized_inputs: Dict[str, Any] = {}
+    input_schema = dep_info.get("input_schema") or {}
+
     for f in feature_cols:
         f_lower = str(f).lower().strip()
+        val = None
         if f in raw_inputs:
-            sanitized_inputs[f] = raw_inputs[f]
+            val = raw_inputs[f]
         elif f_lower in lower_inputs:
-            sanitized_inputs[f] = lower_inputs[f_lower]
+            val = lower_inputs[f_lower]
         elif f in sample_inputs:
-            sanitized_inputs[f] = sample_inputs[f]
+            val = sample_inputs[f]
         elif f_lower in lower_sample:
-            sanitized_inputs[f] = lower_sample[f_lower]
-        else:
-            sanitized_inputs[f] = 0.0 if any(kw in f_lower for kw in ("charge", "tenure", "age", "price", "income", "amount", "count", "num")) else "Default"
+            val = lower_sample[f_lower]
 
-    for f, v in sanitized_inputs.items():
-        if isinstance(v, str) and v.strip() != "":
+        f_type = input_schema.get(f, {}).get("type", "numeric") if isinstance(input_schema, dict) else "numeric"
+        if val is None or (isinstance(val, str) and val.strip() == ""):
+            val = sample_inputs.get(f, 0.0 if f_type == "numeric" else "sample")
+
+        if f_type == "numeric":
             try:
-                sanitized_inputs[f] = float(v)
-            except ValueError:
-                pass
+                sanitized_inputs[f] = float(val)
+            except (ValueError, TypeError):
+                sanitized_inputs[f] = 0.0
+        else:
+            sanitized_inputs[f] = str(val)
 
     import time
     from app.ml.inference_engine import predict
@@ -1287,6 +1307,16 @@ async def get_exam_dataset_preview(
         raise HTTPException(status_code=404, detail=f"Lab exam '{exam_id}' not found.")
     dataset_name = exam.get("dataset_name") or exam.get("dataset_id") or "telecom_churn.csv"
     path = _resolve_dataset_filepath(dataset_name)
+    if not path or not os.path.exists(path):
+        alt_id = exam.get("dataset_id")
+        if alt_id and alt_id != dataset_name:
+            path = _resolve_dataset_filepath(alt_id)
+    if not path or not os.path.exists(path):
+        starter = exam.get("starter_code", "")
+        m = re.search(r'''pd\.read_(?:csv|parquet)\(\s*['"]([^'"]+)['"]\s*\)''', starter)
+        if m:
+            path = _resolve_dataset_filepath(m.group(1).strip())
+
     if not path or not os.path.exists(path):
         raise HTTPException(status_code=404, detail=f"Dataset file '{dataset_name}' not found on server.")
 

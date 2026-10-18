@@ -122,12 +122,6 @@ def sync_dataset_to_workspace(project_id: str, dataset_id: Optional[str] = None)
         except Exception as exc:
             logger.debug("Dataset lookup for %s failed: %s", dataset_id, exc)
 
-    if not src_csv and os.path.exists(UPLOADS_DIR):
-        # Look for any recent dataset CSV
-        for fname in os.listdir(UPLOADS_DIR):
-            if fname.endswith(".csv") and not fname.startswith("."):
-                src_csv = os.path.join(UPLOADS_DIR, fname)
-                break
 
     if src_csv and os.path.isfile(src_csv):
         base_name = os.path.basename(src_csv)
