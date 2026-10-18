@@ -105,6 +105,8 @@ function AppContent() {
   const [hoveredNav, setHoveredNav] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState<string>('');
   const [isCopilotOpen, setIsCopilotOpen] = useState<boolean>(false);
+  /** Lifted from ClassroomHub — hides sidebar during exam lockdown */
+  const [isExamLocked, setIsExamLocked] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -282,7 +284,8 @@ function AppContent() {
       {/* ── 1. COMPACT ICON-ONLY SIDEBAR (A1, A3, A5) ──────────────── */}
       <aside
         style={{
-          width: 58,
+          width: isExamLocked ? 0 : 58,
+          overflow: 'hidden',
           backgroundColor: BB.surface,
           borderRight: `1px solid ${BB.border}`,
           flexShrink: 0,
@@ -290,6 +293,7 @@ function AppContent() {
           flexDirection: 'column',
           alignItems: 'center',
           zIndex: 30,
+          transition: 'width 0.25s ease',
         }}
       >
         {/* Brand Mark Icon Only (A1: ML Lab text removed) */}
@@ -808,7 +812,10 @@ function AppContent() {
           ) : activeTab === 'classroom' ? (
             <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '10px 16px', width: '100%' }}>
               <ErrorBoundary key="classroom" onReset={() => handleNavigate('classroom')}>
-                <ClassroomHub onShowToast={showToast} />
+                <ClassroomHub
+                  onShowToast={showToast}
+                  onExamLockChange={setIsExamLocked}
+                />
               </ErrorBoundary>
             </div>
           ) : (

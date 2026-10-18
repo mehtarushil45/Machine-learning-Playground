@@ -1,4 +1,4 @@
-﻿/**
+/**
  * useSafeExamBrowser — Proctored Exam Lockdown Hook
  *
  * Responsibilities:
@@ -24,6 +24,7 @@ export const MAX_VIOLATIONS = 3;
 
 /** Keys to suppress during lockdown */
 const BLOCKED_KEYS: Record<string, boolean> = {
+  Escape: true,
   F5: true,
   F12: true,
   F11: true,
@@ -90,10 +91,12 @@ export function useSafeExamBrowser(
 
     const fns: Array<() => void> = [];
 
-    // Fullscreen change listener
+    // Fullscreen change listener — re-enter fullscreen if student presses ESC
     const handleFSChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
       if (!document.fullscreenElement && activeRef.current) {
+        // Attempt to re-acquire fullscreen immediately after ESC
+        document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
         recordViolation();
       }
     };

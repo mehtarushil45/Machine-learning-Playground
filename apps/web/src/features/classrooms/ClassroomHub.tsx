@@ -104,9 +104,11 @@ const formatISTDateTime = (dateStr?: string | null) => {
 export interface ClassroomHubProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
   initialView?: 'entry' | 'instructor' | 'student' | 'lobby' | 'classroom';
+  /** Called whenever exam lockdown is activated/released — parent can hide sidebar */
+  onExamLockChange?: (locked: boolean) => void;
 }
 
-export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initialView }) => {
+export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initialView, onExamLockChange }) => {
   const authCtx = useContext(AuthContext);
   const user = authCtx?.user;
   const project = useOptionalProject();
@@ -175,11 +177,17 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   // SEB Confirm Modal state
   const [showSebModal, setShowSebModal] = useState(false);
   const [sebPendingExamInfo, setSebPendingExamInfo] = useState<{
-    finalExam: any;
+    examTitle: string;
+    durationMinutes?: number;
     targetCid: string;
+    /** Deferred exam state setter — runs on confirm, not on button click */
+    applyExamState: () => Promise<void>;
   } | null>(null);
   // SEB Flagged (max violations)
   const [sebFlagged, setSebFlagged] = useState(false);
+  // Post-submit release confirm: lockdown stays until student explicitly dismisses
+  const [showSebReleaseModal, setShowSebReleaseModal] = useState(false);
+  const [pendingReceipt, setPendingReceipt] = useState<any>(null);
 
   // AI Copilot State (Server Enforced)
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
@@ -329,6 +337,11 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       );
     },
   );
+
+  // Notify parent (App) whenever lockdown state changes so sidebar can be hidden
+  useEffect(() => {
+    onExamLockChange?.(examLocked);
+  }, [examLocked, onExamLockChange]);
 
   // 1. Initial Load: Exams & Student Session
   useEffect(() => {
@@ -734,12 +747,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setIsSubmitting(true);
     try {
       const receipt = await ClassroomService.submitExam(selectedExamId, code, deployment?.deployment_id);
-      setSubmissionReceipt(receipt);
       setShowConfirmSubmit(false);
-      // Release exam lockdown (fullscreen + all listeners)
-      setExamLocked(false);
-      seb.release();
-      setSebFlagged(false);
       setOutputLines((prev) => [
         ...prev,
         '─────────────────────────────────────────────────────────────',
@@ -747,7 +755,11 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
         `[Immutable Receipt] Code SHA-256: ${receipt.code_sha256?.slice(0, 16)}...`,
         `[Status] ${receipt.status} (${receipt.passed ? 'PASSED' : 'COMPLETED'})`,
       ]);
-      onShowToast?.('Lab Exam Submitted!', 'Your code and model receipt are permanently locked on server.', 'success');
+      onShowToast?.('Lab Exam Submitted!', 'Confirm below to exit lockdown and return to normal mode.', 'success');
+      // Store receipt and show the post-submit release confirm modal
+      // Lockdown stays active until the student explicitly dismisses
+      setPendingReceipt(receipt);
+      setShowSebReleaseModal(true);
     } catch (err: any) {
       const errMsg = err.message || 'Submission failed.';
       onShowToast?.('Submission Error', errMsg, 'error');
@@ -1042,67 +1054,69 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
               {/* Start Button at Top Right */}
               <button
-                onClick={async () => {
+                onClick={() => {
+                  // Open SEB pre-flight modal instantly — async work deferred to onConfirm
                   const examId = `exam-${selectedClassroomAssignment.id}`;
-                  let latestExams = exams;
-                  try {
-                    latestExams = await ClassroomService.listExams();
-                    setExams(latestExams);
-                  } catch {}
-                  let targetExam = latestExams.find((e) => e.id === examId || e.id.includes(selectedClassroomAssignment.id));
-                  if (!targetExam) {
-                    try {
-                      const fetched = await ClassroomService.getExam(examId);
-                      if (fetched) {
-                        targetExam = fetched;
-                        latestExams = [...latestExams, fetched];
-                        setExams(latestExams);
-                      }
-                    } catch {}
-                  }
-                  const finalExam = targetExam || (latestExams.length > 0 ? latestExams[0] : null);
-                  if (finalExam) {
-                    setActiveExam(finalExam);
-                    setSelectedExamId(finalExam.id);
-                    setCode(finalExam.starter_code);
-                    setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
-                    setDeployment(null);
-                    setEvaluationResult(null);
-                    setPredictionResult(null);
-                    setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
-                    try {
-                      const sess = await ClassroomService.getSession(finalExam.id);
-                      if (sess?.code_draft) setCode(sess.code_draft);
-                      if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
-                        setSubmissionReceipt({
-                          submission_id: sess.submission_receipt.submission_id || 'sub-locked',
-                          status: 'SUBMITTED',
-                          grade_score: sess.grade_score || 85.0,
-                          percentage: sess.grade_score || 85.0,
-                          passed: (sess.grade_score || 0) >= 60.0,
-                          submitted_at: sess.submitted_at || new Date().toISOString(),
-                          code_sha256: sess.submission_receipt.code_sha256,
-                          model_sha256: sess.submission_receipt.model_sha256,
-                          rubric_snapshot: sess.submission_receipt.rubric_snapshot,
-                          guardrail_flags: sess.submission_receipt.guardrail_flags || [],
-                          message: 'Exam submission locked.',
-                        });
-                      }
-                    } catch {}
-                  }
                   const targetCid = selectedClassroomId || activeClassroom?.id || '';
-                  if (targetCid) {
-                    ClassroomService.enterExamWorkspace(targetCid).catch(() => {});
-                  }
-                  // Activate safe browser lock (released on submission)
-                  setExamLocked(true);
-                  setViewMode('student');
+                  setSebPendingExamInfo({
+                    examTitle: selectedClassroomAssignment.title || 'Lab Exam',
+                    durationMinutes: selectedClassroomAssignment.rubric?.duration_minutes,
+                    targetCid,
+                    applyExamState: async () => {
+                      let latestExams = exams;
+                      try {
+                        latestExams = await ClassroomService.listExams();
+                        setExams(latestExams);
+                      } catch {}
+                      let targetExam = latestExams.find((e) => e.id === examId || e.id.includes(selectedClassroomAssignment.id));
+                      if (!targetExam) {
+                        try {
+                          const fetched = await ClassroomService.getExam(examId);
+                          if (fetched) {
+                            targetExam = fetched;
+                            setExams([...latestExams, fetched]);
+                          }
+                        } catch {}
+                      }
+                      const finalExam = targetExam || (latestExams.length > 0 ? latestExams[0] : null);
+                      if (finalExam) {
+                        setActiveExam(finalExam);
+                        setSelectedExamId(finalExam.id);
+                        setCode(finalExam.starter_code);
+                        setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
+                        setDeployment(null);
+                        setEvaluationResult(null);
+                        setPredictionResult(null);
+                        setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
+                        try {
+                          const sess = await ClassroomService.getSession(finalExam.id);
+                          if (sess?.code_draft) setCode(sess.code_draft);
+                          if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
+                            setSubmissionReceipt({
+                              submission_id: sess.submission_receipt.submission_id || 'sub-locked',
+                              status: 'SUBMITTED',
+                              grade_score: sess.grade_score || 85.0,
+                              percentage: sess.grade_score || 85.0,
+                              passed: (sess.grade_score || 0) >= 60.0,
+                              submitted_at: sess.submitted_at || new Date().toISOString(),
+                              code_sha256: sess.submission_receipt.code_sha256,
+                              model_sha256: sess.submission_receipt.model_sha256,
+                              rubric_snapshot: sess.submission_receipt.rubric_snapshot,
+                              guardrail_flags: sess.submission_receipt.guardrail_flags || [],
+                              message: 'Exam submission locked.',
+                            });
+                          }
+                        } catch {}
+                      }
+                    },
+                  });
+                  setShowSebModal(true);
                 }}
                 className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs text-[#0B0912] shadow transition-all hover:opacity-90 shrink-0"
                 style={{ background: 'linear-gradient(135deg, #00D4FF 0%, #00F5A0 100%)' }}
               >
                 <Play className="w-4 h-4 fill-current" />
-                <span>Start Assignment</span>
+                <span>Start Exam</span>
               </button>
             </div>
 
@@ -1194,57 +1208,62 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     Ready to begin? Click below to open your coding environment and start solving.
                   </p>
                   <button
-                    onClick={async () => {
+                    onClick={() => {
+                      // Open SEB modal instantly — heavy async work runs only on confirm
                       const examId = `exam-${selectedClassroomAssignment.id}`;
-                      let latestExams = exams;
-                      try {
-                        latestExams = await ClassroomService.listExams();
-                        setExams(latestExams);
-                      } catch {}
-                      let targetExam = latestExams.find((e) => e.id === examId || e.id.includes(selectedClassroomAssignment.id));
-                      if (!targetExam) {
-                        try {
-                          const fetched = await ClassroomService.getExam(examId);
-                          if (fetched) {
-                            targetExam = fetched;
-                            latestExams = [...latestExams, fetched];
-                            setExams(latestExams);
-                          }
-                        } catch {}
-                      }
-                      const finalExam = targetExam || (latestExams.length > 0 ? latestExams[0] : null);
-                      if (finalExam) {
-                        setActiveExam(finalExam);
-                        setSelectedExamId(finalExam.id);
-                        setCode(finalExam.starter_code);
-                        setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
-                        setDeployment(null);
-                        setEvaluationResult(null);
-                        setPredictionResult(null);
-                        setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
-                        try {
-                          const sess = await ClassroomService.getSession(finalExam.id);
-                          if (sess?.code_draft) setCode(sess.code_draft);
-                          if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
-                            setSubmissionReceipt({
-                              submission_id: sess.submission_receipt.submission_id || 'sub-locked',
-                              status: 'SUBMITTED',
-                              grade_score: sess.grade_score || 85.0,
-                              percentage: sess.grade_score || 85.0,
-                              passed: (sess.grade_score || 0) >= 60.0,
-                              submitted_at: sess.submitted_at || new Date().toISOString(),
-                              code_sha256: sess.submission_receipt.code_sha256,
-                              model_sha256: sess.submission_receipt.model_sha256,
-                              rubric_snapshot: sess.submission_receipt.rubric_snapshot,
-                              guardrail_flags: sess.submission_receipt.guardrail_flags || [],
-                              message: 'Exam submission locked.',
-                            });
-                          }
-                        } catch {}
-                      }
                       const targetCid = selectedClassroomId || activeClassroom?.id || '';
-                      // Open pre-flight SEB confirm modal instead of locking immediately
-                      setSebPendingExamInfo({ finalExam, targetCid });
+                      setSebPendingExamInfo({
+                        examTitle: selectedClassroomAssignment.title || 'Lab Exam',
+                        durationMinutes: selectedClassroomAssignment.rubric?.duration_minutes,
+                        targetCid,
+                        applyExamState: async () => {
+                          let latestExams = exams;
+                          try {
+                            latestExams = await ClassroomService.listExams();
+                            setExams(latestExams);
+                          } catch {}
+                          let targetExam = latestExams.find((e) => e.id === examId || e.id.includes(selectedClassroomAssignment.id));
+                          if (!targetExam) {
+                            try {
+                              const fetched = await ClassroomService.getExam(examId);
+                              if (fetched) {
+                                targetExam = fetched;
+                                setExams([...latestExams, fetched]);
+                              }
+                            } catch {}
+                          }
+                          const finalExam = targetExam || (latestExams.length > 0 ? latestExams[0] : null);
+                          if (finalExam) {
+                            setActiveExam(finalExam);
+                            setSelectedExamId(finalExam.id);
+                            setCode(finalExam.starter_code);
+                            setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
+                            setDeployment(null);
+                            setEvaluationResult(null);
+                            setPredictionResult(null);
+                            setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
+                            try {
+                              const sess = await ClassroomService.getSession(finalExam.id);
+                              if (sess?.code_draft) setCode(sess.code_draft);
+                              if (sess?.status === 'SUBMITTED' && sess?.submission_receipt) {
+                                setSubmissionReceipt({
+                                  submission_id: sess.submission_receipt.submission_id || 'sub-locked',
+                                  status: 'SUBMITTED',
+                                  grade_score: sess.grade_score || 85.0,
+                                  percentage: sess.grade_score || 85.0,
+                                  passed: (sess.grade_score || 0) >= 60.0,
+                                  submitted_at: sess.submitted_at || new Date().toISOString(),
+                                  code_sha256: sess.submission_receipt.code_sha256,
+                                  model_sha256: sess.submission_receipt.model_sha256,
+                                  rubric_snapshot: sess.submission_receipt.rubric_snapshot,
+                                  guardrail_flags: sess.submission_receipt.guardrail_flags || [],
+                                  message: 'Exam submission locked.',
+                                });
+                              }
+                            } catch {}
+                          }
+                        },
+                      });
                       setShowSebModal(true);
                     }}
                     className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-xs text-[#0B0912] shadow-lg transition-all hover:opacity-90 active:scale-[0.98]"
@@ -3030,19 +3049,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       {/* ── Safe Exam Browser — Pre-flight Confirmation Modal ── */}
       {showSebModal && sebPendingExamInfo && (
         <SafeExamConfirmModal
-          examTitle={
-            sebPendingExamInfo.finalExam?.title ||
-            selectedClassroomAssignment?.title ||
-            'Lab Exam'
-          }
-          durationMinutes={
-            sebPendingExamInfo.finalExam?.duration_minutes ||
-            selectedClassroomAssignment?.rubric?.duration_minutes
-          }
+          examTitle={sebPendingExamInfo.examTitle}
+          durationMinutes={sebPendingExamInfo.durationMinutes}
           onConfirm={async () => {
-            // This click IS the user gesture — request fullscreen here
+            // User gesture: request fullscreen, apply exam state, enter lockdown
             await seb.acquireFullscreen();
-            // Enter lockdown workspace
+            await sebPendingExamInfo.applyExamState();
             if (sebPendingExamInfo.targetCid) {
               ClassroomService.enterExamWorkspace(sebPendingExamInfo.targetCid).catch(() => {});
             }
@@ -3053,10 +3065,94 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             setSebPendingExamInfo(null);
           }}
           onCancel={() => {
+            // Cancel: just close modal, do NOT change viewMode or examLocked
             setShowSebModal(false);
             setSebPendingExamInfo(null);
           }}
         />
+      )}
+
+      {/* ── Safe Exam Browser — Post-Submit Release Confirm ── */}
+      {showSebReleaseModal && pendingReceipt && (
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+            style={{ background: 'rgba(11,9,18,0.92)', backdropFilter: 'blur(14px)' }}
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 20, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+              className="w-full max-w-md rounded-3xl overflow-hidden shadow-2xl"
+              style={{
+                background: 'linear-gradient(145deg, #151026 0%, #1C1534 100%)',
+                border: `1.5px solid ${pendingReceipt.passed ? 'rgba(0,245,160,0.5)' : 'rgba(107,92,166,0.4)'}`,
+                boxShadow: pendingReceipt.passed
+                  ? '0 0 60px rgba(0,245,160,0.15), 0 30px 80px rgba(0,0,0,0.6)'
+                  : '0 0 60px rgba(107,92,166,0.15), 0 30px 80px rgba(0,0,0,0.6)',
+              }}
+            >
+              <div className="px-7 py-6 text-center space-y-4">
+                <div
+                  className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center text-2xl"
+                  style={{
+                    background: pendingReceipt.passed ? 'rgba(0,245,160,0.15)' : 'rgba(107,92,166,0.15)',
+                    border: `1px solid ${pendingReceipt.passed ? 'rgba(0,245,160,0.4)' : 'rgba(107,92,166,0.4)'}`,
+                  }}
+                >
+                  {pendingReceipt.passed ? '🏆' : '📝'}
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold tracking-widest uppercase mb-1"
+                    style={{ color: pendingReceipt.passed ? '#00F5A0' : '#9E93B8' }}>
+                    Exam Submitted Successfully
+                  </p>
+                  <h2 className="text-lg font-bold text-[#F5F1EC]">
+                    {pendingReceipt.passed ? 'Congratulations!' : 'Submission Complete'}
+                  </h2>
+                  <p className="text-sm text-[#9E93B8] mt-1">
+                    Final Grade: <strong className="text-[#F5F1EC]">{pendingReceipt.grade_score?.toFixed(1) || '—'} / 100</strong>
+                    &nbsp;&bull;&nbsp;
+                    <span style={{ color: pendingReceipt.passed ? '#00F5A0' : '#F59E0B' }}>
+                      {pendingReceipt.passed ? 'PASSED' : 'COMPLETED'}
+                    </span>
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl text-left space-y-1" style={{ background: 'rgba(11,9,18,0.6)', border: '1px solid rgba(107,92,166,0.2)' }}>
+                  <p className="text-[11px] text-[#9E93B8]">Receipt ID: <span className="font-mono text-[#00D4FF]">{pendingReceipt.submission_id}</span></p>
+                  <p className="text-[11px] text-[#9E93B8]">Code Hash: <span className="font-mono text-[#F5F1EC]">{pendingReceipt.code_sha256?.slice(0,20)}…</span></p>
+                </div>
+                <p className="text-xs text-[#6B5CA5]">
+                  Lockdown is still active. Click below to exit fullscreen and return to normal mode.
+                </p>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => {
+                    // Release lockdown only after explicit student confirmation
+                    setSubmissionReceipt(pendingReceipt);
+                    setPendingReceipt(null);
+                    setShowSebReleaseModal(false);
+                    setExamLocked(false);
+                    seb.release();
+                    setSebFlagged(false);
+                    onShowToast?.('Lockdown Released', 'You have exited safe exam mode.', 'success');
+                  }}
+                  className="w-full py-3 px-6 rounded-2xl font-bold text-sm text-[#0B0912]"
+                  style={{
+                    background: 'linear-gradient(135deg, #00D4FF 0%, #00F5A0 100%)',
+                    boxShadow: '0 4px 24px rgba(0,212,255,0.3)',
+                  }}
+                >
+                  Exit Lockdown & Return to Normal Mode
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        </AnimatePresence>
       )}
 
       {/* ── Safe Exam Browser — Violation Overlay ── */}
