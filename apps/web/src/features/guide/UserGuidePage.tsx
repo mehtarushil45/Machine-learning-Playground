@@ -936,21 +936,22 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
       </header>
 
       {/* ── Main Layout (Sidebar + Content) ───────────────────────────── */}
-      <div style={{ display: 'flex', flex: 1, maxWidth: 1440, width: '100%', margin: '0 auto' }}>
-        {/* Left Sticky Navigation Sidebar (Reduced width for Task 3) */}
+      <div style={{ display: 'flex', flex: 1, width: '100%' }}>
+        {/* Left Sticky Navigation Sidebar */}
         <aside
           style={{
-            width: 225,
+            width: 250,
             flexShrink: 0,
             borderRight: '1px solid ' + TOKENS.border,
-            padding: '16px 8px',
+            padding: '18px 12px',
             position: 'sticky',
             top: 59,
             height: 'calc(100vh - 59px)',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: 2,
+            gap: 3,
+            background: 'rgba(5, 11, 20, 0.6)',
           }}
         >
           <div

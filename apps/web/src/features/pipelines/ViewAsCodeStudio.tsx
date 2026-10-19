@@ -202,7 +202,7 @@ function ExperimentExplorer({
   modifiedFileNames,
   generatedFileNames,
   onSelectFile,
-  onNewFile,
+  onNewFile: _onNewFile,
   onDeleteFile,
   onPendingNameChange,
   onPendingNameCommit,
@@ -258,35 +258,6 @@ function ExperimentExplorer({
             {files.length}
           </span>
         </div>
-        <button
-          onClick={onNewFile}
-          title="Create new experiment script"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '2px 8px',
-            borderRadius: 4,
-            border: `1px solid rgba(201,162,75,0.4)`,
-            background: 'rgba(201,162,75,0.1)',
-            color: BB.gold,
-            cursor: 'pointer',
-            fontSize: 10,
-            fontWeight: 700,
-            transition: 'all 120ms',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(201,162,75,0.22)';
-            e.currentTarget.style.borderColor = BB.gold;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(201,162,75,0.1)';
-            e.currentTarget.style.borderColor = 'rgba(201,162,75,0.4)';
-          }}
-        >
-          <Plus style={{ width: 11, height: 11 }} />
-          <span>New</span>
-        </button>
       </div>
 
       {/* Real Project Files List */}
@@ -415,41 +386,6 @@ function ExperimentExplorer({
           </div>
         )}
 
-        {/* Action button at bottom */}
-        <div style={{ padding: '8px 12px' }}>
-          <button
-            onClick={onNewFile}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              padding: '5px 8px',
-              borderRadius: 4,
-              border: `1px dashed ${BB.border}`,
-              background: 'transparent',
-              color: BB.muted,
-              fontSize: 10.5,
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 120ms ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = BB.gold;
-              e.currentTarget.style.color = BB.gold;
-              e.currentTarget.style.background = 'rgba(201,162,75,0.06)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = BB.border;
-              e.currentTarget.style.color = BB.muted;
-              e.currentTarget.style.background = 'transparent';
-            }}
-          >
-            <Plus style={{ width: 11, height: 11 }} />
-            <span>New Script</span>
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -2530,37 +2466,6 @@ export function ViewAsCodeStudio({
             >
               <FileCode style={{ width: 12, height: 12, color: BB.gold }} />
               <span>Snippets</span>
-            </button>
-
-            {/* New Script Button */}
-            <button
-              onClick={handleNewFile}
-              title="Create a new Python experiment script"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 11px',
-                borderRadius: 5,
-                border: '1px solid rgba(0,212,255,0.4)',
-                background: 'rgba(0,212,255,0.12)',
-                color: '#00D4FF',
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 120ms ease',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(0,212,255,0.22)';
-                e.currentTarget.style.borderColor = '#00D4FF';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(0,212,255,0.12)';
-                e.currentTarget.style.borderColor = 'rgba(0,212,255,0.4)';
-              }}
-            >
-              <Plus style={{ width: 12, height: 12 }} />
-              <span>New Script</span>
             </button>
 
             <div style={{ width: 1, height: 16, background: BB.border, margin: '0 2px' }} />

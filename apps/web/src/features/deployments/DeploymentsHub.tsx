@@ -112,11 +112,11 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
 
   // Modals
   const [logsModalDep, setLogsModalDep] = useState<LocalDeploymentResponse | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
   const [redeployModalDep, setRedeployModalDep] = useState<LocalDeploymentResponse | null>(null);
   const [availableVersions, setAvailableVersions] = useState<ModelVersionOption[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const [redeployLoading, setRedeployLoading] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Load all deployments
   const fetchDeployments = useCallback(async () => {
@@ -237,6 +237,21 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
       setLineageData(null);
     } finally {
       setLineageLoading(false);
+    }
+  };
+
+  const handleOpenLogs = async (dep: LocalDeploymentResponse) => {
+    setLogsModalDep(dep);
+    setLogsLoading(true);
+    try {
+      const fresh = await LocalDeploymentService.get(dep.deployment_id);
+      if (fresh) {
+        setLogsModalDep(fresh);
+      }
+    } catch {
+      // keep existing deployment logs
+    } finally {
+      setLogsLoading(false);
     }
   };
 
@@ -412,13 +427,6 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
     }
   };
 
-  const copyEndpoint = (endpointPath: string, id: string) => {
-    const full = `http://localhost:8000${endpointPath}`;
-    navigator.clipboard.writeText(full);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1800);
-    onShowToast?.('URL Copied', full, 'info');
-  };
 
   /* ── If a Deployment is selected for Studio view ── */
   if (activeDeploymentId) {
@@ -1007,18 +1015,6 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                 <div style={{ minWidth: 260 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                     <span style={{ fontSize: 16, fontWeight: 800, color: '#FFFFFF' }}>{dep.name}</span>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 800,
-                        padding: '2px 7px',
-                        borderRadius: 4,
-                        background: 'rgba(168, 85, 247, 0.15)',
-                        color: '#C084FC',
-                      }}
-                    >
-                      {dep.model_version}
-                    </span>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#64748B' }}>
@@ -1032,62 +1028,30 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                   </div>
                 </div>
 
-                {/* Column 2: Status & Endpoint URL */}
-                <div style={{ minWidth: 240 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                    {/* Status Pill */}
-                    <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        padding: '4px 10px',
-                        borderRadius: 99,
-                        background: statusCfg.bg,
-                        border: `1px solid ${statusCfg.dot}33`,
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: 7,
-                          height: 7,
-                          borderRadius: '50%',
-                          background: statusCfg.dot,
-                        }}
-                      />
-                      <span style={{ fontSize: 11, fontWeight: 800, color: statusCfg.text, letterSpacing: '0.06em' }}>
-                        {statusCfg.label}
-                      </span>
-                    </div>
-
-                    <span style={{ fontSize: 11, color: '#475569' }}>
-                      Port: 8000
-                    </span>
-                  </div>
-
-                  {/* Endpoint copyable pill */}
+                {/* Column 2: Status */}
+                <div style={{ minWidth: 140 }}>
                   <div
-                    onClick={() => copyEndpoint(dep.endpoint_path, dep.deployment_id)}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 6,
-                      padding: '3px 8px',
-                      borderRadius: 6,
-                      background: '#040912',
-                      border: '1px solid #142032',
-                      fontSize: 11,
-                      fontFamily: 'var(--font-mono, monospace)',
-                      color: '#94A3B8',
-                      cursor: 'pointer',
+                      padding: '4px 10px',
+                      borderRadius: 99,
+                      background: statusCfg.bg,
+                      border: `1px solid ${statusCfg.dot}33`,
                     }}
                   >
-                    <span>{dep.endpoint_path}</span>
-                    {copiedId === dep.deployment_id ? (
-                      <Check size={11} style={{ color: '#00F5A0' }} />
-                    ) : (
-                      <Copy size={11} style={{ color: '#475569' }} />
-                    )}
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        background: statusCfg.dot,
+                      }}
+                    />
+                    <span style={{ fontSize: 11, fontWeight: 800, color: statusCfg.text, letterSpacing: '0.06em' }}>
+                      {statusCfg.label}
+                    </span>
                   </div>
                 </div>
 
@@ -1195,7 +1159,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
 
                   {/* View Logs */}
                   <button
-                    onClick={() => setLogsModalDep(dep)}
+                    onClick={() => handleOpenLogs(dep)}
                     title="Lifecycle Logs"
                     style={{
                       padding: '7px 10px',
@@ -1893,12 +1857,34 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                     Lifecycle Logs: {logsModalDep.name}
                   </span>
                 </div>
-                <button
-                  onClick={() => setLogsModalDep(null)}
-                  style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
-                >
-                  <X size={18} />
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button
+                    onClick={() => logsModalDep && handleOpenLogs(logsModalDep)}
+                    disabled={logsLoading}
+                    title="Refresh Logs"
+                    style={{
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid #1E293B',
+                      borderRadius: 6,
+                      padding: '4px 8px',
+                      color: '#94A3B8',
+                      cursor: logsLoading ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      fontSize: 11,
+                    }}
+                  >
+                    <RefreshCw size={12} className={logsLoading ? 'animate-spin' : ''} />
+                    <span>Refresh</span>
+                  </button>
+                  <button
+                    onClick={() => setLogsModalDep(null)}
+                    style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
               </div>
 
               <div
@@ -1915,7 +1901,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                   [...logsModalDep.logs].reverse().map((l, i) => (
                     <div key={i} style={{ display: 'flex', gap: 10, marginBottom: 6 }}>
                       <span style={{ color: '#475569', flexShrink: 0 }}>
-                        {new Date(l.ts).toLocaleTimeString()}
+                        {l.ts ? (isNaN(new Date(l.ts).getTime()) ? String(l.ts) : new Date(l.ts).toLocaleTimeString()) : '—'}
                       </span>
                       {l.event && (
                         <span style={{ color: '#00D4FF', fontWeight: 700, flexShrink: 0 }}>
