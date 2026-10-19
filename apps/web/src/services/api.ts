@@ -212,6 +212,7 @@ export interface LabExamInfo {
   is_closed?: boolean;
   protected_regions?: string[];
   learning_aids_enabled?: boolean;
+  classroom_id?: string;
 }
 
 export interface LabExamSession {
@@ -309,6 +310,7 @@ export interface ExamViolationReport {
   student_name: string;
   student_email?: string;
   student_id?: string;
+  classroom_id?: string;
   violation_count: number;
   flagged?: boolean;
   alert_type: 'WARNING' | 'RED_ALERT';
@@ -530,11 +532,19 @@ export const ClassroomService = {
       }
     ),
 
-  getExamViolations: (examId: string) =>
-    request<ExamViolationReport[]>(`/classrooms/exams/${examId}/violations`),
+  getExamViolations: (examId: string, classroomId?: string) =>
+    request<ExamViolationReport[]>(
+      classroomId
+        ? `/classrooms/exams/${examId}/violations?classroom_id=${encodeURIComponent(classroomId)}`
+        : `/classrooms/exams/${examId}/violations`
+    ),
 
-  getRecentViolations: () =>
-    request<ExamViolationReport[]>('/classrooms/violations/recent'),
+  getRecentViolations: (classroomId?: string) =>
+    request<ExamViolationReport[]>(
+      classroomId
+        ? `/classrooms/violations/recent?classroom_id=${encodeURIComponent(classroomId)}`
+        : '/classrooms/violations/recent'
+    ),
 
   getExamDatasetPreview: (examId: string) =>
     request<{ file_name: string; columns: string[]; rows: Record<string, any>[]; row_count: number }>(

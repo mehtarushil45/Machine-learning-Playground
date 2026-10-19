@@ -180,6 +180,7 @@ class LabExamInfo(BaseModel):
     open_time: Optional[datetime] = Field(None, description="Exam window open time")
     close_time: Optional[datetime] = Field(None, description="Exam window close deadline")
     is_closed: bool = Field(False, description="Whether exam is past close time")
+    classroom_id: Optional[str] = Field(None, description="Associated classroom ID")
     protected_regions: List[str] = Field(default_factory=list, description="Protected starter code snippets")
 
 
@@ -259,6 +260,7 @@ class ExamViolationReport(BaseModel):
     alert_type: str = "WARNING"  # "WARNING" or "RED_ALERT"
     reason: str = "Tab switch or window blur detected"
     timestamp: Optional[str] = None
+    classroom_id: Optional[str] = None
 
 
 class ExamViolationResponse(BaseModel):

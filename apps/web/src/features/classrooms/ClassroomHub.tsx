@@ -212,13 +212,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>('');
   const [submissions, setSubmissions] = useState<SubmissionDashboardItem[]>([]);
   const [isLoadingInstructor, setIsLoadingInstructor] = useState(false);
-  const [proctorAlerts, setProctorAlerts] = useState<ExamViolationReport[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('ml_proctor_violations') || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [proctorAlerts, setProctorAlerts] = useState<ExamViolationReport[]>([]);
 
   // Data Preview State (Modal & Pagination)
   const [showDataPreview, setShowDataPreview] = useState(false);
@@ -368,9 +362,11 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const seb = useSafeExamBrowser(
     examLocked,
     (count) => {
+      const currentCid = activeExam?.classroom_id || activeClassroom?.id || selectedClassroomId || '';
       const isRedAlert = count >= 3;
       const violationPayload: ExamViolationReport = {
         exam_id: selectedExamId || 'active-exam',
+        classroom_id: currentCid || undefined,
         student_name: studentDisplayName,
         student_email: studentEmail,
         student_id: authCtx?.user?.id,
@@ -388,9 +384,10 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
       // 2. Persist locally & broadcast live proctor alert to instructors
       try {
-        const stored = JSON.parse(localStorage.getItem('ml_proctor_violations') || '[]');
+        const storageKey = currentCid ? `ml_proctor_violations_${currentCid}` : 'ml_proctor_violations';
+        const stored = JSON.parse(localStorage.getItem(storageKey) || '[]');
         stored.unshift(violationPayload);
-        localStorage.setItem('ml_proctor_violations', JSON.stringify(stored.slice(0, 50)));
+        localStorage.setItem(storageKey, JSON.stringify(stored.slice(0, 50)));
       } catch {}
 
       window.dispatchEvent(new CustomEvent('ml-exam-proctor-alert', { detail: violationPayload }));
@@ -421,6 +418,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     const handleProctorEvent = (e: Event) => {
       const custom = e as CustomEvent<ExamViolationReport>;
       if (custom.detail) {
+        const currentCid = activeClassroom?.id || selectedClassroomId;
+        // Strictly ignore violations belonging to a different classroom
+        if (custom.detail.classroom_id && currentCid && custom.detail.classroom_id !== currentCid) {
+          return;
+        }
+
         setProctorAlerts((prev) => [custom.detail, ...prev.filter(p => p.timestamp !== custom.detail.timestamp)].slice(0, 50));
         if (viewMode === 'instructor') {
           if (custom.detail.alert_type === 'RED_ALERT' || custom.detail.flagged) {
@@ -442,16 +445,27 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
     window.addEventListener('ml-exam-proctor-alert', handleProctorEvent);
     return () => window.removeEventListener('ml-exam-proctor-alert', handleProctorEvent);
-  }, [viewMode, onShowToast]);
+  }, [viewMode, onShowToast, activeClassroom?.id, selectedClassroomId]);
 
-  // Sync recent violations from backend when entering instructor mode
+  // Sync recent violations from backend when entering instructor mode or switching classrooms
   useEffect(() => {
+    const targetCid = activeClassroom?.id || selectedClassroomId;
     if (viewMode === 'instructor') {
-      ClassroomService.getRecentViolations?.()
+      const storageKey = targetCid ? `ml_proctor_violations_${targetCid}` : 'ml_proctor_violations';
+      try {
+        const localAlerts = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        if (Array.isArray(localAlerts)) {
+          setProctorAlerts(localAlerts);
+        }
+      } catch {}
+
+      ClassroomService.getRecentViolations?.(targetCid || undefined)
         .then((remoteAlerts) => {
-          if (Array.isArray(remoteAlerts) && remoteAlerts.length > 0) {
+          if (Array.isArray(remoteAlerts)) {
             setProctorAlerts((prev) => {
-              const combined = [...remoteAlerts, ...prev];
+              const combined = [...remoteAlerts, ...prev].filter(
+                (a) => !a.classroom_id || !targetCid || a.classroom_id === targetCid
+              );
               const map = new Map();
               for (const item of combined) {
                 const key = `${item.student_name}_${item.timestamp}_${item.violation_count}`;
@@ -463,7 +477,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
         })
         .catch(() => {});
     }
-  }, [viewMode]);
+  }, [viewMode, activeClassroom?.id, selectedClassroomId]);
 
   // Notify parent (App) whenever lockdown state changes so sidebar can be hidden
   useEffect(() => {
@@ -1737,7 +1751,11 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     </div>
                     <button
                       onClick={() => {
+                        const targetCid = activeClassroom?.id || selectedClassroomId;
                         setProctorAlerts([]);
+                        if (targetCid) {
+                          localStorage.removeItem(`ml_proctor_violations_${targetCid}`);
+                        }
                         localStorage.removeItem('ml_proctor_violations');
                       }}
                       className="text-[11px] text-[#9E93B8] hover:text-white transition-colors"

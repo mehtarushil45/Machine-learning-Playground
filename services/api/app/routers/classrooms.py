@@ -426,6 +426,7 @@ def build_exam_from_assignment(asgn: Assignment, rubric_dict: Optional[Dict[str,
         "open_time": rubric.get("start_date"),
         "close_time": rubric.get("end_date"),
         "is_closed": False,
+        "classroom_id": str(asgn.classroom_id) if getattr(asgn, "classroom_id", None) else None,
     }
     return exam_dict
 
@@ -818,8 +819,19 @@ async def report_exam_violation(
         student_name = current_user.full_name or student_name or current_user.email.split("@")[0]
         student_email = current_user.email or student_email
 
+    # Resolve classroom ID for strict classroom isolation
+    cid = payload.classroom_id
+    if not cid and request is not None and hasattr(request, "headers"):
+        cid = request.headers.get("x-classroom-id")
+    if not cid:
+        cid = CURATED_LAB_EXAMS.get(exam_id, {}).get("classroom_id")
+    if not cid and exam_id.startswith("exam-"):
+        clean = exam_id.replace("exam-", "").strip()
+        cid = CURATED_LAB_EXAMS.get(clean, {}).get("classroom_id")
+
     entry = {
         "exam_id": exam_id,
+        "classroom_id": cid,
         "student_id": student_id,
         "student_name": student_name,
         "student_email": student_email,
@@ -850,19 +862,28 @@ async def report_exam_violation(
 
 
 @router.get("/exams/{exam_id}/violations", response_model=List[ExamViolationReport], summary="Get proctor violation events for exam")
-async def get_exam_violations(exam_id: str) -> List[ExamViolationReport]:
+async def get_exam_violations(
+    exam_id: str,
+    classroom_id: Optional[str] = Query(None, description="Filter violations to specific classroom"),
+) -> List[ExamViolationReport]:
     """Retrieve all proctor violations for an exam so instructors can monitor integrity in real time."""
     logs = _PROCTOR_VIOLATION_LOGS.get(exam_id, [])
+    if classroom_id:
+        logs = [item for item in logs if item.get("classroom_id") == classroom_id]
     return [ExamViolationReport(**item) for item in reversed(logs)]
 
 
 @router.get("/violations/recent", response_model=List[ExamViolationReport], summary="Get all recent proctor violations across exams")
-async def get_recent_violations() -> List[ExamViolationReport]:
+async def get_recent_violations(
+    classroom_id: Optional[str] = Query(None, description="Filter violations to specific classroom"),
+) -> List[ExamViolationReport]:
     """Global proctor violations feed for instructor dashboard."""
     all_violations: List[Dict[str, Any]] = []
     for logs in _PROCTOR_VIOLATION_LOGS.values():
         all_violations.extend(logs)
     all_violations.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+    if classroom_id:
+        all_violations = [v for v in all_violations if v.get("classroom_id") == classroom_id]
     return [ExamViolationReport(**item) for item in all_violations[:100]]
 
 

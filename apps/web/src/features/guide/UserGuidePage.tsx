@@ -940,17 +940,17 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
         {/* Left Sticky Navigation Sidebar */}
         <aside
           style={{
-            width: 250,
+            width: 220,
             flexShrink: 0,
             borderRight: '1px solid ' + TOKENS.border,
-            padding: '18px 12px',
+            padding: '16px 8px',
             position: 'sticky',
             top: 59,
             height: 'calc(100vh - 59px)',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: 3,
+            gap: 2,
             background: 'rgba(5, 11, 20, 0.6)',
           }}
         >
@@ -1225,7 +1225,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               Machine learning is simply finding patterns in historical examples so a computer can make predictions on new data. Here are the core concepts you need to know:
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
               {/* Concept 1 */}
               <div style={{ padding: '18px', borderRadius: 10, background: TOKENS.bgElevated, border: '1px solid ' + TOKENS.border }}>
                 <div style={{ fontWeight: 700, fontSize: 14.5, color: TOKENS.primary, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1459,7 +1459,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
 
             {/* Classification Algorithms */}
             {algoTab === 'classification' && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
                 <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
                   <div style={{ fontWeight: 700, color: TOKENS.primary, fontSize: 14 }}>Logistic Regression</div>
                   <div style={{ fontSize: 12.5, color: TOKENS.textSecondary, marginTop: 4 }}>
@@ -1544,7 +1544,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
 
             {/* Regression Algorithms */}
             {algoTab === 'regression' && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
                 <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
                   <div style={{ fontWeight: 700, color: TOKENS.accentEmerald, fontSize: 14 }}>Linear Regression</div>
                   <div style={{ fontSize: 12.5, color: TOKENS.textSecondary, marginTop: 4 }}>
@@ -1780,7 +1780,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
             <h3 style={{ fontSize: 16, fontWeight: 700, color: TOKENS.primary, margin: '0 0 12px' }}>
               Classification Scores (When Predicting Categories)
             </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginBottom: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, marginBottom: 24 }}>
               <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
                 <div style={{ fontWeight: 700, color: TOKENS.primary, fontSize: 14 }}>Accuracy</div>
                 <div style={{ fontSize: 12.5, color: TOKENS.textMuted, marginTop: 4 }}>
@@ -1814,7 +1814,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
             <h3 style={{ fontSize: 16, fontWeight: 700, color: TOKENS.accentEmerald, margin: '0 0 12px' }}>
               Regression Scores (When Predicting Numbers)
             </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
               <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
                 <div style={{ fontWeight: 700, color: TOKENS.accentEmerald, fontSize: 14 }}>MAE (Mean Absolute Error)</div>
                 <div style={{ fontSize: 12.5, color: TOKENS.textMuted, marginTop: 4 }}>
