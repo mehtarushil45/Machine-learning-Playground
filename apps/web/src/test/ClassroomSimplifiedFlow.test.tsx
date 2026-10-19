@@ -219,7 +219,7 @@ describe('Simplified Classroom & Assignment Flow', () => {
 
       // Verify Problem Type and Dataset
       expect(screen.getByText(/Problem Type/i)).toBeInTheDocument();
-      expect(screen.getByText(/Dataset \/ Pitfall Story/i)).toBeInTheDocument();
+      expect(screen.getByText(/Uploaded Dataset/i)).toBeInTheDocument();
 
       // Verify Advanced Evaluation & Rubric Settings accordion exists
       expect(screen.getByText(/Advanced Evaluation & Rubric Settings/i)).toBeInTheDocument();

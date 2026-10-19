@@ -302,7 +302,13 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [newAssignmentStartDate, setNewAssignmentStartDate] = useState('');
   const [newAssignmentEndDate, setNewAssignmentEndDate] = useState('');
   const [newAssignmentType, setNewAssignmentType] = useState('classification');
-  const [newAssignmentDataset, setNewAssignmentDataset] = useState(activeDatasetId || 'telecom_churn.csv');
+  const [newAssignmentDataset, setNewAssignmentDataset] = useState(activeDatasetId || '');
+
+  useEffect(() => {
+    if (activeDatasetId) {
+      setNewAssignmentDataset(activeDatasetId);
+    }
+  }, [activeDatasetId]);
 
   // Helper: Format ISO date string for display
   const formatExamDate = useCallback((dateStr?: string | null): string => {
@@ -374,7 +380,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             const initial = data.find((e) => e.id === selectedExamId) || data[0];
             setActiveExam(initial);
             setSelectedExamId(initial.id);
-            setCode(initial.starter_code);
+            setCode('');
             setLearningAidsAllowed(initial.learning_aids_enabled ?? true);
 
             // Fetch active session state for this exam
@@ -535,7 +541,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     if (!target) return;
     setSelectedExamId(examId);
     setActiveExam(target);
-    setCode(target.starter_code);
+    setCode('');
     setServerPreview(null);
     setDeployment(null);
     setTestInputs({});
@@ -543,7 +549,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setPredictionResult(null);
     setRegisteredModelId(null);
     setSubmissionReceipt(null);
-    setOutputLines([`[System] Switched to ${target.title}. Starter pipeline loaded.`]);
+    setOutputLines([`[System] Switched to ${target.title}.`]);
     onShowToast?.('Exam Switched', `Switched to ${target.title}`, 'info');
     setLearningAidsAllowed(target.learning_aids_enabled ?? true);
 
@@ -615,7 +621,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       const exec = await CodeExecutionService.execute({
         code,
         filename: 'lab_exam.py',
-        dataset_id: activeExam?.dataset_id || activeDatasetId || 'telecom_churn.csv',
+        dataset_id: activeExam?.dataset_id || activeDatasetId || '',
         timeout: 90,
       });
 
@@ -861,13 +867,11 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       setDeployment(null);
       setEvaluationResult(null);
       setPredictionResult(null);
-      if (activeExam) {
-        setCode(activeExam.starter_code);
-      }
+      setCode('');
       setOutputLines((prev) => [
         ...prev,
         '─────────────────────────────────────────────────────────────',
-        `[Session Reset] Lab exam unlocked. Starter pipeline restored. Ready for new training & deployment.`,
+        `[Session Reset] Lab exam unlocked. Ready for implementation.`,
       ]);
       onShowToast?.('Lab Exam Unlocked', 'Session reset to active. You can now edit code, run, deploy, and evaluate.', 'success');
     } catch (err: any) {
@@ -1192,7 +1196,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       if (finalExam) {
                         setActiveExam(finalExam);
                         setSelectedExamId(finalExam.id);
-                        setCode(finalExam.starter_code);
+                        setCode('');
                         setServerPreview(null);
                         setLearningAidsAllowed(finalExam.learning_aids_enabled ?? true);
                         setDeployment(null);
@@ -1201,7 +1205,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         setEvaluationResult(null);
                         setPredictionResult(null);
                         setSubmissionReceipt(null);
-                        setOutputLines([`[System] Workspace opened for ${finalExam.title}. Starter code loaded.`]);
+                        setOutputLines([`[System] Workspace opened for ${finalExam.title}.`]);
                         try {
                           const sess = await ClassroomService.getSession(finalExam.id);
                           if (sess?.code_draft) setCode(sess.code_draft);
@@ -1254,8 +1258,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     <span>Assigned Dataset</span>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-xs">
-                    <span className="font-mono text-[#F5F1EC]">{selectedClassroomAssignment.dataset_id || activeDatasetId || 'telecom_churn.csv'}</span>
-                    <span className="text-[11px] text-[#9E93B8]">Pre-loaded in workspace</span>
+                    <span className="font-mono text-[#F5F1EC]">{selectedClassroomAssignment.dataset_id || activeDatasetId || 'Active Uploaded Dataset'}</span>
+                    <span className="text-[11px] text-[#9E93B8]">Uploaded in workspace</span>
                   </div>
                 </div>
 
@@ -1729,30 +1733,19 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Dataset / Pitfall Story</label>
-                  <select
-                    value={newAssignmentDataset}
-                    onChange={(e) => setNewAssignmentDataset(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[#0F0B1E] border border-[rgba(107,92,166,0.3)] text-[#F5F1EC] focus:outline-none focus:border-[#00D4FF]"
-                  >
-                    {projectDataset?.fileName && (
-                      <option value={projectDataset.fileName}>Active Uploaded Dataset: {projectDataset.fileName}</option>
-                    )}
-                    <option value="telecom_churn.csv">Ready-Made: Telecom Customer Churn</option>
-                    <option value="housing_prices.csv">Ready-Made: California Housing Valuation</option>
-                    <option value="credit_risk.csv">Ready-Made: Credit Risk & Default Assessment</option>
-                    <option value="iris_species.csv">Ready-Made: Iris Flower Taxonomy Benchmark</option>
-                    <option value="insurance_charges.csv">Ready-Made: Healthcare Insurance Charges</option>
-                    <option value="story_churn_leakage.csv">Story: Churn with Target Leakage (Leakage Pitfall)</option>
-                    <option value="story_credit_imbalance.csv">Story: Credit Default (95/5 Class Imbalance)</option>
-                    <option value="story_housing_multicollinearity.csv">Story: Housing (Multicollinearity Pitfall)</option>
-                    <option value="story_hospital_simpsons_paradox.csv">Story: Hospital (Simpson's Paradox Pitfall)</option>
-                    <option value="story_ecommerce_identifier.csv">Story: E-Commerce (Identifier Leaking Order)</option>
-                    <option value="story_medical_mnar.csv">Story: Medical (MNAR Missingness Pattern)</option>
-                    {stories && stories.map((s) => (
-                      <option key={s.id} value={s.filename}>{s.title} ({s.pitfall_name || s.pitfall_type || s.pitfall || 'Pitfall'})</option>
-                    ))}
-                  </select>
+                  <label className="text-[11px] font-semibold text-[#9E93B8] block mb-1">Uploaded Dataset</label>
+                  {projectDataset?.fileName ? (
+                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[#0F0B1E] border border-[rgba(0,212,255,0.3)] text-[#F5F1EC] text-xs">
+                      <Database className="w-4 h-4 text-[#00D4FF]" />
+                      <span className="font-semibold text-[#00D4FF]">Active Uploaded File:</span>
+                      <span className="font-mono text-white">{projectDataset.fileName}</span>
+                    </div>
+                  ) : (
+                    <div className="px-3 py-2.5 rounded-xl bg-[#0F0B1E] border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                      <span>No dataset uploaded yet. Please upload a CSV file in Workspace first.</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2255,6 +2248,15 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
             />
           )}
 
+          {!activeDatasetId && (
+            <div className="mb-4 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span><strong>No dataset uploaded:</strong> This exam requires your uploaded CSV file. Please upload a dataset in Workspace first so your code and models run on your data.</span>
+              </div>
+            </div>
+          )}
+
           {/* Main Lab Workspace: Left (Editor + Terminal) & Right (Deployment + Grading) */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
             {/* Left 7 Columns: Manual Code Studio & Terminal Output */}
@@ -2335,12 +2337,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={() => {
-                        if (activeExam) setCode(activeExam.starter_code);
-                        onShowToast?.('Reset Code', 'Restored starter template.', 'info');
+                        setCode('');
+                        onShowToast?.('Reset Code', 'Editor cleared.', 'info');
                       }}
                       disabled={Boolean(submissionReceipt)}
                       className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-[#9E93B8] hover:text-white hover:bg-[#241B42] transition-colors flex items-center gap-1"
-                      title="Reset to original exam starter code"
+                      title="Clear code editor"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                       <span>Reset</span>
@@ -2937,7 +2939,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         <div className="flex items-center gap-2">
                           <h3 className="text-sm font-bold text-[#F5F1EC]">Dataset Preview</h3>
                           <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#1C1534] text-[#00D4FF] border border-[rgba(107,92,166,0.3)]">
-                            {activePreviewData?.fileName || 'dataset.csv'}
+                            {activePreviewData?.fileName || activeDatasetId || 'Active Dataset'}
                           </span>
                         </div>
                         <p className="text-[11px] text-[#9E93B8]">

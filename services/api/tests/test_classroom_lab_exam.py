@@ -48,14 +48,25 @@ def dispose_db():
 async def test_university_lab_exam_singleton_lifecycle():
     """Verify entire university lab exam workflow with in-place deployment guarantee."""
     
-    # 1. Verify Lab Exams Listing
-    exams = await list_lab_exams()
+    # 1. Verify Lab Exams Listing for uploaded dataset
+    uploads_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
+    os.makedirs(uploads_dir, exist_ok=True)
+    test_csv = os.path.join(uploads_dir, "test_churn_exam.csv")
+    df_test = pd.DataFrame({
+        'tenure': np.random.randint(1, 60, size=50),
+        'monthly_charges': np.random.uniform(20.0, 100.0, size=50),
+        'total_charges': np.random.uniform(100.0, 5000.0, size=50),
+        'churn': np.random.choice([0, 1], size=50),
+    })
+    df_test.to_csv(test_csv, index=False)
+
+    exams = await list_lab_exams(dataset_id="test_churn_exam.csv")
     assert len(exams) >= 1
-    exam_id = "lab-exam-01"
-    exam = await get_lab_exam(exam_id)
+    exam_id = exams[0].id
+    exam = await get_lab_exam(exam_id, dataset_id="test_churn_exam.csv")
     assert exam.id == exam_id
     assert "churn" in exam.target_column
-    assert exam.starter_code is not None
+    assert exam.starter_code == ""
 
     # 2. Simulate Student Writing Code Manually
     # Create dataset in a temporary location or use existing

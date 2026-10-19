@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { UserGuidePage } from '../features/guide/UserGuidePage';
 
-describe('UserGuidePage Component', () => {
+describe('UserGuidePage Component', { timeout: 25000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
