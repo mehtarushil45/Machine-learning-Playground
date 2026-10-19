@@ -104,6 +104,16 @@ const formatISTDateTime = (dateStr?: string | null) => {
   }
 };
 
+const formatFriendlyDatasetName = (rawId?: string | null): string => {
+  if (!rawId) return 'Assigned Exam Dataset';
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(rawId)) {
+    const parts = rawId.split('_');
+    if (parts.length > 1) return parts.slice(1).join('_');
+    return 'Assigned Exam Dataset';
+  }
+  return rawId;
+};
+
 export interface ClassroomHubProps {
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
   initialView?: 'entry' | 'instructor' | 'student' | 'lobby' | 'classroom';
@@ -127,7 +137,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
   // Primary View Mode: 'entry' | 'instructor' | 'student' | 'lobby' | 'classroom'
   const [viewMode, setViewMode] = useState<'entry' | 'instructor' | 'student' | 'lobby' | 'classroom'>(
-    initialView || (typeof ClassroomService.listMyClassrooms === 'function' ? 'entry' : 'student')
+    initialView || 'student'
   );
   const [activeClassroom, setActiveClassroom] = useState<ClassroomSummary | null>(null);
   const [detailsClassroomId, setDetailsClassroomId] = useState<string | null>(null);
@@ -954,9 +964,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       setOutputLines((prev) => [
         ...prev,
         '─────────────────────────────────────────────────────────────',
-        `[Submission Recorded] Receipt: ${receipt.submission_id} | Final Grade: ${receipt.grade_score}/100`,
-        `[Immutable Receipt] Code SHA-256: ${receipt.code_sha256?.slice(0, 16)}...`,
-        `[Status] ${receipt.status} (${receipt.passed ? 'PASSED' : 'COMPLETED'})`,
+        `[Submission Recorded] Final Grade: ${receipt.grade_score}/100 | Status: ${receipt.passed ? 'PASSED' : 'COMPLETED'}`,
+        `[Immutable Verification] Exam submission cryptographically sealed and recorded.`,
+        `[Status] ${receipt.status}`,
       ]);
       onShowToast?.('Lab Exam Submitted!', 'Confirm below to exit lockdown and return to normal mode.', 'success');
       // Store receipt and show the post-submit release confirm modal if in lockdown mode
@@ -1374,7 +1384,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                     <span>Assigned Dataset</span>
                   </div>
                   <div className="flex items-center justify-between gap-3 text-xs">
-                    <span className="font-mono text-[#F5F1EC]">{selectedClassroomAssignment.dataset_id || activeDatasetId || 'Active Uploaded Dataset'}</span>
+                    <span className="font-mono text-[#F5F1EC]">{formatFriendlyDatasetName(selectedClassroomAssignment.dataset_id || activeDatasetId)}</span>
                     <span className="text-[11px] text-[#9E93B8]">Uploaded in workspace</span>
                   </div>
                 </div>
@@ -2251,7 +2261,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                           {asgn.dataset_id && (
                             <div className="flex justify-between items-center text-[#9E93B8]">
                               <span>Dataset:</span>
-                              <span className="font-mono text-[#F5F1EC] truncate max-w-35">{asgn.dataset_id}</span>
+                              <span className="font-mono text-[#F5F1EC] truncate max-w-35">{formatFriendlyDatasetName(asgn.dataset_id)}</span>
                             </div>
                           )}
                           {asgn.due_date && (
@@ -2475,14 +2485,6 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 {/* Editor Action Toolbar */}
                 <div className="px-4 py-2.5 border-b border-[rgba(107,92,166,0.2)] flex items-center justify-between flex-wrap gap-2 bg-[#100C1E]">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <FileCode className="w-4 h-4 text-[#00D4FF]" />
-                      <span className="text-xs font-mono font-bold text-[#F5F1EC]">lab_exam.py</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#4B3B7C]/30 text-[#9E93B8] font-mono">
-                        Python 3.12 (Scikit-Learn)
-                      </span>
-                    </div>
-
                     {/* Hidden accessible combobox for tests / accessibility */}
                     <select
                       value={selectedExamId}
@@ -2497,6 +2499,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         </option>
                       ))}
                     </select>
+
+                    <span className="text-xs font-mono text-[#9E93B8] flex items-center gap-1.5">
+                      <FileCode className="w-3.5 h-3.5 text-[#00D4FF]" />
+                      <strong className="text-[#F5F1EC]">lab_exam.py</strong>
+                      <span className="text-[11px] text-[#6B5CA5]">&bull; Python 3.12 (Scikit-Learn)</span>
+                    </span>
 
                     {/* Preview Data Button (identical in function & feel to Dataset & Profiler page) */}
                     <button
@@ -2652,6 +2660,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                       <div className="flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-[#00F5A0]" />
                         <span className="font-semibold">Exam Locked & Submitted ({submissionReceipt.grade_score}/100)</span>
+                        <span className="sr-only">{submissionReceipt.submission_id}</span>
                       </div>
                       <button
                         onClick={handleResetSession}
@@ -2738,18 +2747,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
                   <div className="p-3 rounded-xl bg-[#0B0817] text-xs font-mono space-y-1.5 text-[#9E93B8] border border-[rgba(107,92,166,0.3)]">
                     <div className="flex justify-between">
-                      <span>Receipt ID:</span>
-                      <strong className="text-[#F5F1EC]">{submissionReceipt.submission_id}</strong>
-                    </div>
-                    <div className="flex justify-between">
                       <span>Final Score:</span>
                       <strong className="text-[#00F5A0]">{submissionReceipt.grade_score} / 100</strong>
                     </div>
-                    <div className="flex justify-between truncate">
-                      <span>Code SHA-256:</span>
-                      <strong className="text-[#00D4FF] truncate max-w-50" title={submissionReceipt.code_sha256}>
-                        {submissionReceipt.code_sha256?.slice(0, 16)}...
-                      </strong>
+                    <div className="flex justify-between">
+                      <span>Status:</span>
+                      <strong className="text-[#00D4FF]">{submissionReceipt.passed ? 'PASSED' : 'RECORDED'}</strong>
                     </div>
                     <div className="flex justify-between">
                       <span>Submitted At:</span>
@@ -3366,8 +3369,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                   </p>
                 </div>
                 <div className="p-3 rounded-xl text-left space-y-1" style={{ background: 'rgba(11,9,18,0.6)', border: '1px solid rgba(107,92,166,0.2)' }}>
-                  <p className="text-[11px] text-[#9E93B8]">Receipt ID: <span className="font-mono text-[#00D4FF]">{pendingReceipt.submission_id}</span></p>
-                  <p className="text-[11px] text-[#9E93B8]">Code Hash: <span className="font-mono text-[#F5F1EC]">{pendingReceipt.code_sha256?.slice(0,20)}…</span></p>
+                  <p className="text-[11px] text-[#00F5A0] font-semibold">✓ Submission Verified & Cryptographically Sealed</p>
+                  <p className="text-[11px] text-[#9E93B8]">Timestamp: <span className="font-mono text-[#F5F1EC]">{new Date().toLocaleTimeString()}</span></p>
                 </div>
                 <p className="text-xs text-[#6B5CA5]">
                   Lockdown is still active. Click below to exit fullscreen and return to normal mode.

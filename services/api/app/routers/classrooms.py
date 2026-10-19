@@ -1252,21 +1252,22 @@ async def predict_lab_slot(
             detail=f"Lab serving slot is {status_text}. Please deploy or start the serving slot first.",
         )
 
-    target_model_id = dep_info.get("model_id")
+    target_model_id = str(dep_info.get("model_id") or "")
     if not target_model_id:
         raise HTTPException(status_code=404, detail="No model associated with this lab deployment.")
 
-    raw_inputs = payload.get("inputs") or {}
-    feature_cols = dep_info.get("feature_columns", [])
-    sample_inputs = dep_info.get("sample_inputs", {})
-    lower_inputs = {str(k).lower().strip(): v for k, v in raw_inputs.items()}
-    lower_sample = {str(k).lower().strip(): v for k, v in sample_inputs.items()}
+    raw_inputs: Dict[str, Any] = payload.get("inputs") if isinstance(payload.get("inputs"), dict) else {}
+    feature_cols: List[Any] = dep_info.get("feature_columns") if isinstance(dep_info.get("feature_columns"), list) else []
+    sample_inputs: Dict[str, Any] = dep_info.get("sample_inputs") if isinstance(dep_info.get("sample_inputs"), dict) else {}
+    lower_inputs = {k.lower().strip(): v for k, v in raw_inputs.items()}
+    lower_sample = {k.lower().strip(): v for k, v in sample_inputs.items()}
 
     sanitized_inputs: Dict[str, Any] = {}
-    input_schema = dep_info.get("input_schema") or {}
+    input_schema: Dict[str, Any] = dep_info.get("input_schema") if isinstance(dep_info.get("input_schema"), dict) else {}
 
     for f in feature_cols:
-        f_lower = str(f).lower().strip()
+        f_str = str(f)
+        f_lower = f_str.lower().strip()
         val = None
         if f in raw_inputs:
             val = raw_inputs[f]
@@ -1277,17 +1278,22 @@ async def predict_lab_slot(
         elif f_lower in lower_sample:
             val = lower_sample[f_lower]
 
-        f_type = input_schema.get(f, {}).get("type", "numeric") if isinstance(input_schema, dict) else "numeric"
+        f_type = "numeric"
+        if isinstance(input_schema, dict):
+            field_meta = input_schema.get(f)
+            if isinstance(field_meta, dict):
+                f_type = str(field_meta.get("type", "numeric"))
+
         if val is None or (isinstance(val, str) and val.strip() == ""):
             val = sample_inputs.get(f, 0.0 if f_type == "numeric" else "sample")
 
         if f_type == "numeric":
             try:
-                sanitized_inputs[f] = float(val)
+                sanitized_inputs[f_str] = float(cast(Any, val))
             except (ValueError, TypeError):
-                sanitized_inputs[f] = 0.0
+                sanitized_inputs[f_str] = 0.0
         else:
-            sanitized_inputs[f] = str(val)
+            sanitized_inputs[f_str] = str(val)
 
     import time
     from app.ml.inference_engine import predict
@@ -1352,8 +1358,8 @@ async def get_lab_deployment(
     session_key = f"{student_id}:{exam_id}"
     session_data = _STUDENT_LAB_SESSIONS.get(session_key, {})
     dep_info = session_data.get("deployment")
+    clean_id = exam_id.replace("exam-", "")
     if not dep_info:
-        clean_id = exam_id.replace("exam-", "")
         for alt_key in (f"{student_id}:{clean_id}", f"guest-student:{exam_id}", f"guest-student:{clean_id}"):
             if alt_key in _STUDENT_LAB_SESSIONS and _STUDENT_LAB_SESSIONS[alt_key].get("deployment"):
                 dep_info = _STUDENT_LAB_SESSIONS[alt_key].get("deployment")
@@ -1665,8 +1671,6 @@ async def evaluate_lab_model(
                         pred_val = p_res.get("prediction")
                         if pred_val is not None and str(pred_val).strip() == str(c["ground_truth"]).strip():
                             correct_preds += 1
-                    except Exception:
-                        pass
                     except Exception:
                         pass
 

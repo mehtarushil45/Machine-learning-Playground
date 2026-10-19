@@ -299,21 +299,6 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
                         )}
 
                         <div className="flex items-center gap-1.5 ml-auto">
-                          {c.join_code && (
-                            <button
-                              onClick={() =>
-                                setProjectorData({
-                                  code: c.join_code!,
-                                  name: c.name,
-                                  courseId: c.course_id,
-                                })
-                              }
-                              title="Projector View"
-                              className="p-1.5 rounded-lg bg-[#1C1534] hover:bg-[#241B42] text-[#00D4FF] transition-colors"
-                            >
-                              <Presentation className="w-3.5 h-3.5" />
-                            </button>
-                          )}
 
                           <button
                             onClick={() => onOpenClassroom(c, 'owner')}
@@ -459,15 +444,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
         />
       )}
 
-      {/* Fullscreen Projector View */}
-      {projectorData && (
-        <ProjectorViewModal
-          joinCode={projectorData.code}
-          classroomName={projectorData.name}
-          courseId={projectorData.courseId}
-          onClose={() => setProjectorData(null)}
-        />
-      )}
+
     </div>
   );
 };

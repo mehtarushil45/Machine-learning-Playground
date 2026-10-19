@@ -893,30 +893,8 @@ function AppContent() {
               <Sparkles className="w-4 h-4" style={{ color: isCopilotOpen ? BB.gold : 'inherit' }} />
             </button>
 
-            {/* Auth status: User Avatar Badge or Sign In Button */}
-            {isAuthenticated && user ? (
-              <div
-                title={user.email || 'User Profile'}
-                style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, #3B82F6, #8B5CF6)',
-                  color: '#FFFFFF',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 700,
-                  fontSize: 12,
-                  boxShadow: '0 2px 8px rgba(59, 130, 246, 0.3)',
-                  border: '1.5px solid rgba(255, 255, 255, 0.25)',
-                  cursor: 'default',
-                  flexShrink: 0,
-                }}
-              >
-                {(user.full_name || user.email || 'U')[0].toUpperCase()}
-              </div>
-            ) : (
+            {/* Auth status: Sign In Button if not authenticated (Avatar kept exclusively on bottom-left sidebar) */}
+            {!isAuthenticated && (
               <button
                 type="button"
                 onClick={() => handleNavigate('login')}

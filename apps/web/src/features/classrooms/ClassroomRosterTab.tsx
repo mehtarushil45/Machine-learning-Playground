@@ -348,7 +348,6 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
                   >
                     <td className="py-3 px-4 font-medium">
                       <div className="font-bold text-[#F5F1EC]">{m.full_name}</div>
-                      <div className="text-[10px] text-[#7C6BAE] font-mono">{m.user_id}</div>
                     </td>
                     <td className="py-3 px-4 font-mono font-semibold text-[#00D4FF]">
                       {m.enrollment_number || '—'}

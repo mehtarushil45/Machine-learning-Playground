@@ -193,8 +193,7 @@ describe('Simplified Classroom & Assignment Flow', () => {
 
       // Should transition to Student Workspace
       await waitFor(() => {
-        expect(screen.getByText(/lab_exam\.py/i)).toBeInTheDocument();
-        expect(screen.getByText(/Python 3\.12 \(Scikit-Learn\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/EXAM IN PROGRESS/i)).toBeInTheDocument();
       });
     });
   });

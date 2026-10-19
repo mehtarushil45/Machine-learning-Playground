@@ -165,16 +165,6 @@ export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
                 <span>{copiedLink ? 'Link Copied!' : 'Copy Invite Link'}</span>
               </button>
 
-              <button
-                onClick={() => {
-                  onClose();
-                  onOpenProjector(createdResult.join_code, createdResult.name, createdResult.course_id);
-                }}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl bg-linear-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-bold text-[#0B0912] shadow transition-all hover:opacity-90"
-              >
-                <Presentation className="w-4 h-4" />
-                <span>Open Projector View</span>
-              </button>
             </div>
 
             <div className="pt-4 border-t border-[rgba(107,92,166,0.2)]">
