@@ -362,7 +362,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const seb = useSafeExamBrowser(
     examLocked,
     (count) => {
-      const currentCid = activeExam?.classroom_id || activeClassroom?.id || selectedClassroomId || '';
+      const currentCid =
+        activeExam?.classroom_id ||
+        exams.find(x => x.id === selectedExamId)?.classroom_id ||
+        activeClassroom?.id ||
+        selectedClassroomId ||
+        '';
       const isRedAlert = count >= 3;
       const violationPayload: ExamViolationReport = {
         exam_id: selectedExamId || 'active-exam',
@@ -419,8 +424,8 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
       const custom = e as CustomEvent<ExamViolationReport>;
       if (custom.detail) {
         const currentCid = activeClassroom?.id || selectedClassroomId;
-        // Strictly ignore violations belonging to a different classroom
-        if (custom.detail.classroom_id && currentCid && custom.detail.classroom_id !== currentCid) {
+        // Strictly ignore violations that do not belong to this active classroom
+        if (currentCid && custom.detail.classroom_id !== currentCid) {
           return;
         }
 
@@ -451,21 +456,27 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   useEffect(() => {
     const targetCid = activeClassroom?.id || selectedClassroomId;
     if (viewMode === 'instructor') {
-      const storageKey = targetCid ? `ml_proctor_violations_${targetCid}` : 'ml_proctor_violations';
+      if (!targetCid) {
+        setProctorAlerts([]);
+        return;
+      }
+      const storageKey = `ml_proctor_violations_${targetCid}`;
+      let initialAlerts: ExamViolationReport[] = [];
       try {
         const localAlerts = JSON.parse(localStorage.getItem(storageKey) || '[]');
         if (Array.isArray(localAlerts)) {
-          setProctorAlerts(localAlerts);
+          initialAlerts = localAlerts.filter((a: ExamViolationReport) => a.classroom_id === targetCid);
         }
       } catch {}
+      // Reset immediately to the specific classroom's local alerts to avoid cross-contamination
+      setProctorAlerts(initialAlerts);
 
-      ClassroomService.getRecentViolations?.(targetCid || undefined)
+      ClassroomService.getRecentViolations?.(targetCid)
         .then((remoteAlerts) => {
           if (Array.isArray(remoteAlerts)) {
+            const filteredRemote = remoteAlerts.filter((a) => a.classroom_id === targetCid);
             setProctorAlerts((prev) => {
-              const combined = [...remoteAlerts, ...prev].filter(
-                (a) => !a.classroom_id || !targetCid || a.classroom_id === targetCid
-              );
+              const combined = [...filteredRemote, ...prev.filter((a) => a.classroom_id === targetCid)];
               const map = new Map();
               for (const item of combined) {
                 const key = `${item.student_name}_${item.timestamp}_${item.violation_count}`;
