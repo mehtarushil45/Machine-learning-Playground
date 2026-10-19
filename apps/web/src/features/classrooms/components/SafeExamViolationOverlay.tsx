@@ -15,6 +15,7 @@ export interface SafeExamViolationOverlayProps {
   violations: number;
   /** Whether the session was flagged (max violations reached) */
   flagged: boolean;
+  studentName?: string;
 }
 
 interface ViolationEvent {
@@ -26,6 +27,7 @@ interface ViolationEvent {
 export const SafeExamViolationOverlay: React.FC<SafeExamViolationOverlayProps> = ({
   violations,
   flagged,
+  studentName,
 }) => {
   const [events, setEvents] = useState<ViolationEvent[]>([]);
   const prevViolations = React.useRef(0);
@@ -92,8 +94,8 @@ export const SafeExamViolationOverlay: React.FC<SafeExamViolationOverlayProps> =
                   </p>
                   <p className="text-[11px] text-[#9E93B8] mt-0.5 leading-relaxed">
                     {evt.critical
-                      ? 'Your session has been flagged for review. You may continue and submit, but proctors will be notified.'
-                      : 'Tab switch, window blur, or fullscreen exit detected. Further violations will flag your session.'}
+                      ? `Student session flagged for ${studentName || 'user'}. Maximum violations reached. Instructor and proctors notified.`
+                      : `Tab switch or window blur detected for ${studentName || 'student'}. Instructor notified (Violation ${evt.count}/${MAX_VIOLATIONS}).`}
                   </p>
                 </div>
                 {!evt.critical && (
@@ -146,7 +148,7 @@ export const SafeExamViolationOverlay: React.FC<SafeExamViolationOverlayProps> =
           >
             <Shield className="w-4 h-4 text-red-300 shrink-0" />
             <p className="text-xs font-bold text-red-200">
-              SESSION FLAGGED — Proctors will review this session. Submit your exam to complete it.
+              SESSION FLAGGED ({studentName || 'Student'}) — Instructor notified of repeated tab switching. Submit your exam to complete it.
             </p>
           </motion.div>
         )}

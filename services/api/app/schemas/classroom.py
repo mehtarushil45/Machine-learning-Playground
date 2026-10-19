@@ -248,10 +248,31 @@ class LabEvaluateResponse(BaseModel):
     latency_method: str = "Warm-up (2 calls) + Median of 5 serving process calls"
 
 
+class ExamViolationReport(BaseModel):
+    """Real-time security report when a student triggers a tab-switch or window blur during an exam."""
+    exam_id: str
+    student_name: str
+    student_email: Optional[str] = None
+    student_id: Optional[str] = None
+    violation_count: int = 1
+    flagged: bool = False
+    alert_type: str = "WARNING"  # "WARNING" or "RED_ALERT"
+    reason: str = "Tab switch or window blur detected"
+    timestamp: Optional[str] = None
+
+
+class ExamViolationResponse(BaseModel):
+    success: bool
+    message: str
+    violation: ExamViolationReport
+
+
 class LabSubmitRequest(BaseModel):
     """Final submission of student lab exam."""
     code: Optional[str] = None
     deployment_id: Optional[str] = None
+    violations_count: Optional[int] = 0
+    flagged: Optional[bool] = False
 
 
 class LabSubmitResponse(BaseModel):
@@ -267,6 +288,8 @@ class LabSubmitResponse(BaseModel):
     rubric_snapshot: Optional[Any] = None
     reproducibility_verified: bool = False
     guardrail_flags: List[str] = Field(default_factory=list)
+    violations_count: int = 0
+    flagged: bool = False
     message: str
 
 
@@ -324,6 +347,9 @@ class SubmissionDashboardItem(BaseModel):
     model_sha256: Optional[str] = None
     guardrail_flags: List[str] = Field(default_factory=list)
     code_snippet: Optional[str] = None
+    violations_count: int = 0
+    flagged: bool = False
+    security_alerts: List[str] = Field(default_factory=list)
 
 
 class ReproduceAuditResponse(BaseModel):

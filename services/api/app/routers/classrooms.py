@@ -76,6 +76,8 @@ from app.schemas.classroom import (
     CourseCreate,
     CourseResponse,
     ExamLobbyResponse,
+    ExamViolationReport,
+    ExamViolationResponse,
     FeedbackCreate,
     JoinClassroomRequest,
     JoinClassroomResponse,
@@ -109,6 +111,9 @@ from app.schemas.classroom import (
 logger = logging.getLogger("apex_ml.classrooms")
 
 router = APIRouter(prefix="/classrooms", tags=["University Classroom & Lab Exams"])
+
+# Real-time In-Memory Proctor Violation Logs per Exam
+_PROCTOR_VIOLATION_LOGS: Dict[str, List[Dict[str, Any]]] = {}
 
 
 async def get_db():
@@ -794,6 +799,71 @@ async def get_lab_session(
         is_locked=bool(state.get("is_locked", False)),
         submission_receipt=receipt_dict,
     )
+
+
+@router.post("/exams/{exam_id}/violations", response_model=ExamViolationResponse, summary="Record student exam tab-switch or window-blur violation")
+async def report_exam_violation(
+    exam_id: str,
+    payload: ExamViolationReport,
+    request: Request = cast(Request, None),
+    current_user: OptionalCurrentUser = None,
+) -> ExamViolationResponse:
+    """Record student exam proctor violation (tab switch, window blur, or security exit)."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    student_id = _resolve_student_id(request, current_user)
+
+    student_name = payload.student_name
+    student_email = payload.student_email
+    if current_user:
+        student_name = current_user.full_name or student_name or current_user.email.split("@")[0]
+        student_email = current_user.email or student_email
+
+    entry = {
+        "exam_id": exam_id,
+        "student_id": student_id,
+        "student_name": student_name,
+        "student_email": student_email,
+        "violation_count": payload.violation_count,
+        "flagged": payload.flagged or payload.violation_count >= 3,
+        "alert_type": "RED_ALERT" if (payload.flagged or payload.violation_count >= 3) else "WARNING",
+        "reason": payload.reason or "Tab switch or window blur detected",
+        "timestamp": payload.timestamp or now_iso,
+    }
+
+    if exam_id not in _PROCTOR_VIOLATION_LOGS:
+        _PROCTOR_VIOLATION_LOGS[exam_id] = []
+
+    _PROCTOR_VIOLATION_LOGS[exam_id].append(entry)
+    _PROCTOR_VIOLATION_LOGS[exam_id] = _PROCTOR_VIOLATION_LOGS[exam_id][-100:]
+
+    session_key = f"{student_id}:{exam_id}"
+    if session_key in _STUDENT_LAB_SESSIONS:
+        sess = _STUDENT_LAB_SESSIONS[session_key]
+        sess["violations_count"] = payload.violation_count
+        sess["flagged"] = payload.flagged or payload.violation_count >= 3
+
+    return ExamViolationResponse(
+        success=True,
+        message=f"Proctor alert recorded: {student_name} ({entry['alert_type']})",
+        violation=ExamViolationReport(**entry),
+    )
+
+
+@router.get("/exams/{exam_id}/violations", response_model=List[ExamViolationReport], summary="Get proctor violation events for exam")
+async def get_exam_violations(exam_id: str) -> List[ExamViolationReport]:
+    """Retrieve all proctor violations for an exam so instructors can monitor integrity in real time."""
+    logs = _PROCTOR_VIOLATION_LOGS.get(exam_id, [])
+    return [ExamViolationReport(**item) for item in reversed(logs)]
+
+
+@router.get("/violations/recent", response_model=List[ExamViolationReport], summary="Get all recent proctor violations across exams")
+async def get_recent_violations() -> List[ExamViolationReport]:
+    """Global proctor violations feed for instructor dashboard."""
+    all_violations: List[Dict[str, Any]] = []
+    for logs in _PROCTOR_VIOLATION_LOGS.values():
+        all_violations.extend(logs)
+    all_violations.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
+    return [ExamViolationReport(**item) for item in all_violations[:100]]
 
 
 @router.post("/exams/{exam_id}/draft", response_model=StudentDraftResponse, summary="Save code draft server-side (E3)")
@@ -1718,6 +1788,9 @@ async def submit_lab_exam(
         exam.get("target_column", "churn"),
     )
 
+    violations_count = payload.violations_count if payload and payload.violations_count is not None else int(session_data.get("violations_count", 0))
+    is_flagged = bool((payload and payload.flagged) or session_data.get("flagged", False) or violations_count >= 3)
+
     sub_id = f"sub-lab-{uuid.uuid4().hex[:10]}"
     receipt_data = {
         "submission_id": sub_id,
@@ -1726,6 +1799,8 @@ async def submit_lab_exam(
         "submitted_at": now_iso,
         "grade_score": final_score,
         "guardrail_flags": guardrail_flags,
+        "violations_count": violations_count,
+        "flagged": is_flagged,
     }
 
     _STUDENT_LAB_SESSIONS[session_key] = {
@@ -1776,6 +1851,8 @@ async def submit_lab_exam(
         rubric_snapshot=session_data.get("rubric_snapshot"),
         reproducibility_verified=False,
         guardrail_flags=guardrail_flags,
+        violations_count=violations_count,
+        flagged=is_flagged,
         message="Exam submission locked successfully. Immutable cryptographic receipt generated.",
     )
 
@@ -3610,6 +3687,8 @@ async def get_assignment_submissions(
                 model_sha256=meta.get("model_sha256"),
                 guardrail_flags=meta.get("guardrail_flags", []),
                 code_snippet=(sub.code_draft or "")[:150],
+                violations_count=int(meta.get("violations_count", 0)),
+                flagged=bool(meta.get("flagged", False)),
             )
         )
     return items

@@ -45,6 +45,7 @@ import {
   type LabSubmitResponse,
   type SubmissionDashboardItem,
   type ClassroomSummary,
+  type ExamViolationReport,
   CodeExecutionService,
 } from '../../services/api';
 import { ClassroomEntryView } from './ClassroomEntryView';
@@ -201,6 +202,13 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>('');
   const [submissions, setSubmissions] = useState<SubmissionDashboardItem[]>([]);
   const [isLoadingInstructor, setIsLoadingInstructor] = useState(false);
+  const [proctorAlerts, setProctorAlerts] = useState<ExamViolationReport[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('ml_proctor_violations') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   // Data Preview State (Modal & Pagination)
   const [showDataPreview, setShowDataPreview] = useState(false);
@@ -343,25 +351,109 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
 
-  // ── Safe Exam Browser Hook ──────────────────────────────────────────────
+  // ── Safe Exam Browser Hook & Proctor Security Monitoring ───────────────────
+  const studentDisplayName = authCtx?.user?.full_name || authCtx?.user?.email?.split('@')[0] || 'Active Student';
+  const studentEmail = authCtx?.user?.email || 'student@university.edu';
+
   const seb = useSafeExamBrowser(
     examLocked,
     (count) => {
-      onShowToast?.(
-        `⚠️ Violation Detected (${count}/3)`,
-        'Tab switch or window blur detected. Proctors will be notified.',
-        'error',
-      );
+      const isRedAlert = count >= 3;
+      const violationPayload: ExamViolationReport = {
+        exam_id: selectedExamId || 'active-exam',
+        student_name: studentDisplayName,
+        student_email: studentEmail,
+        student_id: authCtx?.user?.id,
+        violation_count: count,
+        flagged: isRedAlert,
+        alert_type: isRedAlert ? 'RED_ALERT' : 'WARNING',
+        reason: 'Tab switch or window blur detected during exam',
+        timestamp: new Date().toISOString(),
+      };
+
+      // 1. Report to Backend Proctor Integrity Service
+      if (selectedExamId) {
+        ClassroomService.reportExamViolation?.(selectedExamId, violationPayload)?.catch?.(() => {});
+      }
+
+      // 2. Persist locally & broadcast live proctor alert to instructors
+      try {
+        const stored = JSON.parse(localStorage.getItem('ml_proctor_violations') || '[]');
+        stored.unshift(violationPayload);
+        localStorage.setItem('ml_proctor_violations', JSON.stringify(stored.slice(0, 50)));
+      } catch {}
+
+      window.dispatchEvent(new CustomEvent('ml-exam-proctor-alert', { detail: violationPayload }));
+
+      // 3. User feedback
+      if (isRedAlert) {
+        setSebFlagged(true);
+        onShowToast?.(
+          `🚨 RED ALERT — Session Flagged!`,
+          `Student '${studentDisplayName}' reached maximum allowed tab switches (3/3). Instructor flagged for cheating review.`,
+          'error',
+        );
+      } else {
+        onShowToast?.(
+          `⚠️ Violation Warning (${count}/3)`,
+          `Tab switch detected for ${studentDisplayName}. Instructor and proctors notified.`,
+          'error',
+        );
+      }
     },
     () => {
       setSebFlagged(true);
-      onShowToast?.(
-        '🚨 Session Flagged',
-        'Maximum violations reached. Proctors will review this session.',
-        'error',
-      );
     },
   );
+
+  // Instructor Live Proctor Alert Event Listener
+  useEffect(() => {
+    const handleProctorEvent = (e: Event) => {
+      const custom = e as CustomEvent<ExamViolationReport>;
+      if (custom.detail) {
+        setProctorAlerts((prev) => [custom.detail, ...prev.filter(p => p.timestamp !== custom.detail.timestamp)].slice(0, 50));
+        if (viewMode === 'instructor') {
+          if (custom.detail.alert_type === 'RED_ALERT' || custom.detail.flagged) {
+            onShowToast?.(
+              `🚨 PROCTOR RED ALERT: ${custom.detail.student_name}`,
+              `Student '${custom.detail.student_name}' reached 3 tab switches — exam session FLAGGED!`,
+              'error',
+            );
+          } else {
+            onShowToast?.(
+              `⚠️ Proctor Alert: ${custom.detail.student_name}`,
+              `Student '${custom.detail.student_name}' switched tabs during exam (Violation ${custom.detail.violation_count}/3).`,
+              'error',
+            );
+          }
+        }
+      }
+    };
+
+    window.addEventListener('ml-exam-proctor-alert', handleProctorEvent);
+    return () => window.removeEventListener('ml-exam-proctor-alert', handleProctorEvent);
+  }, [viewMode, onShowToast]);
+
+  // Sync recent violations from backend when entering instructor mode
+  useEffect(() => {
+    if (viewMode === 'instructor') {
+      ClassroomService.getRecentViolations?.()
+        .then((remoteAlerts) => {
+          if (Array.isArray(remoteAlerts) && remoteAlerts.length > 0) {
+            setProctorAlerts((prev) => {
+              const combined = [...remoteAlerts, ...prev];
+              const map = new Map();
+              for (const item of combined) {
+                const key = `${item.student_name}_${item.timestamp}_${item.violation_count}`;
+                if (!map.has(key)) map.set(key, item);
+              }
+              return Array.from(map.values()).slice(0, 50);
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [viewMode]);
 
   // Notify parent (App) whenever lockdown state changes so sidebar can be hidden
   useEffect(() => {
@@ -851,7 +943,13 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     if (!selectedExamId) return;
     setIsSubmitting(true);
     try {
-      const receipt = await ClassroomService.submitExam(selectedExamId, code, deployment?.deployment_id);
+      const receipt = await ClassroomService.submitExam(
+        selectedExamId,
+        code,
+        deployment?.deployment_id,
+        seb.violations,
+        sebFlagged,
+      );
       setShowConfirmSubmit(false);
       setOutputLines((prev) => [
         ...prev,
@@ -1607,6 +1705,83 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                 </div>
               </div>
 
+              {/* Live Proctor Tab-Switch Alerts Banner (Real-time student detection) */}
+              {proctorAlerts.length > 0 && (
+                <div
+                  className="rounded-2xl border overflow-hidden p-4 space-y-3"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(28, 10, 15, 0.75) 0%, rgba(20, 12, 28, 0.75) 100%)',
+                    borderColor: 'rgba(239, 68, 68, 0.35)',
+                    boxShadow: '0 4px 20px rgba(239, 68, 68, 0.12)',
+                  }}
+                >
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-red-400" />
+                      <span className="text-xs font-bold text-red-200">
+                        Live Exam Proctor & Tab-Switch Security Alerts
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-red-500/20 text-red-300 border border-red-500/30">
+                        {proctorAlerts.length} alert{proctorAlerts.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setProctorAlerts([]);
+                        localStorage.removeItem('ml_proctor_violations');
+                      }}
+                      className="text-[11px] text-[#9E93B8] hover:text-white transition-colors"
+                    >
+                      Clear Alerts
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-48 overflow-y-auto pr-1">
+                    {proctorAlerts.map((alert, idx) => {
+                      const isRed = alert.alert_type === 'RED_ALERT' || alert.flagged || alert.violation_count >= 3;
+                      return (
+                        <div
+                          key={idx}
+                          className="p-2.5 rounded-xl border flex items-start gap-2.5 text-xs transition-colors"
+                          style={{
+                            background: isRed ? 'rgba(127, 29, 29, 0.25)' : 'rgba(245, 158, 11, 0.15)',
+                            borderColor: isRed ? 'rgba(239, 68, 68, 0.4)' : 'rgba(245, 158, 11, 0.3)',
+                          }}
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            {isRed ? (
+                              <Shield className="w-3.5 h-3.5 text-red-400" />
+                            ) : (
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-white truncate" title={alert.student_name}>
+                                {alert.student_name}
+                              </span>
+                              <span
+                                className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border shrink-0 ${
+                                  isRed
+                                    ? 'bg-red-500/20 text-red-300 border-red-500/40'
+                                    : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                }`}
+                              >
+                                {isRed ? 'RED ALERT (3/3)' : `WARNING (${alert.violation_count}/3)`}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-[#9E93B8] truncate">{alert.student_email || 'student@university.edu'}</div>
+                            <div className="text-[10px] text-[#C084FC] mt-0.5">
+                              {alert.reason || 'Tab switch / window blur'} • {alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : 'Just now'}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Submissions Table */}
               <div
                 className="rounded-2xl border overflow-hidden"
@@ -1639,7 +1814,18 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
                         submissions.map((sub, idx) => (
                           <tr key={sub.submission_id + idx} className="hover:bg-[#1A1432] transition-colors">
                             <td className="p-3 font-medium">
-                              <div>{sub.learner_name}</div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white">{sub.learner_name}</span>
+                                {sub.flagged || (sub.violations_count && sub.violations_count >= 3) ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-red-500/20 text-red-400 border border-red-500/40">
+                                    🚨 RED ALERT ({sub.violations_count || 3} Tab Switches)
+                                  </span>
+                                ) : sub.violations_count && sub.violations_count > 0 ? (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">
+                                    ⚠️ Warning ({sub.violations_count} Tab Switch{sub.violations_count > 1 ? 'es' : ''})
+                                  </span>
+                                ) : null}
+                              </div>
                               <div className="text-[10px] text-[#9E93B8] font-mono">{sub.learner_email}</div>
                             </td>
                             <td className="p-3">
@@ -3218,6 +3404,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
         <SafeExamViolationOverlay
           violations={seb.violations}
           flagged={sebFlagged}
+          studentName={studentDisplayName}
         />
       )}
     </div>

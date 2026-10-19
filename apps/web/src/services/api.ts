@@ -299,6 +299,21 @@ export interface SubmissionDashboardItem {
   model_sha256?: string | null;
   guardrail_flags: string[];
   code_snippet?: string | null;
+  violations_count?: number;
+  flagged?: boolean;
+  security_alerts?: string[];
+}
+
+export interface ExamViolationReport {
+  exam_id: string;
+  student_name: string;
+  student_email?: string;
+  student_id?: string;
+  violation_count: number;
+  flagged?: boolean;
+  alert_type: 'WARNING' | 'RED_ALERT';
+  reason?: string;
+  timestamp?: string;
 }
 
 export interface ReproduceAuditResponse {
@@ -500,11 +515,26 @@ export const ClassroomService = {
       body: JSON.stringify({ deployment_id: deploymentId }),
     }),
 
-  submitExam: (examId: string, code: string, deploymentId?: string) =>
+  submitExam: (examId: string, code: string, deploymentId?: string, violationsCount: number = 0, flagged: boolean = false) =>
     request<LabSubmitResponse>(`/classrooms/exams/${examId}/submit`, {
       method: 'POST',
-      body: JSON.stringify({ code, deployment_id: deploymentId }),
+      body: JSON.stringify({ code, deployment_id: deploymentId, violations_count: violationsCount, flagged }),
     }),
+
+  reportExamViolation: (examId: string, report: ExamViolationReport) =>
+    request<{ success: boolean; message: string; violation: ExamViolationReport }>(
+      `/classrooms/exams/${examId}/violations`,
+      {
+        method: 'POST',
+        body: JSON.stringify(report),
+      }
+    ),
+
+  getExamViolations: (examId: string) =>
+    request<ExamViolationReport[]>(`/classrooms/exams/${examId}/violations`),
+
+  getRecentViolations: () =>
+    request<ExamViolationReport[]>('/classrooms/violations/recent'),
 
   getExamDatasetPreview: (examId: string) =>
     request<{ file_name: string; columns: string[]; rows: Record<string, any>[]; row_count: number }>(
