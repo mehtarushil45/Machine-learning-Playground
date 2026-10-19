@@ -7,61 +7,65 @@ describe('UserGuidePage Component', () => {
     vi.clearAllMocks();
   });
 
-  it('renders enterprise header, title, and all 4 pillars in sidebar', () => {
+  it('renders user guide header, title, and all sections in sidebar', () => {
     render(<UserGuidePage />);
 
-    expect(screen.getByText(/ML Playground — Enterprise MLOps Guide/i)).toBeInTheDocument();
+    expect(screen.getByText(/ML Playground — Complete Machine Learning Guide/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/Production Architecture, Core Pillars, and Operational Reference/i)
+      screen.getByText(/Learn How to Explore Data, Train Models, and Understand Predictions/i)
     ).toBeInTheDocument();
 
-    // Verify all core pillar & reference buttons exist in sidebar
-    expect(screen.getByRole('button', { name: /Platform Architecture & Topology/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /1\. Dataset Engine & Governance/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /2\. Monaco Code Studio & Guardian/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /3\. Experiment Tracking & Registry/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /4\. Model Serving & Batch Scoring/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Diagnostic Metrics & Formulas/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /MLOps & ML Glossary/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Keyboard Shortcuts Cheatsheet/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Frequently Asked Questions/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Enterprise Pitfalls to Avoid/i })).toBeInTheDocument();
+    // Verify friendly ML guide sections exist in sidebar
+    expect(screen.getByRole('button', { name: /1\. The Machine Learning Journey/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /2\. Core Machine Learning Concepts/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /3\. Preparing & Cleaning Data/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /4\. Code Studio & Pipeline Editor/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /5\. Algorithms & Models Guide/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /6\. Settings & Sliders Explained/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /7\. Comparing Experiments & Models/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /8\. Understanding Model Scores/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /9\. Making Predictions on New Data/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /10\. Machine Learning Glossary/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /11\. Keyboard Shortcuts Cheatsheet/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /12\. Frequently Asked Questions/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /13\. Common Mistakes to Avoid/i })).toBeInTheDocument();
   }, 15000);
 
-  it('renders the interactive architecture topology diagram', () => {
+  it('renders the interactive 5-stage machine learning journey diagram', () => {
     render(<UserGuidePage />);
 
     const diagram = screen.getByTestId('architecture-topology-diagram');
     expect(diagram).toBeInTheDocument();
-    expect(within(diagram).getByText(/CLIENT LAYER: Web Monaco IDE/i)).toBeInTheDocument();
-    expect(within(diagram).getByText(/FASTAPI GATEWAY: Stateless API Pods/i)).toBeInTheDocument();
-    expect(within(diagram).getByText(/^1\. DATASET ENGINE$/i)).toBeInTheDocument();
-    expect(within(diagram).getByText(/^2\. CODE STUDIO$/i)).toBeInTheDocument();
-    expect(within(diagram).getByText(/^3\. EXPERIMENT HUB$/i)).toBeInTheDocument();
-    expect(within(diagram).getByText(/^4\. MODEL SERVING$/i)).toBeInTheDocument();
-    expect(within(diagram).getByText(/STORAGE & QUEUE INFRASTRUCTURE/i)).toBeInTheDocument();
+    expect(within(diagram).getByText(/The 5 Stages of Machine Learning/i)).toBeInTheDocument();
+    expect(within(diagram).getByText(/1\. DATASET & PROFILER/i)).toBeInTheDocument();
+    expect(within(diagram).getByText(/2\. DATA PREPROCESSING/i)).toBeInTheDocument();
+    expect(within(diagram).getByText(/3\. CODE & TRAINING STUDIO/i)).toBeInTheDocument();
+    expect(within(diagram).getByText(/4\. RESULTS & EVALUATION/i)).toBeInTheDocument();
+    expect(within(diagram).getByText(/5\. MODEL PREDICTIONS/i)).toBeInTheDocument();
   });
 
-  it('renders core MLOps glossary definitions', () => {
+  it('renders core machine learning glossary definitions', () => {
     render(<UserGuidePage />);
 
     expect(screen.getByText('Overfitting')).toBeInTheDocument();
     expect(screen.getByText('Target Leakage')).toBeInTheDocument();
+    expect(screen.getByText('Dataset Profiler')).toBeInTheDocument();
     expect(screen.getByText('Population Stability Index (PSI)')).toBeInTheDocument();
     expect(screen.getByText('Kolmogorov-Smirnov (KS) Test')).toBeInTheDocument();
     expect(screen.getByText('Hyperparameter')).toBeInTheDocument();
     expect(screen.getByText('One-Hot Encoding')).toBeInTheDocument();
+    expect(screen.getByText('Random Forest')).toBeInTheDocument();
   });
 
   it('filters glossary and FAQs when using the search bar', () => {
     render(<UserGuidePage />);
 
     const searchInput = screen.getByTestId('guide-search-input');
-    fireEvent.change(searchInput, { target: { value: 'DuckDB' } });
+    fireEvent.change(searchInput, { target: { value: 'Decision Threshold' } });
 
     // FAQ should match
     expect(
-      screen.getByText(/How does DuckDB prevent Out-Of-Memory \(OOM\) crashes on large datasets\?/i)
+      screen.getByText(/How does the Decision Threshold slider work\?/i)
     ).toBeInTheDocument();
   });
 
