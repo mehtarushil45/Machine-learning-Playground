@@ -35,6 +35,7 @@ import {
   Search,
   X,
   ChevronLeft,
+  Database,
 } from 'lucide-react';
 import {
   ClassroomService,
@@ -337,7 +338,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   const [newAssignmentDuration, setNewAssignmentDuration] = useState('90');
   const [newAssignmentPassingScore, setNewAssignmentPassingScore] = useState('60');
 
-  const { setLearningAidsAllowed, stories } = useLearning();
+  const { setLearningAidsAllowed } = useLearning();
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
@@ -548,14 +549,16 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setEvaluationResult(null);
     setPredictionResult(null);
     setRegisteredModelId(null);
-    setSubmissionReceipt(null);
     setOutputLines([`[System] Switched to ${target.title}.`]);
-    onShowToast?.('Exam Switched', `Switched to ${target.title}`, 'info');
     setLearningAidsAllowed(target.learning_aids_enabled ?? true);
 
     try {
+      const localDraft = localStorage.getItem(`ml_classroom_draft_${examId}`);
+      if (localDraft) {
+        setCode(localDraft);
+      }
       const sess = await ClassroomService.getSession(examId);
-      if (sess?.code_draft) setCode(sess.code_draft);
+      if (sess?.code_draft && !localDraft) setCode(sess.code_draft);
       if (sess?.active_deployment_id) {
         try {
           const depData = await ClassroomService.getLabDeployment(examId);
@@ -592,6 +595,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   // 4. Auto-save Draft Code to Server (Debounced E3)
   useEffect(() => {
     if (!selectedExamId || submissionReceipt || !code) return;
+    try {
+      localStorage.setItem(`ml_classroom_draft_${selectedExamId}`, code);
+    } catch {}
     const timer = setTimeout(async () => {
       try {
         const res = await ClassroomService.saveDraft(selectedExamId, code);
@@ -781,8 +787,9 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     try {
       // Coerce inputs according to deployment schema types and expected features
       const formattedInputs: Record<string, any> = {};
-      const expectedKeys = deployment.feature_columns?.length
-        ? deployment.feature_columns
+      const depAny = deployment as any;
+      const expectedKeys = depAny.feature_columns?.length
+        ? depAny.feature_columns
         : Object.keys(deployment.input_schema || deployment.sample_inputs || testInputs);
 
       for (const k of expectedKeys) {
@@ -810,7 +817,6 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
       const res = await ClassroomService.predictModel(selectedExamId, deployment.deployment_id, formattedInputs);
       setPredictionResult(res);
-      onShowToast?.('Prediction Received', `Result: ${res.prediction} (${res.latency_ms?.toFixed(1) || '0.0'}ms)`, 'success');
     } catch (err: any) {
       onShowToast?.('Inference Error', err.message, 'error');
     } finally {

@@ -34,7 +34,6 @@ import {
   Database,
   CheckCircle2,
   History,
-  ShieldCheck,
   Sliders,
 } from 'lucide-react';
 import {
@@ -1255,11 +1254,11 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
         </>
       ) : (
         <>
-          {/* ── Registry Metrics Bar (4 KPIs) ── */}
+          {/* ── Registry Metrics Bar (2 Clean KPIs) ── */}
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
+              gridTemplateColumns: 'repeat(2, 1fr)',
               gap: 16,
               marginBottom: 24,
             }}
@@ -1332,78 +1331,6 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                 </div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: '#FFFFFF', marginTop: 2 }}>
                   {championCount} <span style={{ fontSize: 13, fontWeight: 500, color: '#475569' }}>active</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 3: Model Families */}
-            <div
-              style={{
-                background: '#091322',
-                border: '1px solid #14243B',
-                borderRadius: 12,
-                padding: '16px 20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 14,
-              }}
-            >
-              <div
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 10,
-                  background: 'rgba(168, 85, 247, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#A855F7',
-                }}
-              >
-                <GitBranch size={20} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
-                  Tracked Model Families
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#FFFFFF', marginTop: 2 }}>
-                  {modelFamilies.length} <span style={{ fontSize: 13, fontWeight: 500, color: '#475569' }}>families</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 4: Governed Versions */}
-            <div
-              style={{
-                background: '#091322',
-                border: '1px solid #14243B',
-                borderRadius: 12,
-                padding: '16px 20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 14,
-              }}
-            >
-              <div
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 10,
-                  background: 'rgba(0, 245, 160, 0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#00F5A0',
-                }}
-              >
-                <ShieldCheck size={20} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>
-                  Governed Active Versions
-                </div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#FFFFFF', marginTop: 2 }}>
-                  {governedActiveCount} <span style={{ fontSize: 13, fontWeight: 500, color: '#475569' }}>models</span>
                 </div>
               </div>
             </div>

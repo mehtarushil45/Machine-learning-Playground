@@ -12,6 +12,8 @@ import {
   GraduationCap,
   User,
   LogIn,
+  LogOut,
+  X,
 } from 'lucide-react';
 import { ThemeProvider } from './providers/ThemeProvider';
 import { AuthProvider, useAuthContext } from './providers/AuthContext';
@@ -153,19 +155,56 @@ function AppContent() {
     description?: string,
     type: 'success' | 'info' | 'error' = 'success',
   ) => {
+    // Task 1: Suppress low-importance / spammy notification events
+    const lowerTitle = title.toLowerCase();
+    if (
+      lowerTitle.includes('exam switched') ||
+      lowerTitle.includes('file saved') ||
+      lowerTitle.includes('prediction received') ||
+      lowerTitle.includes('auto-saved') ||
+      lowerTitle.includes('draft saved')
+    ) {
+      return;
+    }
+
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => {
       // Prevent duplicate stacked notifications with identical title and description
       const exists = prev.some((t) => t.title === title && t.description === description && t.type === type);
       if (exists) return prev;
       const next = [...prev, { id, title, description, type }];
-      return next.slice(-4);
+      return next.slice(-3);
     });
   }, []);
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // Global search catalog (Task 4)
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchableItems = useMemo(() => [
+    { title: 'Datasets & Profiler', category: 'Platform', tab: 'workspace', description: 'Upload CSV, inspect distributions, correlations & data leakage' },
+    { title: 'Code Studio (Pipeline IDE)', category: 'Platform', tab: 'code-studio', description: 'Interactive Python editor with sandboxed execution & scripts' },
+    { title: 'Training & Experiments', category: 'Platform', tab: 'training-results', description: 'Multi-run leaderboard, confusion matrix, ROC/PR & SHAP curves' },
+    { title: 'Model Deployments & Serving', category: 'Platform', tab: 'deployments', description: 'Real-time REST endpoints & high-throughput batch CSV scoring' },
+    { title: 'Model Registry & Governance', category: 'Deployments', tab: 'deployments', description: 'Production Champion models, lineage tracing & version promotion' },
+    { title: 'Classroom & Safe Exam Hub', category: 'Education', tab: 'classroom', description: 'University lab practical exams with proctored safe exam mode' },
+    { title: 'Machine Learning User Guide', category: 'Documentation', tab: 'guide', description: 'Complete plain-English encyclopedia of algorithms, knobs & metrics' },
+    { title: 'Random Forest Classifier', category: 'Algorithms', tab: 'guide', description: 'Ensemble of decision trees voting on predictions' },
+    { title: 'XGBoost & LightGBM', category: 'Algorithms', tab: 'guide', description: 'High-performance gradient boosting for structured tabular datasets' },
+    { title: 'Confusion Matrix & Metrics', category: 'Evaluation', tab: 'guide', description: 'Precision, Recall, F1-Score, and ROC-AUC explained' },
+  ], []);
+
+  const searchResults = useMemo(() => {
+    if (!globalSearch.trim()) return [];
+    const q = globalSearch.toLowerCase().trim();
+    return searchableItems.filter(
+      (item) => item.title.toLowerCase().includes(q) ||
+                item.description.toLowerCase().includes(q) ||
+                item.category.toLowerCase().includes(q)
+    );
+  }, [globalSearch, searchableItems]);
 
   const handleNavigate = (tab: PlatformTab | string, deploymentId?: string) => {
     let resolvedTab: PlatformTab = 'workspace';
@@ -454,7 +493,7 @@ function AppContent() {
         </nav>
 
         {/* User Account / Sign In button at bottom of sidebar */}
-        <div style={{ paddingBottom: 14, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div style={{ paddingBottom: 14, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           <button
             type="button"
             onClick={() => handleNavigate(isAuthenticated ? 'workspace' : 'login')}
@@ -481,6 +520,45 @@ function AppContent() {
               <User className="w-4 h-4" style={{ color: BB.muted }} />
             )}
           </button>
+
+          {isAuthenticated && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await logout();
+                  showToast('Signed Out', 'You have been signed out successfully.', 'info');
+                } catch {
+                  showToast('Sign Out Error', 'Failed to clear session', 'error');
+                }
+              }}
+              title="Sign Out"
+              aria-label="Sign Out"
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                color: '#F87171',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'all 150ms ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.22)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.25)';
+              }}
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </aside>
 
@@ -570,10 +648,30 @@ function AppContent() {
               type="text"
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.target.value)}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = BB.primaryLight;
+                setIsSearchFocused(true);
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = BB.border;
+                setTimeout(() => setIsSearchFocused(false), 200);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchResults.length > 0) {
+                  handleNavigate(searchResults[0].tab as PlatformTab);
+                  setGlobalSearch('');
+                  setIsSearchFocused(false);
+                  searchInputRef.current?.blur();
+                } else if (e.key === 'Escape') {
+                  setGlobalSearch('');
+                  setIsSearchFocused(false);
+                  searchInputRef.current?.blur();
+                }
+              }}
               placeholder="Search datasets, models, pipelines... (Ctrl+K)"
               style={{
                 width: '100%',
-                padding: '6px 36px 6px 32px',
+                padding: '6px 52px 6px 32px',
                 borderRadius: 7,
                 border: `1px solid ${BB.border}`,
                 background: BB.surface,
@@ -583,13 +681,30 @@ function AppContent() {
                 outline: 'none',
                 transition: 'border-color 150ms',
               }}
-              onFocus={(e) => {
-                e.currentTarget.style.borderColor = BB.primaryLight;
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.borderColor = BB.border;
-              }}
             />
+            {globalSearch ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setGlobalSearch('');
+                  searchInputRef.current?.focus();
+                }}
+                title="Clear search"
+                style={{
+                  position: 'absolute',
+                  right: 28,
+                  background: 'none',
+                  border: 'none',
+                  color: BB.muted,
+                  cursor: 'pointer',
+                  padding: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X style={{ width: 12, height: 12 }} />
+              </button>
+            ) : null}
             <span
               style={{
                 position: 'absolute',
@@ -601,10 +716,104 @@ function AppContent() {
                 border: `1px solid ${BB.border}`,
                 background: BB.elevated,
                 fontFamily: 'var(--font-mono)',
+                pointerEvents: 'none',
               }}
             >
               ⌘K
             </span>
+
+            {/* Live Search Results Dropdown */}
+            {isSearchFocused && globalSearch.trim() && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  right: 0,
+                  maxHeight: 340,
+                  overflowY: 'auto',
+                  borderRadius: 10,
+                  background: 'rgba(18, 14, 34, 0.96)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(107, 92, 166, 0.35)',
+                  boxShadow: '0 16px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(0, 212, 255, 0.1)',
+                  zIndex: 9999,
+                  padding: '6px 0',
+                }}
+              >
+                <div
+                  style={{
+                    padding: '6px 12px 4px',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: BB.muted,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span>Search Results ({searchResults.length})</span>
+                  <span>Press Enter to Jump</span>
+                </div>
+
+                {searchResults.length === 0 ? (
+                  <div style={{ padding: '16px 14px', fontSize: 12, color: BB.muted, textAlign: 'center' }}>
+                    No results found for &ldquo;{globalSearch}&rdquo;
+                  </div>
+                ) : (
+                  searchResults.map((item, idx) => (
+                    <div
+                      key={idx}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleNavigate(item.tab as PlatformTab);
+                        setGlobalSearch('');
+                        setIsSearchFocused(false);
+                      }}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        borderBottom: '1px solid rgba(107, 92, 166, 0.12)',
+                        transition: 'background 120ms',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(0, 212, 255, 0.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#FFFFFF' }}>{item.title}</div>
+                        <div style={{ fontSize: 10.5, color: BB.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.description}
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          background: 'rgba(201, 162, 75, 0.15)',
+                          border: '1px solid rgba(201, 162, 75, 0.3)',
+                          color: BB.gold,
+                          flexShrink: 0,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {item.category}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </div>
 
           {/* Header Right: Learning Mode + Lessons + AI Copilot */}
@@ -715,7 +924,7 @@ function AppContent() {
                   style={{
                     color: BB.text,
                     fontWeight: 600,
-                    maxWidth: 110,
+                    maxWidth: 140,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -724,32 +933,6 @@ function AppContent() {
                 >
                   {user.full_name || user.email.split('@')[0]}
                 </span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await logout();
-                      showToast('Signed Out', 'You have been signed out successfully.', 'info');
-                    } catch {
-                      showToast('Sign Out Error', 'Failed to clear session', 'error');
-                    }
-                  }}
-                  title="Sign Out"
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: BB.muted,
-                    cursor: 'pointer',
-                    fontSize: 10,
-                    padding: '2px 4px',
-                    borderRadius: 4,
-                    transition: 'color 150ms',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = '#F87171'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = BB.muted; }}
-                >
-                  Sign Out
-                </button>
               </div>
             ) : (
               <button
@@ -809,17 +992,17 @@ function AppContent() {
           ─────────────────────────────────────────────────────────────────── */}
           {!isProjectInitialized ? (
             <ProjectGatekeeper onNavigate={handleNavigate} />
-          ) : activeTab === 'classroom' ? (
-            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '10px 16px', width: '100%' }}>
-              <ErrorBoundary key="classroom" onReset={() => handleNavigate('classroom')}>
-                <ClassroomHub
-                  onShowToast={showToast}
-                  onExamLockChange={setIsExamLocked}
-                />
-              </ErrorBoundary>
-            </div>
           ) : (
             <>
+              <div style={{ display: activeTab === 'classroom' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'auto', padding: '10px 16px', width: '100%' }}>
+                <ErrorBoundary key="classroom" onReset={() => handleNavigate('classroom')}>
+                  <ClassroomHub
+                    onShowToast={showToast}
+                    onExamLockChange={setIsExamLocked}
+                  />
+                </ErrorBoundary>
+              </div>
+
               <div style={{ display: activeTab === 'workspace' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <ErrorBoundary key="workspace" onReset={() => handleNavigate('workspace')}>
                   <DatasetProfilerPage

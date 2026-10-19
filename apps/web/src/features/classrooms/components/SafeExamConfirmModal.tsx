@@ -30,14 +30,11 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
   onConfirm,
   onCancel,
 }) => {
-  const [agreed, setAgreed] = useState(true);
+  const [agreed, setAgreed] = useState(false);
   const [entering, setEntering] = useState(false);
 
   const handleEnter = async () => {
-    if (entering) return;
-    if (!agreed) {
-      setAgreed(true);
-    }
+    if (!agreed || entering) return;
     setEntering(true);
     try {
       await onConfirm();
@@ -175,15 +172,18 @@ export const SafeExamConfirmModal: React.FC<SafeExamConfirmModalProps> = ({
               </button>
               <motion.button
                 onClick={handleEnter}
-                disabled={entering}
-                whileHover={!entering ? { scale: 1.02 } : {}}
-                whileTap={!entering ? { scale: 0.98 } : {}}
+                disabled={!agreed || entering}
+                whileHover={agreed && !entering ? { scale: 1.02 } : {}}
+                whileTap={agreed && !entering ? { scale: 0.98 } : {}}
                 className="flex-2 flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl text-xs font-bold transition-all shadow-lg"
                 style={{
-                  background: 'linear-gradient(135deg, #EF4444 0%, #F59E0B 100%)',
-                  color: '#fff',
-                  cursor: entering ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 4px 24px rgba(239,68,68,0.35)',
+                  background: agreed
+                    ? 'linear-gradient(135deg, #EF4444 0%, #F59E0B 100%)'
+                    : 'linear-gradient(135deg, rgba(239,68,68,0.4) 0%, rgba(245,158,11,0.3) 100%)',
+                  color: agreed ? '#fff' : 'rgba(255,255,255,0.4)',
+                  cursor: !agreed || entering ? 'not-allowed' : 'pointer',
+                  opacity: agreed ? 1 : 0.6,
+                  boxShadow: agreed ? '0 4px 24px rgba(239,68,68,0.35)' : 'none',
                 }}
               >
                 {entering ? (

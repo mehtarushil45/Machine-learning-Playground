@@ -23,13 +23,10 @@ import {
   Rocket,
   Search,
   AlertTriangle,
-  ExternalLink,
   ArrowRight,
   ShieldCheck,
   Layers,
   Activity,
-  Zap,
-  Sliders,
   Keyboard,
   HelpCircle,
   Copy,
@@ -39,6 +36,8 @@ import {
   Target,
   Split,
   FileSpreadsheet,
+  ArrowLeft,
+  X,
 } from 'lucide-react';
 
 // Design Tokens matching ML Playground Theme
@@ -674,6 +673,37 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
     );
   }, [faqs, searchQuery]);
 
+  const [isGuideSearchFocused, setIsGuideSearchFocused] = useState(false);
+
+  const matchingSearchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase().trim();
+    const results: Array<{ title: string; category: string; targetId: string; description: string }> = [];
+
+    // Search Sections
+    for (const sec of sections) {
+      if (sec.label.toLowerCase().includes(q)) {
+        results.push({ title: sec.label, category: 'Section', targetId: sec.id, description: 'Jump to section' });
+      }
+    }
+
+    // Search Glossary Terms
+    for (const item of glossaryTerms) {
+      if (item.term.toLowerCase().includes(q) || item.definition.toLowerCase().includes(q)) {
+        results.push({ title: item.term, category: item.category, targetId: 'glossary', description: item.definition.slice(0, 70) + '…' });
+      }
+    }
+
+    // Search FAQs
+    for (const faq of faqs) {
+      if (faq.q.toLowerCase().includes(q) || faq.a.toLowerCase().includes(q)) {
+        results.push({ title: faq.q, category: 'FAQ', targetId: 'faqs', description: faq.a.slice(0, 70) + '…' });
+      }
+    }
+
+    return results.slice(0, 8);
+  }, [searchQuery, sections, glossaryTerms, faqs]);
+
   return (
     <div
       style={{
@@ -695,7 +725,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
           background: 'rgba(10, 20, 36, 0.95)',
           backdropFilter: 'blur(16px)',
           borderBottom: '1px solid ' + TOKENS.border,
-          padding: '12px 28px',
+          padding: '12px 24px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -703,25 +733,48 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Back Button */}
+          <button
+            onClick={handleReturnToPlatform}
+            title="Back to Workspace"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid ' + TOKENS.border,
+              background: 'rgba(0, 212, 255, 0.1)',
+              color: TOKENS.primary,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 120ms ease',
+            }}
+          >
+            <ArrowLeft style={{ width: 13, height: 13 }} />
+            <span>Back</span>
+          </button>
+
           <div
             style={{
-              width: 34,
-              height: 34,
-              borderRadius: 9,
+              width: 32,
+              height: 32,
+              borderRadius: 8,
               background: 'linear-gradient(135deg, #00D4FF, #00F5A0)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#050B14',
               fontWeight: 900,
-              fontSize: 14,
+              fontSize: 13,
               boxShadow: '0 0 16px rgba(0, 212, 255, 0.35)',
             }}
           >
             ML
           </div>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em', color: TOKENS.textPrimary }}>
+            <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: '-0.02em', color: TOKENS.textPrimary }}>
               ML Playground — Complete Machine Learning Guide
             </div>
             <div style={{ fontSize: 11, color: TOKENS.textMuted }}>
@@ -730,20 +783,22 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
           </div>
         </div>
 
-        {/* Global Search Input */}
+        {/* Global Search Input with Instant Dropdown (Task 4) */}
         <div style={{ position: 'relative', width: 380, display: 'flex', alignItems: 'center' }}>
-          <Search style={{ position: 'absolute', left: 12, width: 14, height: 14, color: TOKENS.textMuted }} />
+          <Search style={{ position: 'absolute', left: 12, width: 14, height: 14, color: TOKENS.textMuted, pointerEvents: 'none' }} />
           <input
             type="text"
             data-testid="guide-search-input"
             placeholder="Search any ML concept, algorithm, metric, or slider..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setIsGuideSearchFocused(true)}
+            onBlur={() => setTimeout(() => setIsGuideSearchFocused(false), 200)}
             style={{
               width: '100%',
-              padding: '8px 12px 8px 36px',
+              padding: '8px 34px 8px 36px',
               borderRadius: 8,
-              border: '1px solid ' + TOKENS.border,
+              border: '1px solid ' + (isGuideSearchFocused ? TOKENS.primary : TOKENS.border),
               background: 'rgba(16, 31, 56, 0.7)',
               color: TOKENS.textPrimary,
               fontSize: 12.5,
@@ -751,9 +806,112 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               transition: 'border-color 150ms ease',
             }}
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              title="Clear search"
+              style={{
+                position: 'absolute',
+                right: 10,
+                background: 'none',
+                border: 'none',
+                color: TOKENS.textMuted,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                padding: 2,
+              }}
+            >
+              <X style={{ width: 13, height: 13 }} />
+            </button>
+          )}
+
+          {/* Instant Search Results Dropdown */}
+          {isGuideSearchFocused && searchQuery.trim() && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                left: 0,
+                right: 0,
+                maxHeight: 320,
+                overflowY: 'auto',
+                borderRadius: 10,
+                background: 'rgba(10, 20, 36, 0.98)',
+                backdropFilter: 'blur(16px)',
+                border: '1px solid ' + TOKENS.borderActive,
+                boxShadow: '0 16px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 212, 255, 0.12)',
+                zIndex: 9999,
+                padding: '6px 0',
+              }}
+            >
+              <div
+                style={{
+                  padding: '6px 12px 4px',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: TOKENS.textMuted,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                }}
+              >
+                Matching Guide Topics ({matchingSearchResults.length})
+              </div>
+
+              {matchingSearchResults.length === 0 ? (
+                <div style={{ padding: '14px 12px', fontSize: 12, color: TOKENS.textMuted, textAlign: 'center' }}>
+                  No matches found for &ldquo;{searchQuery}&rdquo;
+                </div>
+              ) : (
+                matchingSearchResults.map((res, i) => (
+                  <div
+                    key={i}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setActiveSection(res.targetId);
+                      const el = document.getElementById(res.targetId);
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      setIsGuideSearchFocused(false);
+                    }}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      borderBottom: '1px solid rgba(0, 212, 255, 0.08)',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0, 212, 255, 0.12)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: TOKENS.primary }}>{res.title}</div>
+                      <div style={{ fontSize: 10.5, color: TOKENS.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {res.description}
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        background: 'rgba(0, 212, 255, 0.15)',
+                        color: TOKENS.primary,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {res.category}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Open Workspace Action */}
+        {/* Back to Workspace Action */}
         <button
           onClick={handleReturnToPlatform}
           data-testid="guide-open-workspace"
@@ -764,49 +922,49 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
             padding: '8px 16px',
             borderRadius: 8,
             border: '1px solid ' + TOKENS.borderActive,
-            background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(0, 245, 160, 0.15))',
+            background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.18), rgba(0, 245, 160, 0.18))',
             color: TOKENS.primary,
             fontSize: 12.5,
-            fontWeight: 600,
+            fontWeight: 700,
             cursor: 'pointer',
             transition: 'all 150ms ease',
           }}
         >
-          <span>Open Workspace</span>
-          <ExternalLink style={{ width: 13, height: 13 }} />
+          <ArrowLeft style={{ width: 13, height: 13 }} />
+          <span>Back to Workspace</span>
         </button>
       </header>
 
       {/* ── Main Layout (Sidebar + Content) ───────────────────────────── */}
       <div style={{ display: 'flex', flex: 1, maxWidth: 1440, width: '100%', margin: '0 auto' }}>
-        {/* Left Sticky Navigation Sidebar */}
+        {/* Left Sticky Navigation Sidebar (Reduced width for Task 3) */}
         <aside
           style={{
-            width: 310,
+            width: 225,
             flexShrink: 0,
             borderRight: '1px solid ' + TOKENS.border,
-            padding: '24px 16px',
+            padding: '16px 8px',
             position: 'sticky',
             top: 59,
             height: 'calc(100vh - 59px)',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: 4,
+            gap: 2,
           }}
         >
           <div
             style={{
-              fontSize: 11,
-              fontWeight: 700,
+              fontSize: 10,
+              fontWeight: 800,
               color: TOKENS.textMuted,
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
               marginBottom: 8,
-              paddingLeft: 8,
+              paddingLeft: 6,
             }}
           >
-            Guide &amp; Reference Sections
+            Sections
           </div>
 
           {sections.map((sec) => (
@@ -817,26 +975,30 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                 const el = document.getElementById(sec.id);
                 if (el) el.scrollIntoView({ behavior: 'smooth' });
               }}
+              title={sec.label}
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 10,
-                padding: '8px 12px',
-                borderRadius: 8,
+                gap: 8,
+                padding: '7px 9px',
+                borderRadius: 7,
                 border: 'none',
                 background: activeSection === sec.id ? 'rgba(0, 212, 255, 0.14)' : 'transparent',
                 color: activeSection === sec.id ? TOKENS.primary : TOKENS.textSecondary,
                 fontWeight: activeSection === sec.id ? 700 : 500,
-                fontSize: 12,
+                fontSize: 11.5,
                 textAlign: 'left',
                 cursor: 'pointer',
                 transition: 'all 120ms ease',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
             >
-              <span style={{ color: activeSection === sec.id ? TOKENS.primary : TOKENS.textMuted }}>
-                {sec.icon}
+              <span style={{ flexShrink: 0 }}>{sec.icon}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {sec.label}
               </span>
-              <span>{sec.label}</span>
             </button>
           ))}
         </aside>
@@ -882,7 +1044,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
 
               {/* Friendly Pipeline SVG Flow */}
               <svg
-                viewBox="0 0 840 180"
+                viewBox="0 0 940 180"
                 style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 8, background: TOKENS.codeBg }}
               >
                 {/* Step 1 */}
@@ -890,116 +1052,116 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                   <rect
                     x="20"
                     y="30"
-                    width="150"
+                    width="160"
                     height="80"
                     rx="8"
                     fill={selectedPipelineStep === 'dataset' ? 'rgba(0, 212, 255, 0.25)' : 'rgba(16, 31, 56, 0.9)'}
                     stroke={TOKENS.primary}
                     strokeWidth="1.5"
                   />
-                  <text x="95" y="62" fill={TOKENS.primary} fontSize="11" fontWeight="700" textAnchor="middle">
+                  <text x="100" y="58" fill={TOKENS.primary} fontSize="11" fontWeight="700" textAnchor="middle">
                     1. DATASET &amp; PROFILER
                   </text>
-                  <text x="95" y="82" fill={TOKENS.textMuted} fontSize="9" textAnchor="middle">
-                    Upload &amp; Inspect Columns
+                  <text x="100" y="78" fill={TOKENS.textMuted} fontSize="9.5" textAnchor="middle">
+                    Upload &amp; Inspect Data
                   </text>
                 </g>
 
                 {/* Arrow 1 */}
-                <path d="M 175 70 L 195 70" stroke={TOKENS.borderActive} strokeWidth="2" markerEnd="url(#arrow)" />
+                <path d="M 185 70 L 200 70" stroke={TOKENS.borderActive} strokeWidth="2" />
 
                 {/* Step 2 */}
                 <g onClick={() => setSelectedPipelineStep('preprocessing')} style={{ cursor: 'pointer' }}>
                   <rect
-                    x="200"
+                    x="205"
                     y="30"
-                    width="150"
+                    width="160"
                     height="80"
                     rx="8"
                     fill={selectedPipelineStep === 'preprocessing' ? 'rgba(129, 140, 248, 0.25)' : 'rgba(16, 31, 56, 0.9)'}
                     stroke={TOKENS.accentViolet}
                     strokeWidth="1.5"
                   />
-                  <text x="275" y="62" fill={TOKENS.accentViolet} fontSize="11" fontWeight="700" textAnchor="middle">
+                  <text x="285" y="58" fill={TOKENS.accentViolet} fontSize="11" fontWeight="700" textAnchor="middle">
                     2. DATA PREPROCESSING
                   </text>
-                  <text x="275" y="82" fill={TOKENS.textMuted} fontSize="9" textAnchor="middle">
-                    Fill Gaps &amp; Scale Numbers
+                  <text x="285" y="78" fill={TOKENS.textMuted} fontSize="9.5" textAnchor="middle">
+                    Clean, Impute &amp; Scale
                   </text>
                 </g>
 
                 {/* Arrow 2 */}
-                <path d="M 355 70 L 375 70" stroke={TOKENS.borderActive} strokeWidth="2" />
+                <path d="M 370 70 L 385 70" stroke={TOKENS.borderActive} strokeWidth="2" />
 
                 {/* Step 3 */}
                 <g onClick={() => setSelectedPipelineStep('studio')} style={{ cursor: 'pointer' }}>
                   <rect
-                    x="380"
+                    x="390"
                     y="30"
-                    width="150"
+                    width="160"
                     height="80"
                     rx="8"
                     fill={selectedPipelineStep === 'studio' ? 'rgba(0, 245, 160, 0.25)' : 'rgba(16, 31, 56, 0.9)'}
                     stroke={TOKENS.accentEmerald}
                     strokeWidth="1.5"
                   />
-                  <text x="455" y="62" fill={TOKENS.accentEmerald} fontSize="11" fontWeight="700" textAnchor="middle">
+                  <text x="470" y="58" fill={TOKENS.accentEmerald} fontSize="10" fontWeight="700" textAnchor="middle">
                     3. CODE &amp; TRAINING STUDIO
                   </text>
-                  <text x="455" y="82" fill={TOKENS.textMuted} fontSize="9" textAnchor="middle">
-                    Pick Model &amp; Train Code
+                  <text x="470" y="78" fill={TOKENS.textMuted} fontSize="9.5" textAnchor="middle">
+                    Code, Configure &amp; Run
                   </text>
                 </g>
 
                 {/* Arrow 3 */}
-                <path d="M 535 70 L 555 70" stroke={TOKENS.borderActive} strokeWidth="2" />
+                <path d="M 555 70 L 570 70" stroke={TOKENS.borderActive} strokeWidth="2" />
 
                 {/* Step 4 */}
                 <g onClick={() => setSelectedPipelineStep('results')} style={{ cursor: 'pointer' }}>
                   <rect
-                    x="560"
+                    x="575"
                     y="30"
-                    width="130"
+                    width="160"
                     height="80"
                     rx="8"
                     fill={selectedPipelineStep === 'results' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 31, 56, 0.9)'}
                     stroke={TOKENS.accentAmber}
                     strokeWidth="1.5"
                   />
-                  <text x="625" y="62" fill={TOKENS.accentAmber} fontSize="10.5" fontWeight="700" textAnchor="middle">
+                  <text x="655" y="58" fill={TOKENS.accentAmber} fontSize="10.5" fontWeight="700" textAnchor="middle">
                     4. RESULTS &amp; EVALUATION
                   </text>
-                  <text x="625" y="82" fill={TOKENS.textMuted} fontSize="9" textAnchor="middle">
-                    Accuracy &amp; Metrics
+                  <text x="655" y="78" fill={TOKENS.textMuted} fontSize="9.5" textAnchor="middle">
+                    Leaderboard, ROC &amp; AUC
                   </text>
                 </g>
 
                 {/* Arrow 4 */}
-                <path d="M 695 70 L 710 70" stroke={TOKENS.borderActive} strokeWidth="2" />
+                <path d="M 740 70 L 755 70" stroke={TOKENS.borderActive} strokeWidth="2" />
 
                 {/* Step 5 */}
                 <g onClick={() => setSelectedPipelineStep('predictions')} style={{ cursor: 'pointer' }}>
                   <rect
-                    x="715"
+                    x="760"
                     y="30"
-                    width="110"
+                    width="160"
                     height="80"
                     rx="8"
                     fill={selectedPipelineStep === 'predictions' ? 'rgba(0, 212, 255, 0.25)' : 'rgba(16, 31, 56, 0.9)'}
                     stroke={TOKENS.primary}
                     strokeWidth="1.5"
                   />
-                  <text x="770" y="62" fill={TOKENS.primary} fontSize="10" fontWeight="700" textAnchor="middle">
+                  <text x="840" y="58" fill={TOKENS.primary} fontSize="10.5" fontWeight="700" textAnchor="middle">
                     5. MODEL PREDICTIONS
                   </text>
-                  <text x="770" y="82" fill={TOKENS.textMuted} fontSize="9" textAnchor="middle">
+                  <text x="840" y="78" fill={TOKENS.textMuted} fontSize="9.5" textAnchor="middle">
                     Test or Bulk Score
                   </text>
                 </g>
 
                 {/* Bottom Guide Bar */}
-                <rect x="20" y="130" width="805" height="30" rx="6" fill="rgba(0, 212, 255, 0.08)" />
-                <text x="420" y="150" fill={TOKENS.textSecondary} fontSize="11" fontWeight="600" textAnchor="middle">
+                <rect x="20" y="130" width="900" height="32" rx="6" fill="rgba(0, 212, 255, 0.08)" />
+                <text x="470" y="151" fill={TOKENS.textSecondary} fontSize="11" fontWeight="600" textAnchor="middle">
                   Every step is connected: change your settings, regenerate code, and train models with 1 click.
                 </text>
               </svg>
@@ -1130,7 +1292,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               Real-world data is almost never clean. Models cannot do math with missing values or raw text words, and columns with huge numbers can overshadow small numbers.
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 20 }}>
               {/* Imputation Box */}
               <div style={{ padding: '16px', borderRadius: 10, background: TOKENS.bgElevated, border: '1px solid ' + TOKENS.border }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: TOKENS.primary, marginBottom: 6 }}>
@@ -1763,7 +1925,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               ))}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
               {filteredGlossary.map((item) => (
                 <div
                   key={item.term}
@@ -1774,8 +1936,8 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                     border: '1px solid ' + TOKENS.border,
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, color: TOKENS.primary, fontSize: 13.5 }}>{item.term}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
+                    <span style={{ fontWeight: 700, color: TOKENS.primary, fontSize: 13.5, wordBreak: 'break-word' }}>{item.term}</span>
                     <span
                       style={{
                         fontSize: 10,
@@ -1784,12 +1946,13 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                         background: 'rgba(0, 212, 255, 0.1)',
                         color: TOKENS.textMuted,
                         border: '1px solid rgba(0, 212, 255, 0.15)',
+                        flexShrink: 0,
                       }}
                     >
                       {item.category}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12.5, color: TOKENS.textSecondary, lineHeight: 1.5 }}>{item.definition}</div>
+                  <div style={{ fontSize: 12.5, color: TOKENS.textSecondary, lineHeight: 1.5, wordBreak: 'break-word' }}>{item.definition}</div>
                 </div>
               ))}
             </div>
@@ -1812,7 +1975,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               Useful shortcuts to speed up your workflow in the code editor:
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
               {shortcuts.map((sc) => (
                 <div
                   key={sc.key}

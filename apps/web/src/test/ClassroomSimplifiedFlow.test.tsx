@@ -181,7 +181,11 @@ describe('Simplified Classroom & Assignment Flow', () => {
       // Click Start Exam (opens Safe Exam Browser pre-flight modal)
       fireEvent.click(startBtns[0]);
 
-      // If Safe Exam Browser pre-flight modal appears, confirm lockdown
+      // If Safe Exam Browser pre-flight modal appears, tick consent checkbox then confirm lockdown
+      const consentCheckbox = screen.queryByRole('checkbox');
+      if (consentCheckbox) {
+        fireEvent.click(consentCheckbox);
+      }
       const confirmBtn = screen.queryByRole('button', { name: /start exam \(enter lockdown\)|enter lockdown/i });
       if (confirmBtn) {
         fireEvent.click(confirmBtn);

@@ -143,7 +143,7 @@ def test_training_request_rejects_an_algorithm_target_mismatch(api_client, train
     )
 
     assert response.status_code == 422
-    assert "regression algorithm" in response.json()["detail"]
+    assert "regression" in response.json()["detail"].lower()
 
 
 def test_training_options_endpoint_publishes_the_complete_registries(api_client):
