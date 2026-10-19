@@ -24,6 +24,7 @@ from app.routers.classrooms import (
     list_lab_exams,
     get_lab_exam,
     deploy_lab_model,
+    predict_lab_slot,
     evaluate_lab_model,
     submit_lab_exam,
 )
@@ -212,6 +213,22 @@ print("[Student Script] Trained and exported model v2 with updated hyperparamete
         assert deploy_res_2.is_updated_in_place is True, "Must be flagged as in-place update"
         assert deploy_res_2.version_count >= 2, "Version count must increment on update"
         assert deploy_res_2.model_id == model_id_v2, "Deployed model must be updated to V2"
+
+    # 5b. Live Test Prediction Execution (predict_lab_slot)
+    async with AsyncSessionLocal() as db:
+        pred_res = await predict_lab_slot(
+            exam_id=exam_id,
+            payload={
+                "deployment_id": first_deployment_id,
+                "inputs": deploy_res_2.sample_inputs,
+            },
+            current_user=None,
+            db=db,
+        )
+        assert pred_res["status"] == "SUCCESS"
+        assert pred_res["prediction"] is not None
+        assert pred_res["latency_ms"] > 0
+        assert "probabilities" in pred_res
 
     # 6. Automated Benchmark Evaluation against Rubric
     async with AsyncSessionLocal() as db:

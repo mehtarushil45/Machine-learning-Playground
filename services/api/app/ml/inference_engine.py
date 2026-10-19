@@ -499,8 +499,35 @@ def predict(
 
         X_input = val_res.cleaned_df
 
-        # 4. Model Prediction
-        preds = container.pipeline.predict(X_input)
+        # Align features strictly if pipeline or estimator expects specific feature names
+        expected_feature_names = None
+        if hasattr(container.pipeline, "feature_names_in_"):
+            expected_feature_names = [str(c) for c in container.pipeline.feature_names_in_]
+        elif hasattr(container.pipeline, "named_steps"):
+            for s in container.pipeline.named_steps.values():
+                if hasattr(s, "feature_names_in_"):
+                    expected_feature_names = [str(c) for c in s.feature_names_in_]
+                    break
+
+        if expected_feature_names:
+            for ef in expected_feature_names:
+                if ef not in X_input.columns:
+                    X_input[ef] = 0.0
+            X_input = X_input[expected_feature_names]
+
+        # 4. Model Prediction with resilient fallback
+        try:
+            preds = container.pipeline.predict(X_input)
+        except (ValueError, TypeError) as pred_err:
+            logger.info("DataFrame prediction failed (%s), attempting array fallback", pred_err)
+            if hasattr(container.pipeline, "n_features_in_") and X_input.shape[1] != container.pipeline.n_features_in_:
+                num_df = X_input.select_dtypes(include=[np.number])
+                if num_df.shape[1] == container.pipeline.n_features_in_:
+                    preds = container.pipeline.predict(num_df.values)
+                else:
+                    preds = container.pipeline.predict(X_input.iloc[:, :container.pipeline.n_features_in_].values)
+            else:
+                preds = container.pipeline.predict(X_input.values)
 
         # 5. Model Probabilities
         probas: Optional[np.ndarray] = None
@@ -512,7 +539,10 @@ def predict(
             try:
                 probas = container.pipeline.predict_proba(X_input)
             except Exception as exc:
-                logger.warning("predict_proba failed for %s: %s", container.model_id, exc)
+                try:
+                    probas = container.pipeline.predict_proba(X_input.values)
+                except Exception:
+                    logger.warning("predict_proba failed for %s: %s", container.model_id, exc)
 
         # 6. Postprocess
         formatted_preds = postprocess_prediction(

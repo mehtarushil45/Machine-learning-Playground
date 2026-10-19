@@ -546,19 +546,29 @@ async def _run_execution(
                             dest_model_path = os.path.join(dest_dir, "model.joblib")
                             shutil.copy2(art_src, dest_model_path)
 
-                            # Introspect trained pipeline
+                            # Introspect trained pipeline or estimator
                             algo_name = "Code Studio Pipeline"
                             feat_cols: List[str] = []
                             cat_cols: List[str] = []
                             num_cols: List[str] = []
+                            is_cls = False
                             try:
                                 import joblib
                                 pipe = joblib.load(art_src)
+
+                                # 1. Extract algorithm name & estimator
                                 if hasattr(pipe, "named_steps"):
-                                    for step_key in ("estimator", "classifier", "regressor"):
+                                    for step_key in ("estimator", "classifier", "regressor", "model", "clf", "rf"):
                                         if step_key in pipe.named_steps:
-                                            algo_name = type(pipe.named_steps[step_key]).__name__
+                                            step_obj = pipe.named_steps[step_key]
+                                            algo_name = type(step_obj).__name__
+                                            is_cls = hasattr(step_obj, "classes_") or "classifier" in algo_name.lower() or "svc" in algo_name.lower()
                                             break
+                                    else:
+                                        if hasattr(pipe, "steps") and pipe.steps:
+                                            last_step = pipe.steps[-1][1]
+                                            algo_name = type(last_step).__name__
+                                            is_cls = hasattr(last_step, "classes_") or "classifier" in algo_name.lower()
                                     if "preprocessor" in pipe.named_steps:
                                         prep = pipe.named_steps["preprocessor"]
                                         trans_list = getattr(prep, "transformers_", None) or getattr(prep, "transformers", None)
@@ -571,8 +581,30 @@ async def _run_execution(
                                                         cat_cols.extend(c_list)
                                                     elif tname in ("numeric", "num") or "num" in str(tname).lower():
                                                         num_cols.extend(c_list)
+                                else:
+                                    algo_name = type(pipe).__name__
+                                    is_cls = hasattr(pipe, "classes_") or "classifier" in algo_name.lower() or "forest" in algo_name.lower() or "svc" in algo_name.lower()
+
+                                # 2. Extract feature columns from feature_names_in_ if not yet discovered
+                                if not feat_cols:
+                                    if hasattr(pipe, "feature_names_in_"):
+                                        feat_cols = [str(c) for c in pipe.feature_names_in_]
+                                    elif hasattr(pipe, "named_steps"):
+                                        for s_obj in pipe.named_steps.values():
+                                            if hasattr(s_obj, "feature_names_in_"):
+                                                feat_cols = [str(c) for c in s_obj.feature_names_in_]
+                                                break
+                                    elif hasattr(pipe, "steps"):
+                                        for _, s_obj in pipe.steps:
+                                            if hasattr(s_obj, "feature_names_in_"):
+                                                feat_cols = [str(c) for c in s_obj.feature_names_in_]
+                                                break
                             except Exception:
                                 pass
+
+                            detected_prob_type = "classification" if (
+                                is_cls or "classifier" in algo_name.lower() or "forest" in algo_name.lower()
+                            ) else "regression"
 
                             register_model({
                                 "model_id": model_id,
@@ -580,7 +612,7 @@ async def _run_execution(
                                 "algorithm": algo_name,
                                 "model_path": dest_model_path,
                                 "dataset_id": rec.dataset_id or "dataset.csv",
-                                "problem_type": "classification" if "classifier" in algo_name.lower() or "forest" in algo_name.lower() else "regression",
+                                "problem_type": detected_prob_type,
                                 "feature_columns": feat_cols,
                                 "categorical_columns": cat_cols,
                                 "numeric_columns": num_cols,

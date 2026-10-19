@@ -430,7 +430,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [activeDatasetId]);
 
   // 2. Load Instructor Data
   const loadInstructorData = useCallback(async () => {
@@ -779,20 +779,32 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
     setIsPredicting(true);
     setPredictionResult(null);
     try {
-      // Coerce inputs according to deployment schema types
+      // Coerce inputs according to deployment schema types and expected features
       const formattedInputs: Record<string, any> = {};
-      for (const [k, v] of Object.entries(testInputs)) {
+      const expectedKeys = deployment.feature_columns?.length
+        ? deployment.feature_columns
+        : Object.keys(deployment.input_schema || deployment.sample_inputs || testInputs);
+
+      for (const k of expectedKeys) {
+        const rawVal = testInputs[k] !== undefined && testInputs[k] !== '' ? testInputs[k] : deployment.sample_inputs?.[k];
         const schemaType = deployment.input_schema?.[k]?.type || 'numeric';
         if (schemaType === 'numeric') {
-          if (typeof v === 'number') {
-            formattedInputs[k] = v;
-          } else if (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v))) {
-            formattedInputs[k] = Number(v);
+          if (typeof rawVal === 'number' && !isNaN(rawVal)) {
+            formattedInputs[k] = rawVal;
+          } else if (typeof rawVal === 'string' && rawVal.trim() !== '' && !isNaN(Number(rawVal))) {
+            formattedInputs[k] = Number(rawVal);
           } else {
             formattedInputs[k] = deployment.sample_inputs?.[k] ?? 0;
           }
         } else {
-          formattedInputs[k] = String(v ?? deployment.sample_inputs?.[k] ?? '');
+          formattedInputs[k] = String(rawVal ?? deployment.sample_inputs?.[k] ?? '');
+        }
+      }
+
+      // Also preserve any extra keys that the student typed
+      for (const [k, v] of Object.entries(testInputs)) {
+        if (!(k in formattedInputs) && v !== '' && v !== undefined) {
+          formattedInputs[k] = typeof v === 'number' ? v : !isNaN(Number(v)) ? Number(v) : String(v);
         }
       }
 

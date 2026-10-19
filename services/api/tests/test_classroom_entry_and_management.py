@@ -537,7 +537,7 @@ async def test_seeded_200_rows_roster_pagination():
             users_to_add.append(
                 User(
                     id=uid,
-                    email=f"student_{i}_{uuid.uuid4().hex[:4]}@mega.edu",
+                    email=f"student_{i}_{uuid.uuid4().hex}@mega.edu",
                     hashed_password="mock_hashed_pw",
                     full_name=f"Student {i:03d}",
                     role=UserRole.learner,
