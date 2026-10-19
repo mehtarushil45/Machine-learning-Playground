@@ -236,9 +236,12 @@ def _compute_roc_pr_auc(
                 else:
                     prob_pos = y_prob
 
-                roc_val = round(float(roc_auc_score(y_test_arr, prob_pos)), 6)
+                pos_label = unique[1]
+                y_binary = (y_test_arr == pos_label).astype(int)
 
-                precision, recall, _ = precision_recall_curve(y_test_arr, prob_pos)
+                roc_val = round(float(roc_auc_score(y_binary, prob_pos)), 6)
+
+                precision, recall, _ = precision_recall_curve(y_binary, prob_pos)
                 pr_val = round(float(auc(recall, precision)), 6)
 
     except Exception as exc:

@@ -298,7 +298,8 @@ def execute_ml_training_pipeline_sync(
             # the rest of the registry correctly accepts the platform's native
             # string labels. Keep the source labels in job metadata so clients
             # can map XGBoost predictions back to the uploaded target values.
-            if isinstance(estimator, XGBClassifier):
+            estimator_cls_name = type(estimator).__name__
+            if isinstance(estimator, XGBClassifier) or estimator_cls_name in ("XGBClassifier", "LGBMClassifier"):
                 label_encoder = LabelEncoder()
                 label_encoder.fit(y)
                 class_labels = [str(c) for c in np.asarray(label_encoder.classes_)]
@@ -310,8 +311,17 @@ def execute_ml_training_pipeline_sync(
                 .fillna(0.0)
             )
 
+        n_samples = len(X)
+        effective_test_size: float | int = test_ratio
+        if n_samples >= 4:
+            expected_test_count = int(round(test_ratio * n_samples))
+            if expected_test_count < 2:
+                effective_test_size = 2 / n_samples
+            elif expected_test_count >= n_samples:
+                effective_test_size = max(1, n_samples - 2) / n_samples
+
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_ratio, random_state=seed
+            X, y, test_size=effective_test_size, random_state=seed
         )
 
         # ── Stage 5: Hyperparameter Search ───────────────────────────────────

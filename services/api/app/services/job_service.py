@@ -121,6 +121,13 @@ def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
     """Verify algorithm compatibility by inspecting target column sample (<=50 rows) using authoritative ProblemType detector."""
     _validate_dataset_schema_and_features(request)
 
+    algo_def = ALGORITHM_REGISTRY.get(request.algorithm)
+    if not algo_def:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown algorithm '{request.algorithm}'. Select a valid algorithm.",
+        )
+
     # Read lightweight sample of target column only
     try:
         try:
@@ -136,9 +143,34 @@ def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
             detail=f"Unable to read dataset sample for validation: {exc}",
         ) from exc
 
-    target_series = pd.Series(sample_df[request.target_column])
-    detected_problem: ProblemType = detect_problem_type_from_series(target_series)
-    task_type = detected_problem.to_task_type()
+    target_series = pd.Series(sample_df[request.target_column]).dropna()
+    is_numeric = pd.api.types.is_numeric_dtype(target_series)
+    n_unique = target_series.nunique()
+
+    # If user selected a regression algorithm and target is numeric with variation, allow regression:
+    if algo_def.task_type == "regression":
+        if not is_numeric:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Target column '{request.target_column}' is non-numeric ({target_series.dtype}), but '{algo_def.display_name}' requires numeric continuous values for regression.",
+            )
+        if n_unique <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Target column '{request.target_column}' has only {n_unique} unique value. Regression requires a target with variation.",
+            )
+        if n_unique == 2:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"'{algo_def.display_name}' is a regression algorithm, but the selected target '{request.target_column}' requires classification. Choose a compatible algorithm.",
+            )
+        task_type = "regression"
+    else:
+        # User selected a classification algorithm
+        detected_problem: ProblemType = detect_problem_type_from_series(target_series)
+        task_type = detected_problem.to_task_type()
+        if task_type == "regression" and not is_numeric:
+            task_type = "classification"
 
     try:
         get_algorithm(request.algorithm, task_type=task_type, random_state=request.random_seed or 42)
@@ -148,7 +180,7 @@ def _validate_algorithm_target_compatibility(request: TrainingRequest) -> str:
             detail=str(exc),
         ) from exc
 
-    return ALGORITHM_REGISTRY[request.algorithm].display_name
+    return algo_def.display_name
 
 
 async def _validate_recommendation_provenance(
@@ -494,16 +526,24 @@ class JobService:
         if db is not None:
             user_uuid = None
             try:
-                user_uuid = uuid.UUID(user_id)
-            except ValueError:
-                pass
+                candidate_user_uuid = uuid.UUID(user_id)
+                from app.models.user import User as UserModel
+                u_check = await db.execute(select(UserModel.id).where(UserModel.id == candidate_user_uuid))
+                if u_check.scalar_one_or_none() is not None:
+                    user_uuid = candidate_user_uuid
+            except Exception:
+                user_uuid = None
 
             try:
                 dataset_uuid = None
                 if request.dataset_id:
                     try:
-                        dataset_uuid = uuid.UUID(request.dataset_id)
-                    except ValueError:
+                        candidate_ds_uuid = uuid.UUID(request.dataset_id)
+                        from app.models.dataset import Dataset as DatasetModel
+                        d_check = await db.execute(select(DatasetModel.id).where(DatasetModel.id == candidate_ds_uuid))
+                        if d_check.scalar_one_or_none() is not None:
+                            dataset_uuid = candidate_ds_uuid
+                    except Exception:
                         dataset_uuid = None
 
                 db_job = Job(

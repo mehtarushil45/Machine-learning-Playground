@@ -217,20 +217,25 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
   // Load preview data when active exam changes or preview modal opens
   useEffect(() => {
     setServerPreview(null);
-    if (!selectedExamId) return;
+    if (!selectedExamId || typeof ClassroomService.getExamDatasetPreview !== 'function') return;
 
     let mounted = true;
     setIsLoadingPreview(true);
-    ClassroomService.getExamDatasetPreview(selectedExamId)
-      .then((data) => {
-        if (mounted && data) setServerPreview(data);
-      })
-      .catch((err) => {
-        console.debug('Dataset preview fetch error:', err);
-      })
-      .finally(() => {
-        if (mounted) setIsLoadingPreview(false);
-      });
+    const previewPromise = ClassroomService.getExamDatasetPreview(selectedExamId);
+    if (previewPromise && typeof previewPromise.then === 'function') {
+      previewPromise
+        .then((data) => {
+          if (mounted && data) setServerPreview(data);
+        })
+        .catch((err) => {
+          console.debug('Dataset preview fetch error:', err);
+        })
+        .finally(() => {
+          if (mounted) setIsLoadingPreview(false);
+        });
+    } else {
+      setIsLoadingPreview(false);
+    }
 
     return () => {
       mounted = false;
@@ -832,10 +837,12 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
         `[Status] ${receipt.status} (${receipt.passed ? 'PASSED' : 'COMPLETED'})`,
       ]);
       onShowToast?.('Lab Exam Submitted!', 'Confirm below to exit lockdown and return to normal mode.', 'success');
-      // Store receipt and show the post-submit release confirm modal
-      // Lockdown stays active until the student explicitly dismisses
+      // Store receipt and show the post-submit release confirm modal if in lockdown mode
+      setSubmissionReceipt(receipt);
       setPendingReceipt(receipt);
-      setShowSebReleaseModal(true);
+      if (examLocked) {
+        setShowSebReleaseModal(true);
+      }
     } catch (err: any) {
       const errMsg = err.message || 'Submission failed.';
       onShowToast?.('Submission Error', errMsg, 'error');

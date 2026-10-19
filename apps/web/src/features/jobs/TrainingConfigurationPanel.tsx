@@ -90,29 +90,11 @@ export const TrainingConfigurationPanel = memo(function TrainingConfigurationPan
     : trainingOptions.imputers[0]?.key || 'median'
 
   const algorithmOptions = useMemo(() => {
-    const classificationOptions = trainingOptions.algorithms
-      .filter((option) => option.task_type === 'classification')
-      .map((option) => ({ value: option.key, label: option.display_name }))
-
-    const regressionOptions = trainingOptions.algorithms
-      .filter((option) => option.task_type === 'regression')
-      .map((option) => ({ value: option.key, label: option.display_name }))
-
-    const groups: { label: string; options: { value: string; label: string }[] }[] = []
-    if (classificationOptions.length > 0) {
-      groups.push({
-        label: 'Classification',
-        options: classificationOptions,
-      })
-    }
-    if (regressionOptions.length > 0) {
-      groups.push({
-        label: 'Regression',
-        options: regressionOptions,
-      })
-    }
-    return groups
-  }, [trainingOptions.algorithms])
+    return taskAlgorithms.map((option) => ({
+      value: option.key,
+      label: option.display_name,
+    }))
+  }, [taskAlgorithms])
   const scalerOptions = useMemo(
     () => trainingOptions.scalers.map((option) => ({ value: option.key, label: option.display_name })),
     [trainingOptions.scalers],

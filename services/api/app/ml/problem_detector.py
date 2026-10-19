@@ -149,7 +149,20 @@ def detect_problem_type_from_series(
             )
             return ProblemType.REGRESSION
 
-    # If strictly discrete integer values:
+    # If small dataset with high unique ratio (>35% unique and >4 distinct values), treat as continuous regression
+    total_samples = len(clean_series)
+    if total_samples > 0:
+        unique_ratio = n_unique / total_samples
+        if n_unique > 5 and unique_ratio > 0.35:
+            logger.info(
+                "Problem type resolved as REGRESSION (numeric target with high unique ratio %.2f, %d/%d values).",
+                unique_ratio,
+                n_unique,
+                total_samples,
+            )
+            return ProblemType.REGRESSION
+
+    # If strictly discrete integer values with low cardinality:
     if n_unique <= _CLASSIFICATION_UNIQUE_CAP:
         logger.info(
             "Problem type resolved as CLASSIFICATION via discrete integer cardinality (%d unique values).",

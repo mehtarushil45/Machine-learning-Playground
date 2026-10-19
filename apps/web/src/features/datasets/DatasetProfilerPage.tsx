@@ -724,10 +724,20 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   }, []);
 
   /* ── Handlers ───────────────────────────────────────────────────── */
+  const [manualTaskOverride, setManualTaskOverride] = useState<'classification' | 'regression' | null>(null);
+
   const handleDataLoaded = useCallback(
     (d: Dataset) => {
       loadDataset(d);
       setLifecycleStage('dataset');
+      setManualTaskOverride(null);
+      setLaunchError(null);
+      setAnalyzeError(null);
+      setRecommendationProvenance({
+        recommendationJobId: null,
+        isRecommended: false,
+        recommendedAlgorithmId: null,
+      });
       onShowToast('Dataset Loaded', `${d.fileName} (${d.rows.length} rows, ${d.columns.length} cols)`, 'success');
     },
     [loadDataset, setLifecycleStage, onShowToast],
@@ -745,6 +755,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
       const next = selectTargetColumn(col, selectedFeatures);
       setSelectedTarget(next.selectedTarget);
       setSelectedFeatures(next.selectedFeatures);
+      setManualTaskOverride(null);
     },
     [selectedFeatures, setSelectedTarget, setSelectedFeatures],
   );
@@ -763,13 +774,45 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
   const issueCount = (health?.issues || []).filter((i) => i.severity !== 'info').length;
 
-  const selectedTaskType = useMemo<'classification' | 'regression'>(() => {
+  const isTargetNumeric = useMemo(() => {
+    if (!dataset || !selectedTarget) return false;
+    const colIdx = dataset.columns.indexOf(selectedTarget);
+    if (colIdx < 0) return false;
+    const vals = (dataset.rows || [])
+      .map((r) => r[colIdx])
+      .filter((v) => v !== null && v !== undefined && v !== '');
+    return vals.length > 0 && vals.every((v) => !isNaN(Number(v)));
+  }, [dataset, selectedTarget]);
+
+  const detectedTaskType = useMemo<'classification' | 'regression'>(() => {
     const targetSuggestion = recommendations?.target_suggestions.find(
       (suggestion) => suggestion.column_name === selectedTarget,
     );
     const recommendedTask = targetSuggestion?.suggested_task || recommendations?.recommended_problem_type;
-    return recommendedTask === 'Regression' ? 'regression' : 'classification';
-  }, [recommendations, selectedTarget]);
+    if (recommendedTask === 'Regression') return 'regression';
+    if (recommendedTask === 'Classification') return 'classification';
+
+    // Fallback: check actual column values in dataset
+    if (dataset && selectedTarget) {
+      const colIdx = dataset.columns.indexOf(selectedTarget);
+      if (colIdx >= 0) {
+        const vals = (dataset.rows || [])
+          .map((r) => r[colIdx])
+          .filter((v) => v !== null && v !== undefined && v !== '');
+        const isNum = vals.length > 0 && vals.every((v) => !isNaN(Number(v)));
+        if (!isNum) return 'classification';
+        const uniqueCount = new Set(vals).size;
+        if (uniqueCount === 2) return 'classification';
+        if (uniqueCount > 20 || (vals.length <= 50 && uniqueCount > 5 && uniqueCount / vals.length > 0.35)) {
+          return 'regression';
+        }
+      }
+    }
+    return 'classification';
+  }, [recommendations, selectedTarget, dataset]);
+
+  const selectedTaskType: 'classification' | 'regression' =
+    isTargetNumeric && manualTaskOverride ? manualTaskOverride : detectedTaskType;
 
   const taskAlgorithms = useMemo(
     () => trainingOptions.algorithms.filter((option) => option.task_type === selectedTaskType),
@@ -778,7 +821,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
   const effectiveAlgorithm = taskAlgorithms.some((option) => option.key === algorithm)
     ? algorithm
-    : taskAlgorithms[0]?.key || (selectedTaskType === 'classification' ? 'random_forest_classifier' : 'random_forest_regressor');
+    : taskAlgorithms[0]?.key || (selectedTaskType === 'classification' ? 'random_forest_classifier' : 'linear_regression');
 
   useEffect(() => {
     if (taskAlgorithms.length > 0 && !taskAlgorithms.some((option) => option.key === algorithm)) {
@@ -979,31 +1022,16 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const minSplit = trainingOptions.min_train_test_split ?? 0.5;
   const maxSplit = trainingOptions.max_train_test_split ?? 0.95;
 
-  /* ── Dynamic Dropdown Options from Backend ──────────────────────── */
+  /* ── Dynamic Dropdown Options from Backend (Task-filtered) ───────── */
   const algorithmSelectOptions = useMemo(() => {
-    const classificationOptions = trainingOptions.algorithms
-      .filter((option) => option.task_type === 'classification')
-      .map((option) => ({ value: option.key, label: option.display_name }));
-
-    const regressionOptions = trainingOptions.algorithms
-      .filter((option) => option.task_type === 'regression')
-      .map((option) => ({ value: option.key, label: option.display_name }));
-
-    const groups: { label: string; options: { value: string; label: string }[] }[] = [];
-    if (classificationOptions.length > 0) {
-      groups.push({
-        label: 'Classification',
-        options: classificationOptions,
-      });
-    }
-    if (regressionOptions.length > 0) {
-      groups.push({
-        label: 'Regression',
-        options: regressionOptions,
-      });
-    }
-    return groups;
-  }, [trainingOptions.algorithms]);
+    const currentTaskAlgos = trainingOptions.algorithms.filter(
+      (option) => option.task_type === selectedTaskType,
+    );
+    return currentTaskAlgos.map((option) => ({
+      value: option.key,
+      label: option.display_name,
+    }));
+  }, [trainingOptions.algorithms, selectedTaskType]);
 
   const scalerOptions = useMemo(() => {
     return trainingOptions.scalers.map((option) => ({ value: option.key, label: option.display_name }));
@@ -1996,8 +2024,16 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                     >
                       Training Setup
                     </span>
-                    {/* Problem-type pill — derived from recommendations */}
-                    <span
+                    {/* Problem-type pill — interactive toggle for numeric targets */}
+                    <button
+                      type="button"
+                      disabled={!isTargetNumeric}
+                      onClick={() => {
+                        if (isTargetNumeric) {
+                          const nextTask = selectedTaskType === 'regression' ? 'classification' : 'regression';
+                          setManualTaskOverride(nextTask);
+                        }
+                      }}
                       style={{
                         fontSize: 9,
                         fontWeight: 700,
@@ -2014,11 +2050,20 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                             : 'rgba(107,92,166,0.4)'
                         }`,
                         textTransform: 'capitalize',
+                        cursor: isTargetNumeric ? 'pointer' : 'default',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
                       }}
-                      title="Problem type detected from the target column"
+                      title={
+                        isTargetNumeric
+                          ? `Target '${selectedTarget}' is numeric. Click to toggle between Classification and Regression.`
+                          : `Problem type detected from target '${selectedTarget}'.`
+                      }
                     >
-                      {selectedTaskType === 'regression' ? 'Regression' : 'Classification'}
-                    </span>
+                      <span>{selectedTaskType === 'regression' ? '📈 Regression' : '🔍 Classification'}</span>
+                      {isTargetNumeric && <span style={{ fontSize: 8, opacity: 0.7 }}>⇄</span>}
+                    </button>
                   </div>
 
                   <div
@@ -2047,19 +2092,22 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
                     {/* Algorithm Select */}
                     <div>
-                      <label
-                        style={{
-                          display: 'block',
-                          fontSize: 9,
-                          fontWeight: 700,
-                          color: BB.disabled,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.08em',
-                          marginBottom: 3,
-                        }}
-                      >
-                        Algorithm
-                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+                        <label
+                          style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: BB.disabled,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.08em',
+                          }}
+                        >
+                          Algorithm ({selectedTaskType === 'regression' ? 'Regression' : 'Classification'})
+                        </label>
+                        <span style={{ fontSize: 9, color: BB.muted }}>
+                          {algorithmSelectOptions.length} models
+                        </span>
+                      </div>
                       <Select
                         value={effectiveAlgorithm}
                         onChange={setAlgorithm}
@@ -2068,7 +2116,9 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       />
                       {/* Beginner helper text */}
                       <div style={{ fontSize: 9, color: BB.disabled, marginTop: 3 }}>
-                        The model that learns patterns from your data.
+                        {selectedTaskType === 'classification'
+                          ? 'Classification models predict discrete categories or classes (e.g., Churn, Status).'
+                          : 'Regression models predict continuous numerical values (e.g., Score, Age, Price).'}
                       </div>
                     </div>
 

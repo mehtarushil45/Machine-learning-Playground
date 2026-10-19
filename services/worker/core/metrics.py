@@ -55,10 +55,16 @@ def evaluate_regression(y_true: Any, y_pred: Any) -> Dict[str, float]:
     mae = mean_absolute_error(y_true, y_pred)
     mse = mean_squared_error(y_true, y_pred)
     rmse = np.sqrt(mse)
-    r2 = r2_score(y_true, y_pred)
+    try:
+        if len(y_true) >= 2:
+            r2 = float(r2_score(y_true, y_pred))
+        else:
+            r2 = 0.0
+    except Exception:
+        r2 = 0.0
 
     return {
-        "mae": round(mae, 4),
+        "mae": round(float(mae), 4),
         "mse": round(float(mse), 4),
         "rmse": round(float(rmse), 4),
         "r2_score": round(r2, 4),
