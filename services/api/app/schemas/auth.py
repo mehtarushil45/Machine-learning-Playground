@@ -76,6 +76,7 @@ class OAuthProvidersResponse(BaseModel):
 
     google: bool = Field(..., description="True if Google OAuth is configured and active")
     microsoft: bool = Field(..., description="True if Microsoft OAuth is configured and active")
+    google_client_id: Optional[str] = Field(None, description="Google OAuth Client ID if configured")
 
 
 class OAuthAuthorizeResponse(BaseModel):

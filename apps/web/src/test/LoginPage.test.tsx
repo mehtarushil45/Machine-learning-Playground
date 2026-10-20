@@ -44,7 +44,7 @@ describe('LoginPage Component', () => {
     vi.clearAllMocks();
   });
 
-  it('renders branding, title, inputs, social sign-in buttons (Google & Microsoft only), and footer', () => {
+  it('renders branding, title, inputs, social sign-in buttons (Google), and footer', () => {
     renderWithAuth(<LoginPage />);
 
     // Branding
@@ -62,14 +62,14 @@ describe('LoginPage Component', () => {
     // Sign in button
     expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
 
-    // Social providers: Google and Microsoft exist, GitHub is omitted
+    // Social provider: Google is present, Microsoft & GitHub are omitted
     expect(screen.getByRole('button', { name: /google/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /microsoft/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /microsoft/i })).not.toBeInTheDocument();
     expect(screen.queryByTitle(/sign in with github/i)).not.toBeInTheDocument();
 
-    // Mode switch & Demo fill
+    // Mode switch: Sign Up is present, demo credentials is removed
     expect(screen.getByRole('button', { name: /^sign up$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /fill demo credentials/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /fill demo credentials/i })).not.toBeInTheDocument();
 
     // Footer
     expect(screen.getByText(/privacy policy/i)).toBeInTheDocument();
@@ -112,19 +112,52 @@ describe('LoginPage Component', () => {
     expect(passwordInput).toHaveAttribute('type', 'password');
   });
 
-  it('populates credentials when clicking Fill Demo Credentials', () => {
-    renderWithAuth(<LoginPage />);
+  it('submits registration form in Sign Up mode and automatically logs in', async () => {
+    const handleSuccess = vi.fn();
+    mockLogin.mockResolvedValueOnce(undefined);
 
-    const emailInput = screen.getByLabelText(/email address/i);
-    const passwordInput = screen.getByLabelText(/^password/i);
+    // Mock global fetch for /api/v1/auth/register
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockImplementation((url) => {
+      if (typeof url === 'string' && url.includes('/api/v1/auth/register')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ email: 'newuser@example.com', message: 'Registered' }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
 
-    expect(emailInput).toHaveValue('');
-    expect(passwordInput).toHaveValue('');
+    try {
+      renderWithAuth(<LoginPage onSuccess={handleSuccess} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /fill demo credentials/i }));
+      // Switch to Sign Up mode
+      fireEvent.click(screen.getByRole('button', { name: /^sign up$/i }));
 
-    expect(emailInput).toHaveValue('lead.engineer@apex-ml.internal');
-    expect(passwordInput).toHaveValue('DemoPassword123!');
+      // Fill in registration fields
+      fireEvent.change(screen.getByLabelText(/full name/i), {
+        target: { value: 'Alex Developer' },
+      });
+      fireEvent.change(screen.getByLabelText(/email address/i), {
+        target: { value: 'newuser@example.com' },
+      });
+      fireEvent.change(screen.getByLabelText(/^password/i), {
+        target: { value: 'NewSecurePassword123!' },
+      });
+
+      // Submit registration
+      fireEvent.click(screen.getByRole('button', { name: /^create account$/i }));
+
+      await waitFor(() => {
+        expect(mockLogin).toHaveBeenCalledWith({
+          username: 'newuser@example.com',
+          password: 'NewSecurePassword123!',
+        });
+        expect(handleSuccess).toHaveBeenCalled();
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('submits login form and calls onSuccess on success', async () => {
@@ -185,22 +218,6 @@ describe('LoginPage Component', () => {
       });
       expect(handleSuccess).toHaveBeenCalled();
     });
-  });
-
-  it('opens Microsoft Account Chooser modal and renders Microsoft accounts', () => {
-    renderWithAuth(<LoginPage />);
-
-    const msftBtn = screen.getByRole('button', { name: /microsoft/i });
-    fireEvent.click(msftBtn);
-
-    expect(screen.getByRole('dialog', { name: /sign in with microsoft/i })).toBeInTheDocument();
-    expect(screen.getByText('Pick an account')).toBeInTheDocument();
-    expect(screen.getByText('mehtarushil45@outlook.com')).toBeInTheDocument();
-    expect(screen.getByText('lead.engineer@apex-ml.internal')).toBeInTheDocument();
-
-    // Close modal
-    fireEvent.click(screen.getByTitle(/close dialog/i));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('displays error message banner when login fails', async () => {

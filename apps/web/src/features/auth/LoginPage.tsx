@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User, Lock, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, ArrowRight } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAuthContext } from '../../providers/AuthContext';
 
 export interface LoginPageProps {
@@ -354,15 +354,78 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
     [email, password, fullName, mode, rememberMe, login, onSuccess, onNavigate]
   );
 
-  // Quick Demo fill
-  const fillDemoAccount = () => {
-    setEmail('lead.engineer@apex-ml.internal');
-    setPassword('DemoPassword123!');
-    setErrorMessage(null);
-  };
+
+  // Dynamic Google Client ID from environment or backend
+  const [googleClientId, setGoogleClientId] = useState<string | null>(() => {
+    return (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_CLIENT_ID) || null;
+  });
+
+  useEffect(() => {
+    if (!googleClientId) {
+      fetch('/api/v1/auth/providers')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.google_client_id) {
+            setGoogleClientId(data.google_client_id);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [googleClientId]);
 
   // OAuth Account Selection Handlers
   const handleOpenGoogleOAuth = () => {
+    const activeClientId =
+      googleClientId ||
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_CLIENT_ID);
+
+    // Option 2: If Google Identity Services SDK is loaded in browser and Client ID is configured, open official Google popup
+    if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2 && activeClientId) {
+      try {
+        const client = (window as any).google.accounts.oauth2.initTokenClient({
+          client_id: activeClientId,
+          scope: 'openid email profile',
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse?.error) {
+              setErrorMessage(tokenResponse.error_description || tokenResponse.error || 'Google sign-in was cancelled.');
+              return;
+            }
+            if (tokenResponse?.access_token) {
+              setIsSubmitting(true);
+              setErrorMessage(null);
+              try {
+                const userInfo = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+                }).then((r) => r.json());
+
+                if (!userInfo?.email) {
+                  throw new Error('Google did not return a verified email address.');
+                }
+
+                await loginWithOAuth('google', {
+                  email: userInfo.email,
+                  full_name: userInfo.name,
+                  id_token: tokenResponse.access_token,
+                });
+                hasJustAuthenticated.current = true;
+                if (onSuccess) onSuccess();
+                else if (onNavigate) onNavigate('workspace');
+              } catch (err: any) {
+                setErrorMessage(err.message || 'Google authentication failed.');
+              } finally {
+                setIsSubmitting(false);
+              }
+            }
+          },
+        });
+        client.requestAccessToken({ prompt: 'select_account' });
+        return;
+      } catch (err) {
+        console.warn('Google Identity Services popup failed, falling back:', err);
+      }
+    }
+
+    // Fallback for tests or when Google SDK is offline
     setOauthModalProvider('google');
     setOauthStep('select');
     setSelectedOAuthAccount(null);
@@ -371,14 +434,8 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
     setOauthError(null);
   };
 
-  const handleOpenMicrosoftOAuth = () => {
-    setOauthModalProvider('microsoft');
-    setOauthStep('select');
-    setSelectedOAuthAccount(null);
-    setCustomOAuthEmail('');
-    setOauthPassword('');
-    setOauthError(null);
-  };
+  // Temporarily disabled:
+  // const handleOpenMicrosoftOAuth = () => { ... }
 
   const handleSelectOAuthAccount = (acc: { name: string; email: string }) => {
     setSelectedOAuthAccount(acc);
@@ -1040,12 +1097,11 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
             <div style={{ flex: 1, height: 1, background: '#E2E8F0' }} />
           </div>
 
-          {/* Social Login Buttons: Google, Microsoft */}
+          {/* Social Login Button: Google */}
           <div
             style={{
               display: 'flex',
               justifyContent: 'center',
-              gap: 12,
               marginBottom: 18,
             }}
           >
@@ -1055,7 +1111,7 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
               onClick={handleOpenGoogleOAuth}
               title="Sign in with Google"
               style={{
-                flex: 1,
+                width: '100%',
                 height: 42,
                 borderRadius: 8,
                 border: '1px solid #E2E8F0',
@@ -1101,48 +1157,6 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
                 />
               </svg>
               <span>Google</span>
-            </button>
-
-            {/* Microsoft */}
-            <button
-              type="button"
-              onClick={handleOpenMicrosoftOAuth}
-              title="Sign in with Microsoft"
-              style={{
-                flex: 1,
-                height: 42,
-                borderRadius: 8,
-                border: '1px solid #E2E8F0',
-                background: '#FFFFFF',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 600,
-                color: '#334155',
-                transition: 'all 150ms ease',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#CBD5E1';
-                e.currentTarget.style.background = '#F8FAFC';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#E2E8F0';
-                e.currentTarget.style.background = '#FFFFFF';
-                e.currentTarget.style.transform = 'none';
-              }}
-            >
-              <svg width="17" height="17" viewBox="0 0 21 21">
-                <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-                <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-                <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-                <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-              </svg>
-              <span>Microsoft</span>
             </button>
           </div>
 
@@ -1196,38 +1210,6 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
           </div>
         </div>
 
-        {/* ── Demo Quick Fill Helper ── */}
-        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button
-            type="button"
-            onClick={fillDemoAccount}
-            style={{
-              background: 'rgba(255, 255, 255, 0.08)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              borderRadius: 6,
-              padding: '4px 10px',
-              color: '#94A3B8',
-              fontSize: 11,
-              fontWeight: 500,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              transition: 'all 120ms ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#FFFFFF';
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.14)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = '#94A3B8';
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-            }}
-          >
-            <span>Fill Demo Credentials</span>
-            <ArrowRight style={{ width: 11, height: 11 }} />
-          </button>
-        </div>
 
         {/* ── Page Footer ── */}
         <footer

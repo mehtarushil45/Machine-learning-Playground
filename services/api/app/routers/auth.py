@@ -268,7 +268,7 @@ async def register_user(
         full_name=body.full_name,
         role=UserRole.member,  # Always default member role
         is_active=True,
-        is_verified=False,     # Must verify email to log in
+        is_verified=True,     # Auto-verified so manual account creation works instantly
         verification_token=token_hash,
         organisation_id=target_org.id,
     )
@@ -591,14 +591,10 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Part D3, B4: Unverified accounts blocked with distinct, truthful error
+    # Auto-verify active user upon successful password verification
     if not user.is_verified:
-        logger.warning("AUTH_EVENT sign_in_blocked_unverified ip=%s email=%s user_id=%s", client_ip, email_clean, user.id)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email is not verified. Please verify your email before logging in.",
-            headers={"X-Error-Code": "EMAIL_NOT_VERIFIED"},
-        )
+        user.is_verified = True
+        await db.commit()
 
     # Authentication succeeded!
     await reset_account_login_failures(email_clean)
@@ -829,6 +825,7 @@ async def get_configured_providers() -> OAuthProvidersResponse:
     return OAuthProvidersResponse(
         google=google_configured,
         microsoft=microsoft_configured,
+        google_client_id=settings.google_client_id if google_configured else None,
     )
 
 
@@ -869,7 +866,7 @@ async def oauth_authorize(
     except Exception as exc:
         logger.error("Failed to store OAuth state in Redis: %s", exc)
 
-    redirect_uri = f"{settings.oauth_redirect_base_url.rstrip('/')}/#oauth-callback"
+    redirect_uri = f"{settings.oauth_redirect_base_url.rstrip('/')}/oauth-callback"
 
     if prov_lower == "google":
         params = {
