@@ -1167,6 +1167,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                   Every step is connected: change your settings, regenerate code, and train models with 1 click.
                 </text>
               </svg>
+              </div>
 
               {/* Explanatory Step Card */}
               <div

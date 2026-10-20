@@ -375,6 +375,7 @@ export class ApiClient {
 
   public upload<T>(endpoint: string, formData: FormData, options?: RequestOptions): Promise<T> {
     return this.request<T>(endpoint, {
+      timeoutMs: options?.timeoutMs ?? 180000,
       ...options,
       method: 'POST',
       body: formData,

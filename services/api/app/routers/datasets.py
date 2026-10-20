@@ -407,9 +407,8 @@ async def upload_dataset(
 
             columns = [col.strip() for col in header if col.strip()]
 
-            # Read data rows
-            data_rows = [row for row in reader if row and any(cell.strip() for cell in row)]
-            row_count = len(data_rows)
+            # Streaming count of data rows to avoid materialising millions of Python objects in RAM
+            row_count = sum(1 for row in reader if row and any(row))
 
             if row_count == 0:
                 raise HTTPException(
@@ -992,7 +991,7 @@ async def upload_dataset_v2(
     current_user: CurrentUser,
     file: UploadFile = File(
         ...,
-        description="CSV file to ingest (max 50 MB, UTF-8 or ISO-8859-1 encoded).",
+        description="CSV file to ingest (max 200 MB, UTF-8 or ISO-8859-1 encoded).",
     ),
 ) -> DatasetUploadV2Response:
     """Stream-ingest a CSV file and queue a background validation + profiling job.
@@ -1008,7 +1007,7 @@ async def upload_dataset_v2(
     **HTTP Statuses**:
     - ``202 Accepted``: File stored; ingestion pipeline queued.
     - ``400 Bad Request``: Invalid extension, MIME type, or encoding.
-    - ``413 Payload Too Large``: File exceeds the 50 MB limit.
+    - ``413 Payload Too Large``: File exceeds the 200 MB limit.
     - ``422 Unprocessable Entity``: Missing or blank CSV header row.
     - ``500 Internal Server Error``: Disk write failure.
     """

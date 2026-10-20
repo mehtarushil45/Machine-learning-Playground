@@ -86,11 +86,16 @@ export function createDatasetFromParseResults(
   }
 }
 
-export function parseCsvFile(file: File): Promise<Dataset> {
+export function parseCsvFile(file: File, options?: { preview?: number }): Promise<Dataset> {
   return new Promise((resolve, reject) => {
+    // For large files (>2MB, e.g. 45MB-200MB with 800k - 1M+ rows), preview first 1,000 rows in browser
+    // to prevent browser V8 heap OOM & UI freeze. Full out-of-core profiling is performed on the server.
+    const previewLimit = options?.preview ?? (file.size > 2 * 1024 * 1024 ? 1000 : undefined)
+
     Papa.parse<Row>(file, {
       header: true,
       skipEmptyLines: true,
+      preview: previewLimit,
       dynamicTyping: false, // Disabled to preserve leading zeros in ZIP codes & phone numbers
       complete: (results) => {
         const validation = validateParsedCsv(results)

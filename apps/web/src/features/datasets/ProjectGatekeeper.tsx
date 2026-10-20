@@ -580,11 +580,15 @@ export function ProjectGatekeeper({
 
       let datasetId: string | null = null;
       let serverProfile: DatasetProfile | null = null;
+      let serverRowCount: number | undefined = undefined;
+      let serverColumns: string[] | undefined = undefined;
       try {
         const fd = new FormData();
         fd.append('file', file);
-        const r = await apiClient.upload<{ dataset_id: string }>('/datasets/upload', fd);
+        const r = await apiClient.upload<{ dataset_id: string; row_count?: number; columns?: string[] }>('/datasets/upload', fd);
         datasetId = r.dataset_id;
+        serverRowCount = r.row_count;
+        serverColumns = r.columns;
         setProgress(85);
         if (datasetId) {
           serverProfile = await apiClient.get<DatasetProfile>(`/datasets/${datasetId}/profile`).catch(() => null);
@@ -607,8 +611,10 @@ export function ProjectGatekeeper({
               localStorage.setItem('access_token', authData.access_token);
               const fd2 = new FormData();
               fd2.append('file', file);
-              const r2 = await apiClient.upload<{ dataset_id: string }>('/datasets/upload', fd2);
+              const r2 = await apiClient.upload<{ dataset_id: string; row_count?: number; columns?: string[] }>('/datasets/upload', fd2);
               datasetId = r2.dataset_id;
+              serverRowCount = r2.row_count;
+              serverColumns = r2.columns;
               setProgress(85);
               if (datasetId) {
                 serverProfile = await apiClient.get<DatasetProfile>(`/datasets/${datasetId}/profile`).catch(() => null);
@@ -638,13 +644,19 @@ export function ProjectGatekeeper({
 
       const clientProfile = computeClientProfile(dataset);
       const resolvedProfile = serverProfile || clientProfile;
+      const finalRowCount = serverProfile?.row_count ?? serverRowCount ?? resolvedProfile.row_count ?? dataset.rows.length;
+      const finalCols = serverColumns && serverColumns.length > 0 ? serverColumns : dataset.columns;
 
       setProgress(100);
       setPendingDataset({
         ...dataset,
+        columns: finalCols,
         datasetId: datasetId || 'local-' + Date.now(),
-        rowCount: resolvedProfile.row_count || dataset.rows.length,
-        profile: resolvedProfile,
+        rowCount: finalRowCount,
+        profile: {
+          ...resolvedProfile,
+          row_count: finalRowCount,
+        },
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not parse the CSV file.');
@@ -887,7 +899,7 @@ export function ProjectGatekeeper({
                 <p style={{ fontSize: 11, color: BB.muted, margin: '2px 0 0' }}>
                   {isProcessing
                     ? `Processing CSV and generating profile (${progress}%)...`
-                    : 'Supported: CSV format up to 50 MB with header row'}
+                    : 'Supported: CSV & Parquet formats up to 200 MB (10+ lakhs / 1M+ rows) with header row'}
                 </p>
               </div>
             </div>

@@ -5,7 +5,7 @@ export interface ValidationResult {
   message?: string
 }
 
-export const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024 // 50 MB
+export const MAX_UPLOAD_SIZE_BYTES = 200 * 1024 * 1024 // 200 MB (supports 10+ lakhs / 1M+ rows)
 
 export function validateCsvFile(file: File): ValidationResult {
   const name = file.name.toLowerCase()
@@ -27,7 +27,7 @@ export function validateCsvFile(file: File): ValidationResult {
   if (file.size > MAX_UPLOAD_SIZE_BYTES) {
     return {
       valid: false,
-      message: `File size exceeds maximum allowed limit of 50 MB (${formatBytes(file.size)}).`,
+      message: `File size exceeds maximum allowed limit of 200 MB (${formatBytes(file.size)}).`,
     }
   }
 

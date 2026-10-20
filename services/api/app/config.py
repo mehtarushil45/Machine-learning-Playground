@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "ml-datasets"
 
     # ── Dataset Upload Settings ───────────────────────────────────────────────
-    max_upload_size_bytes: int = 50 * 1024 * 1024  # 50 MB
+    max_upload_size_bytes: int = 200 * 1024 * 1024  # 200 MB (supports 10+ lakhs / 1M+ rows)
     upload_dir: str = _DEFAULT_UPLOAD_DIR
 
     # ── Recommendation Engine & Benchmark Settings ───────────────────────────

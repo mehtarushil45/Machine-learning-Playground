@@ -58,6 +58,117 @@ const isTestEnv =
     Boolean((window as any).__vitest_worker__) ||
     process.env.NODE_ENV === 'test');
 
+// Global live schema context so Monaco language providers ALWAYS reflect the active dataset,
+// even across component remounts, route changes, or dataset switches.
+const globalSchemaContext = {
+  datasetColumns: [] as DatasetColumnInfo[],
+  datasetName: '',
+  selectedTarget: null as string | null,
+  selectedFeatures: [] as string[],
+  isLearningMode: false,
+};
+
+let globalProvidersRegistered = false;
+
+function registerGlobalMonacoProviders(monaco: Monaco) {
+  if (globalProvidersRegistered) return;
+  globalProvidersRegistered = true;
+
+  // 2a. Schema-Aware Completion Provider (5.1 & 5.3)
+  monaco.languages.registerCompletionItemProvider('python', {
+    triggerCharacters: ['"', "'", '[', '.', ' '],
+    provideCompletionItems: (model: any, position: any) => {
+      const word = model.getWordUntilPosition(position);
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      };
+
+      const rawSuggestions = getSchemaCompletions(
+        model.getValue(),
+        position.lineNumber,
+        position.column,
+        globalSchemaContext.datasetColumns,
+        globalSchemaContext.selectedTarget,
+        globalSchemaContext.selectedFeatures,
+        globalSchemaContext.datasetName
+      );
+
+      const suggestions = rawSuggestions.map((item) => ({
+        label: item.label,
+        kind: item.kind,
+        detail: item.detail,
+        documentation: { value: item.documentation },
+        insertText: item.insertText,
+        insertTextRules: item.isSnippet
+          ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+          : undefined,
+        sortText: item.sortText,
+        range,
+      }));
+
+      return { suggestions };
+    },
+  });
+
+  // 2b. Hover Provider from Pinned Library Docstrings & Schema (5.2)
+  monaco.languages.registerHoverProvider('python', {
+    provideHover: (model: any, position: any) => {
+      const word = model.getWordAtPosition(position);
+      if (!word || !word.word) return null;
+
+      const hoverInfo = getHoverDocstring(
+        word.word,
+        globalSchemaContext.datasetColumns,
+        globalSchemaContext.datasetName,
+        globalSchemaContext.selectedTarget
+      );
+
+      if (!hoverInfo) return null;
+
+      return {
+        range: new monaco.Range(
+          position.lineNumber,
+          word.startColumn,
+          position.lineNumber,
+          word.endColumn
+        ),
+        contents: hoverInfo.contents.map((c) => ({ value: c })),
+      };
+    },
+  });
+
+  // 2c. Signature Help Provider for scikit-learn Functions (5.2)
+  monaco.languages.registerSignatureHelpProvider('python', {
+    signatureHelpTriggerCharacters: ['(', ','],
+    provideSignatureHelp: (model: any, position: any) => {
+      const lineText = model.getLineContent(position.lineNumber);
+      const sigResult = getSignatureHelp(lineText, position.column);
+      if (!sigResult) return null;
+
+      return {
+        value: {
+          activeSignature: 0,
+          activeParameter: sigResult.activeParameter,
+          signatures: [
+            {
+              label: sigResult.signature.label,
+              documentation: { value: sigResult.signature.documentation },
+              parameters: sigResult.signature.parameters.map((p) => ({
+                label: p.label,
+                documentation: { value: p.documentation },
+              })),
+            },
+          ],
+        },
+        dispose: () => {},
+      };
+    },
+  });
+}
+
 export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
   code,
   onChange,
@@ -79,9 +190,15 @@ export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
 }) => {
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
-  const completionRegisteredRef = useRef(false);
 
-  // Keep live references to active dataset schema and learning mode for Monaco language providers
+  // Synchronize global live schema context on EVERY render and prop change
+  globalSchemaContext.datasetColumns = datasetColumns || [];
+  globalSchemaContext.datasetName = datasetName || '';
+  globalSchemaContext.selectedTarget = selectedTarget || null;
+  globalSchemaContext.selectedFeatures = selectedFeatures || [];
+  globalSchemaContext.isLearningMode = Boolean(isLearningMode);
+
+  // Keep live references to active dataset schema and learning mode for Monaco callbacks
   const datasetColumnsRef = useRef(datasetColumns);
   const datasetNameRef = useRef(datasetName);
   const selectedTargetRef = useRef(selectedTarget);
@@ -137,109 +254,14 @@ export const MonacoCodeStudioEditor: React.FC<MonacoCodeStudioEditorProps> = ({
     });
 
     // 2. Register Python ML Language Intelligence Providers
-    if (!completionRegisteredRef.current) {
-      completionRegisteredRef.current = true;
-
-      // 2a. Schema-Aware Completion Provider (5.1 & 5.3)
-      monaco.languages.registerCompletionItemProvider('python', {
-        triggerCharacters: ['"', "'", '[', '.', ' '],
-        provideCompletionItems: (model: any, position: any) => {
-          const word = model.getWordUntilPosition(position);
-          const range = {
-            startLineNumber: position.lineNumber,
-            endLineNumber: position.lineNumber,
-            startColumn: word.startColumn,
-            endColumn: word.endColumn,
-          };
-
-          const rawSuggestions = getSchemaCompletions(
-            model.getValue(),
-            position.lineNumber,
-            position.column,
-            datasetColumnsRef.current,
-            selectedTargetRef.current,
-            selectedFeaturesRef.current,
-            datasetNameRef.current
-          );
-
-          const suggestions = rawSuggestions.map((item) => ({
-            label: item.label,
-            kind: item.kind,
-            detail: item.detail,
-            documentation: { value: item.documentation },
-            insertText: item.insertText,
-            insertTextRules: item.isSnippet
-              ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-              : undefined,
-            sortText: item.sortText,
-            range,
-          }));
-
-          return { suggestions };
-        },
-      });
-
-      // 2b. Hover Provider from Pinned Library Docstrings & Schema (5.2)
-      monaco.languages.registerHoverProvider('python', {
-        provideHover: (model: any, position: any) => {
-          const word = model.getWordAtPosition(position);
-          if (!word || !word.word) return null;
-
-          const hoverInfo = getHoverDocstring(
-            word.word,
-            datasetColumnsRef.current,
-            datasetNameRef.current,
-            selectedTargetRef.current
-          );
-
-          if (!hoverInfo) return null;
-
-          return {
-            range: new monaco.Range(
-              position.lineNumber,
-              word.startColumn,
-              position.lineNumber,
-              word.endColumn
-            ),
-            contents: hoverInfo.contents.map((c) => ({ value: c })),
-          };
-        },
-      });
-
-      // 2c. Signature Help Provider for scikit-learn Functions (5.2)
-      monaco.languages.registerSignatureHelpProvider('python', {
-        signatureHelpTriggerCharacters: ['(', ','],
-        provideSignatureHelp: (model: any, position: any) => {
-          const lineText = model.getLineContent(position.lineNumber);
-          const sigResult = getSignatureHelp(lineText, position.column);
-          if (!sigResult) return null;
-
-          return {
-            value: {
-              activeSignature: 0,
-              activeParameter: sigResult.activeParameter,
-              signatures: [
-                {
-                  label: sigResult.signature.label,
-                  documentation: { value: sigResult.signature.documentation },
-                  parameters: sigResult.signature.parameters.map((p) => ({
-                    label: p.label,
-                    documentation: { value: p.documentation },
-                  })),
-                },
-              ],
-            },
-            dispose: () => {},
-          };
-        },
-      });
-    }
+    registerGlobalMonacoProviders(monaco);
   };
 
   // Mount handler: wire cursor tracking and keyboard shortcuts
   const handleMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
+    registerGlobalMonacoProviders(monaco);
 
     // Track cursor movements
     editor.onDidChangeCursorPosition((e) => {

@@ -447,7 +447,7 @@ export function DataUpload({ onDataLoaded }: DataUploadProps) {
                 Drag & drop your CSV or Parquet dataset here
               </div>
               <div style={{ fontSize: 11, color: BB.muted }}>
-                Supports CSV &amp; Parquet up to 50 MB with out-of-core DuckDB streaming and zero host OOM.
+                Supports CSV &amp; Parquet up to 200 MB (10+ lakhs / 1M+ rows) with out-of-core DuckDB streaming and zero host OOM.
               </div>
             </div>
             <button

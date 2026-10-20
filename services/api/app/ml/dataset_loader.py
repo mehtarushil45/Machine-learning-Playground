@@ -152,7 +152,10 @@ def load_dataset_context(
     df = None
     try:
         file_path = find_dataset_path(dataset_id)
-        df = pd.read_csv(file_path)
+        try:
+            df = pd.read_csv(file_path, engine="pyarrow")
+        except Exception:
+            df = pd.read_csv(file_path, low_memory=False)
     except Exception:
         try:
             from services.worker.core.dataset_loader import load_dataset_dataframe

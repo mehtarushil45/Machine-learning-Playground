@@ -393,6 +393,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setStaleDatasetWarning(null);
     const dsId = d.datasetId;
     const isBackend = Boolean(dsId && dsId.includes('-') && !dsId.startsWith('client-') && !dsId.startsWith('ds-'));
+    const resetStudioFiles = () => {
+      setExperimentFiles({ 'pipeline_generated.py': '' });
+      setOpenTabs(['pipeline_generated.py']);
+      setActiveExperimentFile('pipeline_generated.py');
+      setModifiedFiles([]);
+      setGeneratedFiles([]);
+    };
+
     if (isBackend) {
       setIsValidatingDataset(true);
       apiClient.get(`/datasets/${dsId}`)
@@ -404,6 +412,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           setInferredTaskType(null);
           setActiveJob(null);
           setLifecycleStage('dataset');
+          resetStudioFiles();
         })
         .catch((err: any) => {
           const isNotFound =
@@ -427,6 +436,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
             setInferredTaskType(null);
             setActiveJob(null);
             setLifecycleStage('dataset');
+            resetStudioFiles();
           }
         })
         .finally(() => {
@@ -440,6 +450,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setInferredTaskType(null);
       setActiveJob(null);
       setLifecycleStage('dataset');
+      resetStudioFiles();
     }
   }, [setActiveJob, setSelectedTarget]);
 
