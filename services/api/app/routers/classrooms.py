@@ -828,6 +828,16 @@ async def report_exam_violation(
     if not cid and exam_id.startswith("exam-"):
         clean = exam_id.replace("exam-", "").strip()
         cid = CURATED_LAB_EXAMS.get(clean, {}).get("classroom_id")
+    if not cid:
+        try:
+            asgn_uuid = UUID(exam_id)
+            async with AsyncSessionLocal() as session:
+                res = await session.execute(select(Assignment.classroom_id).where(Assignment.id == asgn_uuid))
+                asgn_cid = res.scalar_one_or_none()
+                if asgn_cid:
+                    cid = str(asgn_cid)
+        except Exception:
+            pass
 
     entry = {
         "exam_id": exam_id,

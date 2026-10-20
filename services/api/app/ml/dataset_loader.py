@@ -23,7 +23,13 @@ from typing import List
 import pandas as pd
 
 # Reuse the existing file-system helper — single source of truth.
-from services.worker.core.dataset_loader import find_dataset_path  # noqa: E402
+try:
+    from services.worker.core.dataset_loader import find_dataset_path  # noqa: E402
+except ModuleNotFoundError:
+    _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+    if _repo_root not in sys.path:
+        sys.path.insert(0, _repo_root)
+    from services.worker.core.dataset_loader import find_dataset_path  # noqa: E402
 
 # Reuse the profiler's column-type inference — no duplicate logic.
 

@@ -11,6 +11,7 @@ Verifies that the ML Playground regression pipeline is correctly implemented:
 from __future__ import annotations
 
 import os
+from typing import Any
 import uuid
 from unittest.mock import patch
 
@@ -107,7 +108,7 @@ def test_regression_pipeline_end_to_end_random_forest():
         "study_hours": rng.uniform(0.5, 12, size=n),
         "prior_score": rng.uniform(40, 100, size=n),
     })
-    y = 0.5 * X["study_hours"] + 0.3 * X["prior_score"] + 0.02 * X["age"] + rng.normal(0, 3, size=n)
+    y = 0.5 * X["study_hours"] + 0.3 * X["prior_score"] + 0.02 * X["age"] + pd.Series(rng.normal(0, 3, size=n), index=X.index)
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -149,7 +150,7 @@ def test_regression_pipeline_linear_regression():
 def test_problem_detector_float_target_with_many_unique_values_is_regression():
     """A float target with >20 unique values must resolve to REGRESSION."""
     rng = np.random.default_rng(42)
-    series = pd.Series(rng.uniform(0, 100, size=500))
+    series = pd.Series(data=list(rng.uniform(0, 100, size=500)), dtype=float)
     result = detect_problem_type_from_series(series)
     assert result == ProblemType.REGRESSION
 
@@ -187,7 +188,7 @@ def test_algorithm_factory_regression_keys_exist():
 
 def test_get_algorithm_regression_factory_returns_estimator():
     """get_algorithm with task_type='regression' must return a valid sklearn estimator."""
-    estimator = get_algorithm(key="random_forest_regressor", task_type="regression", random_state=42)
+    estimator: Any = get_algorithm(key="random_forest_regressor", task_type="regression", random_state=42)
     assert hasattr(estimator, "fit")
     assert hasattr(estimator, "predict")
     X = [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
@@ -199,7 +200,7 @@ def test_get_algorithm_regression_factory_returns_estimator():
 
 def test_get_algorithm_linear_regression_no_seed_required():
     """LinearRegression must be constructable and produce correct linear predictions."""
-    estimator = get_algorithm(key="linear_regression", task_type="regression", random_state=99)
+    estimator: Any = get_algorithm(key="linear_regression", task_type="regression", random_state=99)
     X = [[1.0], [2.0], [3.0], [4.0], [5.0]]
     y = [2.0, 4.0, 6.0, 8.0, 10.0]
     estimator.fit(X, y)

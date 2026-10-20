@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 import numpy as np
 import pytest
 
@@ -14,7 +15,8 @@ def test_registered_imputer_removes_missing_values(key):
         [[1.0, np.nan], [2.0, 3.0], [np.nan, 5.0], [4.0, 7.0], [5.0, 9.0], [6.0, 11.0]]
     )
 
-    transformed = get_imputer(key).fit_transform(features)
+    imputer: Any = get_imputer(key)
+    transformed = imputer.fit_transform(features)
 
     assert transformed.shape == features.shape
     assert not np.isnan(transformed).any()

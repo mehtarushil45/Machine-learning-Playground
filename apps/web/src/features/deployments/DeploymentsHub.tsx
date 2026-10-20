@@ -896,7 +896,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{
                 width: '100%',
-                padding: '9px 12px 9px 36px',
+                padding: searchQuery ? '9px 32px 9px 36px' : '9px 12px 9px 36px',
                 borderRadius: 8,
                 background: '#071220',
                 border: '1px solid #172840',
@@ -905,6 +905,28 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                 outline: 'none',
               }}
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                title="Clear search"
+                style={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: '#64748B',
+                  cursor: 'pointer',
+                  padding: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
 
           <button

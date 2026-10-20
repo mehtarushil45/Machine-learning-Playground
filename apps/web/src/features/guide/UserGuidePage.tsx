@@ -940,10 +940,10 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
         {/* Left Sticky Navigation Sidebar */}
         <aside
           style={{
-            width: 220,
+            width: 200,
             flexShrink: 0,
             borderRight: '1px solid ' + TOKENS.border,
-            padding: '16px 8px',
+            padding: '14px 6px',
             position: 'sticky',
             top: 59,
             height: 'calc(100vh - 59px)',
@@ -981,13 +981,13 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                padding: '7px 9px',
-                borderRadius: 7,
+                padding: '6px 8px',
+                borderRadius: 6,
                 border: 'none',
                 background: activeSection === sec.id ? 'rgba(0, 212, 255, 0.14)' : 'transparent',
                 color: activeSection === sec.id ? TOKENS.primary : TOKENS.textSecondary,
                 fontWeight: activeSection === sec.id ? 700 : 500,
-                fontSize: 11.5,
+                fontSize: 11,
                 textAlign: 'left',
                 cursor: 'pointer',
                 transition: 'all 120ms ease',
@@ -1005,7 +1005,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
         </aside>
 
         {/* ── Main Content Area ────────────────────────────────────────── */}
-        <main style={{ flex: 1, padding: '36px 48px', overflowY: 'auto', lineHeight: 1.6 }}>
+        <main style={{ flex: 1, padding: '32px 40px', overflowY: 'auto', lineHeight: 1.6 }}>
 
           {/* ── SECTION 1: THE MACHINE LEARNING JOURNEY ──────────────── */}
           <section id="journey" style={{ marginBottom: 56 }}>
@@ -1033,7 +1033,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                 marginBottom: 28,
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: TOKENS.primary, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Activity className="w-4 h-4" />
                   <span>The 5 Stages of Machine Learning (Click a stage to inspect)</span>
@@ -1044,9 +1044,10 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               </div>
 
               {/* Friendly Pipeline SVG Flow */}
+              <div style={{ overflowX: 'auto', width: '100%', WebkitOverflowScrolling: 'touch' }}>
               <svg
                 viewBox="0 0 940 180"
-                style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 8, background: TOKENS.codeBg }}
+                style={{ width: '100%', minWidth: 720, height: 'auto', display: 'block', borderRadius: 8, background: TOKENS.codeBg }}
               >
                 {/* Step 1 */}
                 <g onClick={() => setSelectedPipelineStep('dataset')} style={{ cursor: 'pointer' }}>
@@ -1646,8 +1647,8 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border, wordBreak: 'break-word' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                   <strong style={{ color: TOKENS.primary }}>Number of Trees (n_estimators)</strong>
                   <span style={{ fontSize: 11, color: TOKENS.textMuted, fontFamily: 'monospace' }}>Default: 100</span>
                 </div>
@@ -1658,8 +1659,8 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                 </div>
               </div>
 
-              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border, wordBreak: 'break-word' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                   <strong style={{ color: TOKENS.primary }}>Tree Depth (max_depth)</strong>
                   <span style={{ fontSize: 11, color: TOKENS.textMuted, fontFamily: 'monospace' }}>Default: 4 - 6</span>
                 </div>
@@ -1670,8 +1671,8 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                 </div>
               </div>
 
-              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border, wordBreak: 'break-word' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                   <strong style={{ color: TOKENS.primary }}>Learning Rate (Step Size)</strong>
                   <span style={{ fontSize: 11, color: TOKENS.textMuted, fontFamily: 'monospace' }}>Default: 0.05 - 0.1</span>
                 </div>
@@ -1681,8 +1682,8 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                 </div>
               </div>
 
-              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border, wordBreak: 'break-word' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                   <strong style={{ color: TOKENS.primary }}>Minimum Samples per Leaf &amp; Split</strong>
                   <span style={{ fontSize: 11, color: TOKENS.textMuted, fontFamily: 'monospace' }}>Default: 2 / 1</span>
                 </div>
@@ -1691,8 +1692,8 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
                 </div>
               </div>
 
-              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ padding: '14px 18px', background: TOKENS.bgElevated, borderRadius: 8, border: '1px solid ' + TOKENS.border, wordBreak: 'break-word' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                   <strong style={{ color: TOKENS.primary }}>Regularization Knobs (C &amp; alpha)</strong>
                   <span style={{ fontSize: 11, color: TOKENS.textMuted, fontFamily: 'monospace' }}>Standard: 1.0</span>
                 </div>
@@ -1720,7 +1721,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               Every time you train, your run is saved automatically so you can compare scores and pick the best one:
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
               <div style={{ padding: '16px', borderRadius: 10, background: TOKENS.bgElevated, border: '1px solid ' + TOKENS.border }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: TOKENS.accentViolet, marginBottom: 6 }}>
                   Side-by-Side Comparison Leaderboard
@@ -1862,7 +1863,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               Once you have a trained model, ML Playground gives you two simple ways to use it:
             </p>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
               <div style={{ padding: '18px', borderRadius: 10, background: TOKENS.bgElevated, border: '1px solid ' + TOKENS.border }}>
                 <div style={{ fontWeight: 700, fontSize: 14.5, color: TOKENS.primary, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Target className="w-4 h-4" />
@@ -1926,7 +1927,7 @@ export function UserGuidePage({ onNavigate }: UserGuidePageProps) {
               ))}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
               {filteredGlossary.map((item) => (
                 <div
                   key={item.term}

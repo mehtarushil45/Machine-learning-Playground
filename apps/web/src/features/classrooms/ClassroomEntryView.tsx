@@ -4,7 +4,6 @@ import {
   KeyRound,
   GraduationCap,
   Users,
-  Presentation,
   Play,
   ArrowRight,
   ChevronRight,
@@ -135,7 +134,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
       )}
 
       {/* Hero / Two Clear Actions (Part B1) */}
-      <div className="rounded-3xl p-6 md:p-8 bg-gradient-to-r from-[#151026] via-[#1C1534] to-[#151026] border border-[rgba(107,92,166,0.3)] shadow-2xl space-y-6">
+      <div className="rounded-3xl p-6 md:p-8 bg-linear-to-r from-[#151026] via-[#1C1534] to-[#151026] border border-[rgba(107,92,166,0.3)] shadow-2xl space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-xs font-mono font-bold text-[#00D4FF] uppercase tracking-wider">
@@ -155,7 +154,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
             <button
               onClick={() => setShowCreateModal(true)}
               data-testid="create-classroom-btn"
-              className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-extrabold text-[#0B0912] shadow-xl hover:opacity-95 transition-all transform hover:-translate-y-0.5"
+              className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-linear-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-extrabold text-[#0B0912] shadow-xl hover:opacity-95 transition-all transform hover:-translate-y-0.5"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
               <span>Create Classroom</span>
@@ -179,7 +178,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
         {data.active_exam_resume && (
           <div
             data-testid="resume-exam-banner"
-            className="p-4 rounded-2xl bg-gradient-to-r from-[#241B42] to-[#1C1534] border border-[#00D4FF]/40 flex flex-wrap items-center justify-between gap-4 shadow-lg animate-pulse"
+            className="p-4 rounded-2xl bg-linear-to-r from-[#241B42] to-[#1C1534] border border-[#00D4FF]/40 flex flex-wrap items-center justify-between gap-4 shadow-lg animate-pulse"
           >
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-[#00D4FF]/20 text-[#00D4FF]">
@@ -363,7 +362,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
 
                         <button
                           onClick={() => onOpenClassroom(c, 'student')}
-                          className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#00D4FF] to-[#00F5A0] text-[#0B0912] font-bold text-xs shadow transition-all hover:opacity-90 ml-auto"
+                          className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-linear-to-r from-[#00D4FF] to-[#00F5A0] text-[#0B0912] font-bold text-xs shadow transition-all hover:opacity-90 ml-auto"
                         >
                           <span>{c.status === 'in_progress' ? 'Resume' : 'Enter Exam'}</span>
                           <ChevronRight className="w-3.5 h-3.5" />
@@ -390,7 +389,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
                 <div className="flex justify-center gap-3">
                   <button
                     onClick={() => setShowCreateModal(true)}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-bold text-[#0B0912]"
+                    className="px-4 py-2 rounded-xl bg-linear-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-bold text-[#0B0912]"
                   >
                     Create Classroom
                   </button>
@@ -444,6 +443,15 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
         />
       )}
 
+      {/* Projector View Modal */}
+      {projectorData && (
+        <ProjectorViewModal
+          joinCode={projectorData.code}
+          classroomName={projectorData.name}
+          courseId={projectorData.courseId}
+          onClose={() => setProjectorData(null)}
+        />
+      )}
 
     </div>
   );

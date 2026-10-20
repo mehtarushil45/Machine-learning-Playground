@@ -77,7 +77,7 @@ export const ExamLobbyView: React.FC<ExamLobbyViewProps> = ({
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] text-center space-y-3">
+      <div className="flex flex-col items-center justify-center min-h-100 text-center space-y-3">
         <RefreshCw className="w-8 h-8 text-[#00D4FF] animate-spin" />
         <div className="text-xs font-mono text-[#9E93B8]">Connecting to Exam Lobby...</div>
       </div>

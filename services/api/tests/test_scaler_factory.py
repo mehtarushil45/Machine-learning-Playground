@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 import numpy as np
 import pytest
 
@@ -12,7 +13,8 @@ from app.ml.scaler_factory import SCALER_REGISTRY, get_scaler
 def test_registered_scaler_transforms_unscaled_features(key):
     features = np.array([[10.0, 100.0], [20.0, 300.0], [40.0, 600.0], [80.0, 1000.0]])
 
-    transformed = get_scaler(key).fit_transform(features)
+    scaler: Any = get_scaler(key)
+    transformed = scaler.fit_transform(features)
 
     assert transformed.shape == features.shape
     assert np.isfinite(transformed).all()
