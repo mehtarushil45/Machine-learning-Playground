@@ -48,7 +48,7 @@ describe('LoginPage Component', () => {
     renderWithAuth(<LoginPage />);
 
     // Branding
-    expect(screen.getByRole('heading', { level: 1, name: /ml platform/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: /ml playground/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: /sign in to your account/i })).toBeInTheDocument();
 
     // Inputs

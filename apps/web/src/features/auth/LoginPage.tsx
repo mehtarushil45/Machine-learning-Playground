@@ -657,68 +657,139 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
           padding: '0 20px',
         }}
       >
-        {/* ── Top Header Logo: ML Platform ── */}
+        {/* ── Top Header Title: ML Playground (Creative Animated) ── */}
+        <style>{`
+          @keyframes mlbadge-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(56,189,248,0.5), 0 0 20px rgba(56,189,248,0.3); }
+            50%       { box-shadow: 0 0 0 6px rgba(56,189,248,0), 0 0 32px rgba(129,140,248,0.6); }
+          }
+          @keyframes mltext-shimmer {
+            0%   { background-position: -300% center; }
+            100% { background-position: 300% center; }
+          }
+          @keyframes mlwrapper-float {
+            0%,100% { transform: translateY(0px); }
+            50%     { transform: translateY(-6px); }
+          }
+          @keyframes mlglow-breathe {
+            0%,100% { opacity: 0.55; transform: scaleX(0.7); }
+            50%     { opacity: 1;    transform: scaleX(1); }
+          }
+          @keyframes mlscan-line {
+            0%   { transform: translateX(-100%); }
+            100% { transform: translateX(400%); }
+          }
+        `}</style>
+
         <div
           style={{
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            marginBottom: 20,
+            marginBottom: 28,
             userSelect: 'none',
+            animation: 'mlwrapper-float 4.5s ease-in-out infinite',
           }}
         >
-          {/* Interlocking geometric ribbon icon matching reference */}
+          {/* ── Top row: "ML" pill badge ── */}
           <div
             style={{
-              width: 52,
-              height: 52,
-              marginBottom: 8,
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              justifyContent: 'center',
+              gap: 7,
+              marginBottom: 10,
             }}
           >
-            <svg viewBox="0 0 48 48" fill="none" style={{ width: '100%', height: '100%' }}>
-              <defs>
-                <linearGradient id="mlNexusGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#38BDF8" />
-                  <stop offset="50%" stopColor="#818CF8" />
-                  <stop offset="100%" stopColor="#F59E0B" />
-                </linearGradient>
-                <linearGradient id="mlNexusGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#60A5FA" />
-                  <stop offset="100%" stopColor="#C084FC" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M14 18 C14 12, 22 10, 26 14 L34 22 C38 26, 38 34, 32 38 C26 42, 18 40, 14 34 L12 31"
-                stroke="url(#mlNexusGrad1)"
-                strokeWidth="4.2"
-                strokeLinecap="round"
-                fill="none"
+            {/* ML badge chip */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'linear-gradient(135deg, #0EA5E9 0%, #6366F1 60%, #A855F7 100%)',
+                borderRadius: 8,
+                padding: '4px 12px',
+                fontSize: 18,
+                fontWeight: 900,
+                color: '#FFFFFF',
+                letterSpacing: '0.1em',
+                animation: 'mlbadge-pulse 2.8s ease-in-out infinite',
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Scan-line shimmer inside badge */}
+              <span
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.35) 50%, transparent 100%)',
+                  animation: 'mlscan-line 2.2s linear infinite',
+                  pointerEvents: 'none',
+                }}
               />
-              <path
-                d="M34 30 C34 36, 26 38, 22 34 L14 26 C10 22, 10 14, 16 10 C22 6, 30 8, 34 14 L36 17"
-                stroke="url(#mlNexusGrad2)"
-                strokeWidth="4.2"
-                strokeLinecap="round"
-                fill="none"
-              />
-            </svg>
+              ML
+            </div>
+
+            {/* Thin vertical divider */}
+            <div
+              style={{
+                width: 2,
+                height: 22,
+                borderRadius: 1,
+                background: 'linear-gradient(to bottom, rgba(99,102,241,0) 0%, rgba(99,102,241,0.7) 50%, rgba(99,102,241,0) 100%)',
+              }}
+            />
+
+            {/* "PLATFORM" micro-label */}
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.25em',
+                color: 'rgba(148,163,184,0.85)',
+                textTransform: 'uppercase',
+              }}
+            >
+              Machine Learning
+            </span>
           </div>
 
+          {/* ── Main headline: "Playground" ── */}
           <h1
+            aria-label="ML Playground"
             style={{
-              fontSize: 22,
-              fontWeight: 800,
-              color: '#FFFFFF',
-              letterSpacing: '-0.02em',
               margin: 0,
-              textShadow: '0 2px 10px rgba(0,0,0,0.5)',
+              fontSize: 42,
+              fontWeight: 900,
+              letterSpacing: '-0.03em',
+              lineHeight: 1.25,
+              paddingBottom: 6,
+              background: 'linear-gradient(90deg, #7DD3FC 0%, #C4B5FD 25%, #FFFFFF 45%, #FDE68A 60%, #FFFFFF 75%, #93C5FD 100%)',
+              backgroundSize: '300% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              animation: 'mltext-shimmer 3.5s linear infinite',
+              textShadow: 'none',
+              filter: 'drop-shadow(0 2px 16px rgba(99,102,241,0.45))',
             }}
           >
-            ML Platform
+            Playground
           </h1>
+
+          {/* ── Animated glow underline ── */}
+          <div
+            style={{
+              marginTop: 8,
+              height: 3,
+              width: 160,
+              borderRadius: 2,
+              background: 'linear-gradient(90deg, rgba(14,165,233,0) 0%, #0EA5E9 25%, #818CF8 50%, #A855F7 75%, rgba(168,85,247,0) 100%)',
+              animation: 'mlglow-breathe 2.5s ease-in-out infinite',
+              filter: 'blur(0.5px)',
+            }}
+          />
         </div>
 
         {/* ── Central Crisp White Floating Card ── */}
