@@ -283,19 +283,21 @@ def execute_code_sandbox(
     else:
         try:
             import pandas as pd
-            df_chk = pd.read_csv(dest_canonical)
+            header_cols = set(pd.read_csv(dest_canonical, nrows=0).columns)
             code_targets = re.findall(r'(?:target_col|target)\s*=\s*[\'"]([^\'"]+)[\'"]', code)
-            for t_col in code_targets:
-                if t_col not in df_chk.columns:
-                    import numpy as np
-                    df_chk[t_col] = list(np.random.choice([0, 1], size=len(df_chk)))
-            if "target" not in df_chk.columns and "'target'" in code:
+            needed_cols = [t for t in code_targets if t not in header_cols]
+            if "target" not in header_cols and "'target'" in code:
+                needed_cols.append("target")
+            if "loan_status" in code and "loan_status" not in header_cols:
+                needed_cols.append("loan_status")
+
+            if needed_cols:
+                df_chk = pd.read_csv(dest_canonical)
                 import numpy as np
-                df_chk["target"] = list(np.random.choice([0, 1], size=len(df_chk)))
-            if "loan_status" in code and "loan_status" not in df_chk.columns:
-                import numpy as np
-                df_chk["loan_status"] = list(np.random.choice([0, 1], size=len(df_chk)))
-            df_chk.to_csv(dest_canonical, index=False)
+                for col in needed_cols:
+                    if col not in df_chk.columns:
+                        df_chk[col] = list(np.random.choice([0, 1], size=len(df_chk)))
+                df_chk.to_csv(dest_canonical, index=False)
         except Exception:
             pass
 

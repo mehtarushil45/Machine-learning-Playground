@@ -375,8 +375,30 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     const safeName = fileName.trim().endsWith('.py') ? fileName.trim() : `${fileName.trim()}.py`;
     setStaleDatasetWarning(null);
     setDataset(d);
-    setSelectedFeatures([]);
-    setSelectedTarget(null);
+
+    // Auto-select initial target and features so Code Studio and Pipeline Builder
+    // are immediately functional without presenting an empty-state blocker.
+    const rawCols = (d.columns || []).map((c: any) => (typeof c === 'string' ? c : c?.name)).filter(Boolean);
+    let autoTarget: string | null = null;
+    let autoFeatures: string[] = [];
+
+    if (rawCols.length >= 2) {
+      const TARGET_CANDIDATE_NAMES = [
+        'target', 'label', 'class', 'churn', 'status', 'loan_status', 'survived',
+        'price', 'median_house_value', 'diagnosis', 'outcome',
+      ];
+      const foundCandidate = rawCols.find((col: string) => TARGET_CANDIDATE_NAMES.includes(col.toLowerCase()));
+      autoTarget = foundCandidate || rawCols[rawCols.length - 1];
+      autoFeatures = rawCols.filter((col: string) => {
+        if (col === autoTarget) return false;
+        const lower = col.toLowerCase();
+        if (lower === 'id' || lower === 'uuid' || lower.endsWith('_id') || lower === 'row_id') return false;
+        return true;
+      });
+    }
+
+    setSelectedFeatures(autoFeatures);
+    setSelectedTarget(autoTarget);
     setTrainingConfig(null);
     setInferredTaskType(null);
     setActiveJobState(null);

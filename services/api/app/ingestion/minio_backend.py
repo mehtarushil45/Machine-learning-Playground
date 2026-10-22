@@ -104,6 +104,9 @@ class MinIOStorageBackend:
                 exc,
                 exc_info=True,
             )
+            raise StorageError(
+                f"MinIOStorageBackend: cannot reach MinIO at {self._endpoint_url} (bucket='{self._bucket}'): {exc}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # StorageBackend interface
@@ -362,13 +365,22 @@ class MinIOStorageBackend:
                 "boto3 is not installed.  Run: pip install boto3"
             ) from exc
 
-        return boto3.client(
-            "s3",
-            endpoint_url=self._endpoint_url,
-            aws_access_key_id=self._access_key,
-            aws_secret_access_key=self._secret_key,
-            region_name="us-east-1",
-        )
+        try:
+            from botocore.config import Config  # noqa: PLC0415
+            boto_cfg = Config(connect_timeout=2.0, read_timeout=3.0, retries={"max_attempts": 1})
+        except Exception:
+            boto_cfg = None
+
+        kwargs = {
+            "endpoint_url": self._endpoint_url,
+            "aws_access_key_id": self._access_key,
+            "aws_secret_access_key": self._secret_key,
+            "region_name": "us-east-1",
+        }
+        if boto_cfg is not None:
+            kwargs["config"] = boto_cfg
+
+        return boto3.client("s3", **kwargs)
 
     def _build_key(
         self,

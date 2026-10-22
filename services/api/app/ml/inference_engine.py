@@ -708,14 +708,28 @@ def predict_batch(
             "csv_download_url": None,
         }
 
-    formatted_all: List[Dict[str, Any]] = []
-    raw_predictions: List[Any] = []
-    raw_confidences: List[Optional[float]] = []
+    preview_predictions: List[Dict[str, Any]] = []
+    from collections import Counter
+    class_distribution_counter = Counter()
+    total_confidence_sum = 0.0
+    confidence_count = 0
 
-    # Process in chunks of batch_size
-    for start_idx in range(0, total_samples, batch_size):
-        end_idx = min(start_idx + batch_size, total_samples)
-        chunk_df = df_input.iloc[start_idx:end_idx]
+    # Optional CSV Export Setup
+    csv_url: Optional[str] = None
+    csv_path: Optional[str] = None
+    if save_csv:
+        os.makedirs(_PREDICTIONS_OUTPUT_DIR, exist_ok=True)
+        csv_filename = f"prediction_{pred_uuid[:8]}.csv"
+        csv_path = os.path.join(_PREDICTIONS_OUTPUT_DIR, csv_filename)
+        csv_url = f"/api/v1/predict/download/{csv_filename}"
+
+    # Use optimal chunk size (e.g. 10,000) for high-speed vectorized throughput
+    chunk_size = max(1000, min(25000, batch_size))
+
+    # Process in chunks of chunk_size
+    for start_idx in range(0, total_samples, chunk_size):
+        end_idx = min(start_idx + chunk_size, total_samples)
+        chunk_df = df_input.iloc[start_idx:end_idx].copy()
 
         val_res = validate_input(chunk_df, container.feature_columns, container=container)
         X_chunk = val_res.cleaned_df
@@ -739,10 +753,35 @@ def predict_batch(
             class_names=list(container.classes_) if container.classes_ is not None else None,
         )
 
-        formatted_all.extend(chunk_formatted)
+        # Retain top 100 rows only for API response preview (prevents 1M-dict heap exhaustion)
+        if len(preview_predictions) < 100:
+            preview_predictions.extend(chunk_formatted[: 100 - len(preview_predictions)])
+
+        # Update summary statistics incrementally
+        chunk_predictions = [item["prediction"] for item in chunk_formatted]
+        class_distribution_counter.update(str(p) for p in chunk_predictions)
         for item in chunk_formatted:
-            raw_predictions.append(item["prediction"])
-            raw_confidences.append(item["confidence"])
+            conf = item.get("confidence")
+            if conf is not None:
+                total_confidence_sum += float(conf)
+                confidence_count += 1
+
+        # Stream write directly to CSV
+        if save_csv and csv_path:
+            chunk_df["prediction"] = chunk_predictions
+            chunk_confidences = [item.get("confidence") for item in chunk_formatted]
+            if any(c is not None for c in chunk_confidences):
+                chunk_df["confidence"] = pd.Series(
+                    [c if c is not None else np.nan for c in chunk_confidences],
+                    index=chunk_df.index,
+                    dtype=float,
+                )
+            chunk_df.to_csv(
+                csv_path,
+                mode="a" if start_idx > 0 else "w",
+                header=(start_idx == 0),
+                index=False,
+            )
 
     latency_ms = round((time.monotonic() - t0) * 1000.0, 3)
 
@@ -768,25 +807,6 @@ def predict_batch(
         }
     )
 
-    # Optional CSV Export
-    csv_url: Optional[str] = None
-    if save_csv:
-        os.makedirs(_PREDICTIONS_OUTPUT_DIR, exist_ok=True)
-        csv_filename = f"prediction_{pred_uuid[:8]}.csv"
-        csv_path = os.path.join(_PREDICTIONS_OUTPUT_DIR, csv_filename)
-
-        output_df = df_input.copy()
-        output_df["prediction"] = raw_predictions
-        if any(c is not None for c in raw_confidences):
-            output_df["confidence"] = pd.Series(
-                [c if c is not None else np.nan for c in raw_confidences],
-                index=output_df.index,
-                dtype=float,
-            )
-
-        output_df.to_csv(csv_path, index=False)
-        csv_url = f"/api/v1/predict/download/{csv_filename}"
-
     metadata = {
         "prediction_id": pred_uuid,
         "model_id": container.model_id,
@@ -799,11 +819,19 @@ def predict_batch(
         "feature_count": len(container.feature_columns),
     }
 
+    avg_conf = (
+        round(total_confidence_sum / confidence_count, 4)
+        if confidence_count > 0
+        else None
+    )
+
     return {
         "total_samples": total_samples,
-        "successful_predictions": len(formatted_all),
+        "successful_predictions": total_samples,
         "failed_predictions": 0,
-        "predictions": formatted_all,
+        "predictions": preview_predictions,
+        "class_distribution": dict(class_distribution_counter) if class_distribution_counter else None,
+        "avg_confidence": avg_conf,
         "latency_ms": latency_ms,
         "metadata": metadata,
         "csv_download_url": csv_url,

@@ -522,6 +522,7 @@ export function ViewAsCodeStudio({
     setSelectedFeatures,
     setActiveJob,
     setFileJob,
+    isProjectInitialized,
   } = useProject();
 
   /* ── Local Sizing & Layout States (with persistence) ─────────────── */
@@ -710,7 +711,10 @@ export function ViewAsCodeStudio({
   }, [dataset, trainingConfig, selectedTarget, trainRatio]);
 
   const isConfigValid = validationErrors.length === 0;
-  const hasUsableConfig = Boolean((dataset || trainingConfig) && (selectedTarget || trainingConfig?.target_column));
+  const hasUsableConfig = Boolean(
+    (dataset || trainingConfig || isProjectInitialized) &&
+    (selectedTarget || trainingConfig?.target_column || Object.keys(experimentFiles).length > 0)
+  );
 
   useEffect(() => {
     setLifecycleStage('pipeline');

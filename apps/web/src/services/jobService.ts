@@ -152,7 +152,10 @@ export function subscribeToJobProgressSSE(
   callbacks: JobProgressSSECallbacks,
   maxReconnectAttempts = 5
 ): () => void {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1'
+  const rawBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '/api/v1'
+  const baseUrl = typeof window !== 'undefined' && rawBase.includes('localhost:8000')
+    ? rawBase.replace(/https?:\/\/localhost:8000/i, '') || '/api/v1'
+    : rawBase
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null
   const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : ''
   const url = `${baseUrl}/jobs/${jobId}/stream${tokenQuery}`

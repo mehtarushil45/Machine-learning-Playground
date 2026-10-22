@@ -264,6 +264,9 @@ class LocalFileSystemBackend:
 # ---------------------------------------------------------------------------
 
 
+_CACHED_BACKEND: "StorageBackend" | None = None
+
+
 def get_configured_backend() -> "StorageBackend":
     """Return the storage backend instance selected by ``settings.storage_backend``.
 
@@ -278,22 +281,29 @@ def get_configured_backend() -> "StorageBackend":
     Raises:
         ValueError: If ``settings.storage_backend`` is not a recognised value.
     """
+    global _CACHED_BACKEND
+    if _CACHED_BACKEND is not None:
+        return _CACHED_BACKEND
+
     backend_name = settings.storage_backend.lower().strip()
 
     if backend_name == "local":
-        return LocalFileSystemBackend()
+        _CACHED_BACKEND = LocalFileSystemBackend()
+        return _CACHED_BACKEND
 
     if backend_name == "minio":
         # Deferred import — boto3 is only required when MinIO backend is selected.
         try:
             from app.ingestion.minio_backend import MinIOStorageBackend  # noqa: PLC0415
-            return MinIOStorageBackend()
+            _CACHED_BACKEND = MinIOStorageBackend()
+            return _CACHED_BACKEND
         except Exception as exc:
             import logging
             logging.getLogger("apex_ingestion.storage").warning(
                 "Failed to connect to MinIO storage backend (%s). Falling back to LocalFileSystemBackend.", exc
             )
-            return LocalFileSystemBackend()
+            _CACHED_BACKEND = LocalFileSystemBackend()
+            return _CACHED_BACKEND
 
     raise ValueError(
         f"Unrecognised storage backend '{backend_name}'. "

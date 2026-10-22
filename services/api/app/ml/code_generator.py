@@ -264,6 +264,7 @@ def generate_python_code(
         CodeGenerationResponse containing the Python code, step explanations, syntax validation flag, and import list.
     """
     imports: List[str] = [
+        "import numpy as np",
         "import pandas as pd",
         "import joblib",
         "from sklearn.model_selection import train_test_split",
@@ -315,11 +316,18 @@ def generate_python_code(
     else:
         formatted_feature_list = "[]"
 
+    target_clean_logic = (
+        'df[target_col] = pd.to_numeric(df[target_col], errors="coerce")\n'
+        'df = df.dropna(subset=[target_col])'
+        if algo_type == "regression"
+        else 'df[target_col] = df[target_col].astype(str)'
+    )
+
     step1_code = f"""# --- Step 1: Load Dataset ---
 dataset_path = "{pipeline.dataset_name}"
 df = pd.read_csv(dataset_path)
 
-# Ensure target column is present and drop records where target is missing
+# Ensure target column is present and clean missing target values
 target_col = "{pipeline.target_column}"
 if target_col not in df.columns:
     if len(df.columns) > 1:
@@ -327,7 +335,10 @@ if target_col not in df.columns:
     else:
         df[target_col] = 0
 
+# Drop any records where target is missing or contains null string representations
+df[target_col] = df[target_col].replace(["", " ", "NA", "N/A", "null", "None", "NaN", "?"], np.nan)
 df = df.dropna(subset=[target_col])
+{target_clean_logic}
 
 # Separate input features and target column
 feature_cols = {formatted_feature_list}
@@ -399,13 +410,23 @@ y = df[target_col]"""
             num_steps.append("('scaler', StandardScaler())")
 
     step2_code = f"""# --- Step 2: Build Preprocessing Pipeline ---
-# Partition features into numeric and categorical subsets dynamically
+# Coerce numeric-convertible feature columns and partition features
+for col in feature_cols:
+    if col in df.columns:
+        num_converted = pd.to_numeric(df[col], errors="coerce")
+        if pd.api.types.is_numeric_dtype(df[col]) or (num_converted.notna().sum() > 0.5 * len(df)):
+            df[col] = num_converted
+
 numeric_features = [
     col for col in feature_cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])
 ]
 categorical_features = [
     col for col in feature_cols if col in df.columns and col not in numeric_features
 ]
+
+# Ensure categorical columns are uniformly strings with missing values filled
+for col in categorical_features:
+    df[col] = df[col].fillna("missing").astype(str)
 
 transformers = []
 
@@ -417,7 +438,7 @@ if numeric_features:
 
 if categorical_features:
     categorical_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
         ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
     ])
     transformers.append(('categorical', categorical_transformer, categorical_features))

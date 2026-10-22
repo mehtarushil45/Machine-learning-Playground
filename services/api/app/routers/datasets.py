@@ -824,6 +824,105 @@ async def get_dataset_profile(
 
 
 @router.get(
+    "/{dataset_id}/preview",
+    summary="Get preview sample rows from dataset via streaming DuckDB reader",
+)
+async def get_dataset_preview(
+    dataset_id: str,
+    current_user: CurrentUser,
+    limit: int = 100,
+    db: Annotated[Optional[AsyncSession], Depends(get_db)] = None,
+) -> Dict[str, Any]:
+    """Retrieve top N preview rows for a dataset directly from disk via DuckDB zero-copy streaming."""
+    org_id_str = str(current_user.organisation_id)
+    org_dir = os.path.join(settings.upload_dir, org_id_str)
+    prefix = f"{dataset_id}_"
+    matched_file_path = None
+
+    # 1. Search in organisation-scoped upload directory
+    if os.path.exists(org_dir):
+        for fname in os.listdir(org_dir):
+            if fname == dataset_id or fname.startswith(prefix):
+                matched_file_path = os.path.join(org_dir, fname)
+                break
+
+    # 2. Fallback search in base upload_dir
+    if not matched_file_path and os.path.exists(settings.upload_dir):
+        for fname in os.listdir(settings.upload_dir):
+            fpath = os.path.join(settings.upload_dir, fname)
+            if os.path.isfile(fpath) and (fname == dataset_id or fname.startswith(prefix)):
+                matched_file_path = fpath
+                break
+
+    # 3. Fallback search in worker candidate loader
+    if not matched_file_path or not os.path.isfile(matched_file_path):
+        try:
+            from services.worker.core.dataset_loader import find_dataset_path
+            resolved_path = find_dataset_path(dataset_id)
+            if resolved_path and os.path.isfile(resolved_path):
+                matched_file_path = resolved_path
+        except Exception:
+            pass
+
+    if not matched_file_path or not os.path.isfile(matched_file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset with ID '{dataset_id}' was not found on server.",
+        )
+
+    safe_limit = max(1, min(1000, limit))
+
+    # Fast path: DuckDB streaming
+    try:
+        import duckdb
+        import pandas as pd
+        con = duckdb.connect(database=":memory:")
+        safe_path = matched_file_path.replace("'", "''")
+        if matched_file_path.lower().endswith((".parquet", ".pq")):
+            query = f"SELECT * FROM read_parquet('{safe_path}') LIMIT {safe_limit}"
+        else:
+            query = f"SELECT * FROM read_csv_auto('{safe_path}', header=True) LIMIT {safe_limit}"
+        preview_df = con.execute(query).fetchdf()
+        con.close()
+
+        # Sanitize NaNs and infinities for strict JSON compatibility
+        preview_df = preview_df.where(pd.notnull(preview_df), None)
+        columns = list(preview_df.columns)
+        rows = preview_df.to_dict(orient="records")
+
+        return {
+            "dataset_id": dataset_id,
+            "filename": os.path.basename(matched_file_path),
+            "columns": columns,
+            "rows": rows,
+            "preview_count": len(rows),
+        }
+    except Exception as duck_err:
+        logger.warning("DuckDB preview failed for %s, falling back to pandas: %s", matched_file_path, duck_err)
+
+    # Fallback path: Pandas nrows
+    try:
+        import pandas as pd
+        if matched_file_path.lower().endswith((".parquet", ".pq")):
+            preview_df = pd.read_parquet(matched_file_path).head(safe_limit)
+        else:
+            preview_df = pd.read_csv(matched_file_path, nrows=safe_limit)
+        preview_df = preview_df.where(pd.notnull(preview_df), None)
+        return {
+            "dataset_id": dataset_id,
+            "filename": os.path.basename(matched_file_path),
+            "columns": list(preview_df.columns),
+            "rows": preview_df.to_dict(orient="records"),
+            "preview_count": len(preview_df),
+        }
+    except Exception as read_err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read preview rows: {str(read_err)}",
+        ) from read_err
+
+
+@router.get(
     "/{dataset_id}/health",
     response_model=DatasetHealthResponse,
     summary="Get enterprise quality health score and audit report for a dataset",

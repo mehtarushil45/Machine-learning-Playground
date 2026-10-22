@@ -89,10 +89,21 @@ def compute_feature_importance(
         "No native importance attribute; falling back to permutation importance."
     )
     try:
+        X_perm, y_perm = X_train, y_train
+        if hasattr(X_train, "__len__") and len(X_train) > 2000:
+            from sklearn.model_selection import train_test_split
+            try:
+                X_perm, _, y_perm, _ = train_test_split(
+                    X_train, y_train, train_size=2000, random_state=random_state
+                )
+            except Exception:
+                X_perm = X_train.iloc[:2000] if hasattr(X_train, "iloc") else X_train[:2000]
+                y_perm = y_train.iloc[:2000] if hasattr(y_train, "iloc") else y_train[:2000]
+
         perm_result = permutation_importance(
             fitted_pipeline,
-            X_train,
-            y_train,
+            X_perm,
+            y_perm,
             n_repeats=n_repeats,
             random_state=random_state,
             n_jobs=-1,

@@ -102,6 +102,8 @@ def read_dataset_header(dataset_id: str) -> List[str]:
         file_path = find_dataset_path(dataset_id)
         header_df = pd.read_csv(file_path, nrows=0)
         return header_df.columns.tolist()
+    except FileNotFoundError:
+        raise
     except Exception:
         pass
 
@@ -226,8 +228,33 @@ def load_dataset_context(
     datetime_cols: List[str] = []
 
     for col_name in available:
-        raw_values = feature_df[col_name].tolist()
-        col_type = infer_column_type(col_name, raw_values)
+        series = feature_df[col_name]
+
+        # 1. Fast path for native pandas dtypes
+        if pd.api.types.is_bool_dtype(series):
+            boolean_cols.append(col_name)
+            continue
+        if pd.api.types.is_numeric_dtype(series):
+            col_name_lower = col_name.lower()
+            is_id_name = any(k in col_name_lower for k in ("id", "_id", "uuid", "key", "pk", "code"))
+            # If identifier column, treat as categorical
+            if is_id_name and series.nunique() == len(series) and len(series) > 1:
+                categorical_cols.append(col_name)
+            else:
+                numeric_cols.append(col_name)
+            continue
+        if pd.api.types.is_datetime64_any_dtype(series):
+            datetime_cols.append(col_name)
+            continue
+
+        # 2. For object/string columns, sample up to 5,000 non-null values to avoid 600k+ Python object allocations
+        non_null_series = series.dropna()
+        if len(non_null_series) > 5000:
+            sample_values = non_null_series.iloc[:5000].tolist()
+        else:
+            sample_values = non_null_series.tolist()
+
+        col_type = infer_column_type(col_name, sample_values)
 
         if col_type == "numeric":
             numeric_cols.append(col_name)
@@ -249,9 +276,17 @@ def load_dataset_context(
         len(datetime_cols),
     )
 
-    # ── 7. Missing value counts ───────────────────────────────────────────────
+    # Coerce numeric columns so string representations of numbers/NaNs don't cause dtype mismatch
+    for c in numeric_cols:
+        if not pd.api.types.is_numeric_dtype(df[c]):
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    for c in categorical_cols:
+        df[c] = df[c].fillna("missing").astype(str)
+
+    # ── 7. Missing value counts (Vectorized pandas isna sum) ───────────────────
     missing_per_column: dict = {
-        col: int(pd.Series(df[col]).isna().sum())
+        col: int(df[col].isna().sum())
         for col in available + [target_column]
     }
 

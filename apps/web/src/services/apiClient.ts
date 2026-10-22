@@ -77,13 +77,14 @@ export class ApiClient {
   private refreshSubscribers: Array<(token: string | null) => void> = []
 
   constructor(config: ApiClientConfig = {}) {
-    const rawBaseUrl =
-      config.baseUrl ||
-      (import.meta.env.VITE_API_BASE_URL as string) ||
-      'http://localhost:8000/api/v1'
+    const envBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim()
+    let rawBaseUrl = config.baseUrl || envBase || '/api/v1'
+    if (typeof window !== 'undefined' && rawBaseUrl.includes('localhost:8000')) {
+      rawBaseUrl = rawBaseUrl.replace(/https?:\/\/localhost:8000/i, '') || '/api/v1'
+    }
 
     this.baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl.slice(0, -1) : rawBaseUrl
-    this.defaultTimeoutMs = config.timeoutMs ?? 15000
+    this.defaultTimeoutMs = config.timeoutMs ?? 60000
     this.getAuthToken =
       config.getAuthToken ||
       (() => _inMemoryAccessToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('access_token') : null))

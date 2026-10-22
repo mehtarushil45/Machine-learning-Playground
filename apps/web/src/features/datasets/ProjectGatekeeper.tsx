@@ -29,7 +29,7 @@ import { parseCsvFile } from '../../services/csvService';
 import { validateCsvFile } from '../../utils/validation';
 import { computeClientProfile } from '../../services/profilerService';
 import { apiClient } from '../../services/apiClient';
-import type { Dataset, DatasetProfile } from '../../types/dataset';
+import type { Dataset, DatasetProfile, Row } from '../../types/dataset';
 
 const BB = {
   base: '#08070F',
@@ -933,38 +933,15 @@ export function ProjectGatekeeper({
         setProgress(85);
         if (datasetId) {
           serverProfile = await apiClient.get<DatasetProfile>(`/datasets/${datasetId}/profile`).catch(() => null);
-        }
-      } catch {
-        // Attempt quick auto-auth retry
-        try {
-          const authBody = new URLSearchParams({
-            username: 'demo@ml-playground.internal',
-            password: 'DemoPassword123!',
-          });
-          const loginRes = await fetch('/api/v1/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: authBody.toString(),
-          });
-          if (loginRes.ok) {
-            const authData = await loginRes.json();
-            if (authData.access_token) {
-              localStorage.setItem('access_token', authData.access_token);
-              const fd2 = new FormData();
-              fd2.append('file', file);
-              const r2 = await apiClient.upload<{ dataset_id: string; row_count?: number; columns?: string[] }>('/datasets/upload', fd2);
-              datasetId = r2.dataset_id;
-              serverRowCount = r2.row_count;
-              serverColumns = r2.columns;
-              setProgress(85);
-              if (datasetId) {
-                serverProfile = await apiClient.get<DatasetProfile>(`/datasets/${datasetId}/profile`).catch(() => null);
-              }
+          if (dataset.rows.length === 0) {
+            const previewRes = await apiClient.get<{ rows: Row[]; columns?: string[] }>(`/datasets/${datasetId}/preview?limit=100`).catch(() => null);
+            if (previewRes?.rows && previewRes.rows.length > 0) {
+              dataset.rows = previewRes.rows;
             }
           }
-        } catch {
-          /* ignore auth retry failure */
         }
+      } catch {
+        /* backend offline or unauthenticated fallback — continue with client-side profile */
       }
 
       // Read small text cache for instant re-use
@@ -1014,14 +991,18 @@ export function ProjectGatekeeper({
     } else if (item.datasetId) {
       try {
         setIsProcessing(true);
-        const profile = await apiClient.get<DatasetProfile>(`/datasets/${item.datasetId}/profile`).catch(() => null);
-        const cols = profile?.columns?.map((c) => c.name) || ['feature_1', 'feature_2', 'target'];
+        const [profile, previewRes] = await Promise.all([
+          apiClient.get<DatasetProfile>(`/datasets/${item.datasetId}/profile`).catch(() => null),
+          apiClient.get<{ rows: Row[]; columns?: string[] }>(`/datasets/${item.datasetId}/preview?limit=100`).catch(() => null),
+        ]);
+        const cols = previewRes?.columns || profile?.columns?.map((c) => c.name) || ['feature_1', 'feature_2', 'target'];
+        const rows = previewRes?.rows || [];
         setPendingDataset({
           fileName: item.fileName,
           datasetId: item.datasetId,
-          rows: [],
+          rows: rows,
           columns: cols,
-          rowCount: profile?.row_count || 100,
+          rowCount: profile?.row_count || rows.length || 100,
           profile: profile || undefined,
         });
       } catch (err: any) {

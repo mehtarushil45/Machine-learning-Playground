@@ -36,12 +36,14 @@ import { CopilotApiService } from '../../services/api';
 import { FeatureTargetSelector } from '../../components/shared/FeatureTargetSelector';
 import { PanelLearningCollapsible, HeadsUpCardsContainer } from '../learning';
 import { Select } from '../../components/ui/Select';
+import { apiClient } from '../../services/apiClient';
 import type {
   ColumnProfile,
   Dataset,
   DatasetHealthReport,
   DatasetProfile,
   DatasetRecommendations,
+  Row,
 } from '../../types/dataset';
 import type { TrainingRequestPayload } from '../../types/job';
 import {
@@ -628,6 +630,22 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         let prof: DatasetProfile | null = null;
         if (dataset.datasetId) {
           prof = await fetchDatasetProfile(dataset.datasetId, ctrl.signal).catch(() => null);
+          if (!dataset.rows || dataset.rows.length === 0) {
+            apiClient
+              .get<{ rows: Row[]; columns?: string[] }>(`/datasets/${dataset.datasetId}/preview?limit=100`, {
+                signal: ctrl.signal,
+              })
+              .then((res: { rows?: Row[]; columns?: string[] }) => {
+                if (res?.rows && res.rows.length > 0 && !ctrl.signal.aborted) {
+                  loadDataset({
+                    ...dataset,
+                    rows: res.rows,
+                    columns: res.columns && res.columns.length > 0 ? res.columns : dataset.columns,
+                  });
+                }
+              })
+              .catch(() => {});
+          }
         }
         if (!prof) prof = computeClientProfile(dataset);
         if (ctrl.signal.aborted) return;

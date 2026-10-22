@@ -191,11 +191,33 @@ def cross_validate_pipeline(
         len(y) if hasattr(y, "__len__") else "?",
     )
 
+    # For large datasets (> 20,000 rows), evaluate CV on a representative sample to prevent 30+ minute hangs
+    X_cv, y_cv = X, y
+    n_samples = len(y) if hasattr(y, "__len__") else 0
+    MAX_CV_SAMPLES = 20000
+    if n_samples > MAX_CV_SAMPLES:
+        logger.info(
+            "Large dataset detected (%d rows). Subsampling to %d representative rows for cross-validation.",
+            n_samples,
+            MAX_CV_SAMPLES,
+        )
+        from sklearn.model_selection import train_test_split
+        strat = y if is_clf else None
+        try:
+            X_cv, _, y_cv, _ = train_test_split(
+                X, y, train_size=MAX_CV_SAMPLES, stratify=strat, random_state=42
+            )
+        except Exception:
+            X_cv, _, y_cv, _ = train_test_split(
+                X, y, train_size=MAX_CV_SAMPLES, random_state=42
+            )
+        cv_splitter = select_cv_strategy(problem_type, y_cv, n_splits=n_splits, cv_strategy=cv_strategy)
+
     try:
         cv_results = cross_validate(
             pipeline_clone,
-            X,
-            y,
+            X_cv,
+            y_cv,
             cv=cv_splitter,
             scoring=scorers,
             return_train_score=False,

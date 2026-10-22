@@ -1179,13 +1179,15 @@ async def predict_batch_local(
         })
 
     # 4. Class distribution for classification
-    class_distribution: Optional[Dict[str, int]] = None
-    if "classification" in (dep.problem_type or "").lower() and all_preds:
+    class_distribution: Optional[Dict[str, int]] = res.get("class_distribution")
+    if class_distribution is None and "classification" in (dep.problem_type or "").lower() and all_preds:
         class_distribution = dict(Counter(str(item.get("prediction")) for item in all_preds))
 
     # 5. Average confidence
-    confidences = [item.get("confidence") for item in all_preds if item.get("confidence") is not None]
-    avg_conf = float(np.mean(confidences)) if confidences else None
+    avg_conf = res.get("avg_confidence")
+    if avg_conf is None:
+        confidences = [item.get("confidence") for item in all_preds if item.get("confidence") is not None]
+        avg_conf = float(np.mean(confidences)) if confidences else None
 
     # 6. Update deployment telemetry and logs
     dep.total_predictions = (dep.total_predictions or 0) + total_samples

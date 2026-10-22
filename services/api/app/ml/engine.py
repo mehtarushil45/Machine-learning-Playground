@@ -290,6 +290,15 @@ def execute_ml_training_pipeline_sync(
             estimated_seconds=3.0,
         )
 
+        # Clean target column and discard invalid target values before train/test split
+        target_series = ctx.dataframe[ctx.target_column].replace(
+            ["", " ", "NA", "N/A", "null", "None", "NaN", "?"], np.nan
+        )
+        valid_mask = target_series.notna()
+        if not valid_mask.all() and valid_mask.sum() >= 2:
+            logger.info("Dropping %d rows with missing target values", int((~valid_mask).sum()))
+            ctx.dataframe = ctx.dataframe[valid_mask].copy()
+
         X: Any = ctx.dataframe[ctx.feature_columns]
         class_labels: Optional[List[str]] = None
         if is_classification:

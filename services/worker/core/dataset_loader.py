@@ -49,7 +49,49 @@ def find_dataset_path(dataset_id: str) -> str:
     if os.path.exists(target) and any(target.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
         return os.path.abspath(target)
 
-    # 2. Check MinIO / S3 Object Storage backend first (primary storage for uploaded datasets)
+    # 2. Gather candidate upload roots (local disk lookup is sub-millisecond)
+    candidate_roots = []
+    if os.path.exists(UPLOADS_DIR):
+        candidate_roots.append(UPLOADS_DIR)
+
+    alt_dirs = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "api", "uploads")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads")),
+        os.path.abspath("uploads"),
+        os.path.abspath("/app/services/api/uploads"),
+        os.path.abspath("/app/uploads"),
+    ]
+    for d in alt_dirs:
+        if os.path.exists(d) and d not in candidate_roots:
+            candidate_roots.append(d)
+
+    clean_target = os.path.basename(target).lower()
+    clean_target_stem = os.path.splitext(clean_target)[0]
+
+    # Fast path: direct file existence in candidate roots
+    for root_dir in candidate_roots:
+        for ext in ("", ".csv", ".parquet", ".pq"):
+            p1 = os.path.join(root_dir, target + ext)
+            if os.path.isfile(p1):
+                return os.path.abspath(p1)
+            p2 = os.path.join(root_dir, clean_target + ext)
+            if os.path.isfile(p2):
+                return os.path.abspath(p2)
+
+    EXCLUDED_DIRS = ("hidden_benchmarks", "prediction_logs", "workspaces", ".git", "__pycache__", "sandboxes")
+
+    # Pass A: Exact filename or stem match across all local upload directories
+    for root_dir in candidate_roots:
+        for root, _, files in os.walk(root_dir):
+            if any(skip in root for skip in EXCLUDED_DIRS):
+                continue
+            for f in files:
+                if any(f.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
+                    f_lower = f.lower()
+                    if f_lower == clean_target or os.path.splitext(f_lower)[0] == clean_target_stem:
+                        return os.path.join(root, f)
+
+    # 3. Check MinIO / S3 Object Storage backend if not found on local disk
     try:
         from app.ingestion.storage_backend import get_configured_backend
         backend: Any = get_configured_backend()
@@ -60,7 +102,7 @@ def find_dataset_path(dataset_id: str) -> str:
     except Exception as exc:
         logger.debug("MinIO temp lookup in find_dataset_path: %s", exc)
 
-    # 3. Check PostgreSQL database records for Dataset.file_path
+    # 4. Check PostgreSQL database records for Dataset.file_path
     try:
         from sqlalchemy import create_engine, text
         db_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/mlplatform")
@@ -87,48 +129,6 @@ def find_dataset_path(dataset_id: str) -> str:
                     pass
     except Exception:
         pass
-
-    # 4. Gather candidate upload roots (excluding workspaces/sandboxes)
-    candidate_roots = []
-    if os.path.exists(UPLOADS_DIR):
-        candidate_roots.append(UPLOADS_DIR)
-
-    alt_dirs = [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "api", "uploads")),
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "uploads")),
-        os.path.abspath("uploads"),
-        os.path.abspath("/app/services/api/uploads"),
-        os.path.abspath("/app/uploads"),
-    ]
-    for d in alt_dirs:
-        if os.path.exists(d) and d not in candidate_roots:
-            candidate_roots.append(d)
-
-    clean_target = os.path.basename(target).lower()
-    clean_target_stem = os.path.splitext(clean_target)[0]
-
-    EXCLUDED_DIRS = ("hidden_benchmarks", "prediction_logs", "workspaces", ".git", "__pycache__", "sandboxes")
-
-    # Pass A: Exact filename match across all subdirectories
-    for root_dir in candidate_roots:
-        for root, _, files in os.walk(root_dir):
-            if any(skip in root for skip in EXCLUDED_DIRS):
-                continue
-            for f in files:
-                if any(f.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
-                    if f.lower() == clean_target:
-                        return os.path.join(root, f)
-
-    # Pass B: Exact stem match (e.g. "telecom_churn" matches "telecom_churn.csv")
-    for root_dir in candidate_roots:
-        for root, _, files in os.walk(root_dir):
-            if any(skip in root for skip in EXCLUDED_DIRS):
-                continue
-            for f in files:
-                if any(f.lower().endswith(ext) for ext in VALID_DATASET_EXTENSIONS):
-                    f_stem = os.path.splitext(f.lower())[0]
-                    if f_stem == clean_target_stem:
-                        return os.path.join(root, f)
 
     # Pass C: Substring in filename
     for root_dir in candidate_roots:

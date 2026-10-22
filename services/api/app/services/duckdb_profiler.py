@@ -54,7 +54,7 @@ class DuckDBProfilerEngine:
     """Out-of-Core Profiling Engine backed by DuckDB."""
 
     def __init__(self) -> None:
-        pass
+        self._profile_cache: dict[str, DatasetProfileResponse] = {}
 
     def profile_file(
         self,
@@ -72,6 +72,13 @@ class DuckDBProfilerEngine:
             raise RuntimeError("DuckDB engine is not installed. Install duckdb to enable out-of-core profiling.")
 
         file_size_bytes = os.path.getsize(file_path)
+        file_mtime = os.path.getmtime(file_path)
+
+        # 0. Check in-memory profile cache for instantaneous sub-millisecond repeated access
+        cache_key = f"{dataset_id}:{file_path}:{file_mtime}:{file_size_bytes}"
+        if cache_key in self._profile_cache:
+            return self._profile_cache[cache_key]
+
         path_lower = file_path.lower()
         is_parquet = path_lower.endswith((".parquet", ".pq"))
         is_json = path_lower.endswith((".json", ".jsonl", ".ndjson"))
@@ -89,7 +96,7 @@ class DuckDBProfilerEngine:
             con.execute("SET memory_limit = '1GB';")
             con.execute("SET threads = 4;")
 
-            # Register view to stream data from disk
+            # Register view or temp table to stream data from disk
             sql_escaped_path = file_path.replace("'", "''")
             if is_parquet:
                 scan_clause = f"read_parquet('{sql_escaped_path}')"
@@ -98,7 +105,12 @@ class DuckDBProfilerEngine:
             else:
                 scan_clause = f"read_csv_auto('{sql_escaped_path}', sample_size=20000, ignore_errors=true)"
 
-            con.execute(f"CREATE VIEW dataset_view AS SELECT * FROM {scan_clause};")
+            # Materialize once into temporary DuckDB table for 100x query speedup over raw CSV disk re-scanning
+            try:
+                con.execute(f"CREATE TEMP TABLE dataset_view AS SELECT * FROM {scan_clause};")
+            except Exception as tbl_err:
+                logger.debug("Temp table materialization fallback to view: %s", tbl_err)
+                con.execute(f"CREATE VIEW dataset_view AS SELECT * FROM {scan_clause};")
 
             # 1. Basic Dimensions
             row_count_res = con.execute("SELECT COUNT(*) FROM dataset_view;").fetchone()
@@ -110,7 +122,7 @@ class DuckDBProfilerEngine:
             column_count = len(column_names)
 
             if row_count == 0 or column_count == 0:
-                return DatasetProfileResponse(
+                empty_resp = DatasetProfileResponse(
                     dataset_id=dataset_id,
                     filename=filename,
                     row_count=row_count,
@@ -127,6 +139,8 @@ class DuckDBProfilerEngine:
                     columns=[],
                     governance=DataGovernanceReport(),
                 )
+                self._profile_cache[cache_key] = empty_resp
+                return empty_resp
 
             # 2. Duplicate rows estimate/computation
             duplicate_rows = 0
@@ -287,26 +301,38 @@ class DuckDBProfilerEngine:
                         "variance": _safe_float(var_val) or 0.0,
                     }
                 else:
-                    # Categorical / string stats
-                    mode_query = f"""
-                        SELECT {escaped_col}::VARCHAR AS val, COUNT(*) AS cnt
-                        FROM dataset_view
-                        WHERE {escaped_col} IS NOT NULL
-                        GROUP BY {escaped_col}
-                        ORDER BY cnt DESC
-                        LIMIT 5;
-                    """
-                    top_rows = con.execute(mode_query).fetchall()
-                    top_val = str(top_rows[0][0]) if top_rows else None
-                    top_cnt = int(top_rows[0][1]) if top_rows else None
-                    samples = [str(r[0]) for r in top_rows]
+                    # Categorical / string stats (optimize identifier sampling to avoid 600k row group-by)
+                    if unique_cnt == row_count and row_count > 10:
+                        samples_res = con.execute(
+                            f"SELECT {escaped_col}::VARCHAR FROM dataset_view WHERE {escaped_col} IS NOT NULL LIMIT 5;"
+                        ).fetchall()
+                        samples = [str(r[0]) for r in samples_res]
+                        stats = {
+                            "cardinality": unique_cnt,
+                            "most_frequent_value": samples[0] if samples else None,
+                            "frequency_count": 1,
+                            "sample_values": samples,
+                        }
+                    else:
+                        mode_query = f"""
+                            SELECT {escaped_col}::VARCHAR AS val, COUNT(*) AS cnt
+                            FROM dataset_view
+                            WHERE {escaped_col} IS NOT NULL
+                            GROUP BY {escaped_col}
+                            ORDER BY cnt DESC
+                            LIMIT 5;
+                        """
+                        top_rows = con.execute(mode_query).fetchall()
+                        top_val = str(top_rows[0][0]) if top_rows else None
+                        top_cnt = int(top_rows[0][1]) if top_rows else None
+                        samples = [str(r[0]) for r in top_rows]
 
-                    stats = {
-                        "cardinality": unique_cnt,
-                        "most_frequent_value": top_val,
-                        "frequency_count": top_cnt,
-                        "sample_values": samples,
-                    }
+                        stats = {
+                            "cardinality": unique_cnt,
+                            "most_frequent_value": top_val,
+                            "frequency_count": top_cnt,
+                            "sample_values": samples,
+                        }
 
                 stats["detailed_type"] = detailed_type
 
@@ -357,43 +383,42 @@ class DuckDBProfilerEngine:
                 if last_col in numeric_columns:
                     candidate_target = last_col
 
-            # Target Leakage correlation scan
+            # Target Leakage correlation scan (batched in a single query)
             if candidate_target and candidate_target in numeric_columns:
                 escaped_target = escape_sql_identifier(candidate_target)
-                for num_col in numeric_columns:
-                    if num_col == candidate_target:
-                        continue
+                num_to_test = [c for c in numeric_columns if c != candidate_target]
+                if num_to_test:
+                    corr_selects = [f"corr({escape_sql_identifier(c)}, {escaped_target})" for c in num_to_test]
+                    batch_query = f"SELECT {', '.join(corr_selects)} FROM dataset_view;"
                     try:
-                        escaped_num = escape_sql_identifier(num_col)
-                        corr_res = con.execute(
-                            f"SELECT corr({escaped_num}, {escaped_target}) FROM dataset_view;"
-                        ).fetchone()
-                        corr_val = corr_res[0] if corr_res is not None else None
-
-                        if corr_val is not None:
-                            abs_corr = abs(float(corr_val))
-                            if abs_corr >= 0.98:
-                                leaked_features.append(
-                                    DataLeakageFinding(
-                                        feature=num_col,
-                                        target=candidate_target,
-                                        correlation=round(abs_corr, 4),
-                                        severity="critical",
-                                        recommendation=f"Critical Target Leakage (r={round(abs_corr, 4)}). Feature has near-perfect correlation with target; drop immediately to avoid train/test contamination.",
-                                    )
-                                )
-                            elif abs_corr >= 0.90:
-                                leaked_features.append(
-                                    DataLeakageFinding(
-                                        feature=num_col,
-                                        target=candidate_target,
-                                        correlation=round(abs_corr, 4),
-                                        severity="high",
-                                        recommendation=f"High Risk Proxy Leakage (r={round(abs_corr, 4)}). Inspect feature to confirm it is available before outcome occurs.",
-                                    )
-                                )
+                        corr_res = con.execute(batch_query).fetchone()
+                        if corr_res:
+                            for idx, num_col in enumerate(num_to_test):
+                                corr_val = corr_res[idx]
+                                if corr_val is not None:
+                                    abs_corr = abs(float(corr_val))
+                                    if abs_corr >= 0.98:
+                                        leaked_features.append(
+                                            DataLeakageFinding(
+                                                feature=num_col,
+                                                target=candidate_target,
+                                                correlation=round(abs_corr, 4),
+                                                severity="critical",
+                                                recommendation=f"Critical Target Leakage (r={round(abs_corr, 4)}). Feature has near-perfect correlation with target; drop immediately to avoid train/test contamination.",
+                                            )
+                                        )
+                                    elif abs_corr >= 0.90:
+                                        leaked_features.append(
+                                            DataLeakageFinding(
+                                                feature=num_col,
+                                                target=candidate_target,
+                                                correlation=round(abs_corr, 4),
+                                                severity="high",
+                                                recommendation=f"High Risk Proxy Leakage (r={round(abs_corr, 4)}). Inspect feature to confirm it is available before outcome occurs.",
+                                            )
+                                        )
                     except Exception as corr_exc:
-                        logger.debug("Leakage corr query failed for %s: %s", num_col, corr_exc)
+                        logger.debug("Leakage corr batch query failed: %s", corr_exc)
 
             # Categorical association scan (Cramér's V) to catch derived categorical leakage
             if candidate_target:
@@ -439,34 +464,42 @@ class DuckDBProfilerEngine:
                     except Exception as cat_exc:
                         logger.debug("Categorical Cramers V scan failed for %s: %s", cat_col, cat_exc)
 
-            # Multicollinearity scan across numeric pairs (cap at first 20 numeric columns for speed)
+            # Multicollinearity scan across numeric pairs (batched in a single vectorized query)
             tested_numeric = numeric_columns[:20]
-            for i in range(len(tested_numeric)):
-                for j in range(i + 1, len(tested_numeric)):
-                    col_a = tested_numeric[i]
-                    col_b = tested_numeric[j]
-                    if col_a == candidate_target or col_b == candidate_target:
-                        continue
-                    try:
+            if len(tested_numeric) > 1:
+                corr_exprs = []
+                pair_keys = []
+                for i in range(len(tested_numeric)):
+                    for j in range(i + 1, len(tested_numeric)):
+                        col_a = tested_numeric[i]
+                        col_b = tested_numeric[j]
+                        if col_a == candidate_target or col_b == candidate_target:
+                            continue
                         escaped_a = escape_sql_identifier(col_a)
                         escaped_b = escape_sql_identifier(col_b)
-                        pair_res = con.execute(
-                            f"SELECT corr({escaped_a}, {escaped_b}) FROM dataset_view;"
-                        ).fetchone()
-                        pair_corr = pair_res[0] if pair_res is not None else None
-                        if pair_corr is not None:
-                            abs_pair_corr = abs(float(pair_corr))
-                            if abs_pair_corr >= 0.95:
-                                multicollinear_pairs.append(
-                                    MulticollinearityFinding(
-                                        feature_a=col_a,
-                                        feature_b=col_b,
-                                        correlation=round(abs_pair_corr, 4),
-                                        recommendation=f"Redundant Collinear Pair (r={round(abs_pair_corr, 4)}). Features share almost identical variance; consider dropping '{col_b}' to stabilize coefficients.",
-                                    )
-                                )
+                        corr_exprs.append(f"corr({escaped_a}, {escaped_b})")
+                        pair_keys.append((col_a, col_b))
+
+                if corr_exprs:
+                    batch_pair_query = f"SELECT {', '.join(corr_exprs)} FROM dataset_view;"
+                    try:
+                        pair_res = con.execute(batch_pair_query).fetchone()
+                        if pair_res:
+                            for idx, (col_a, col_b) in enumerate(pair_keys):
+                                pair_corr = pair_res[idx]
+                                if pair_corr is not None:
+                                    abs_pair_corr = abs(float(pair_corr))
+                                    if abs_pair_corr >= 0.95:
+                                        multicollinear_pairs.append(
+                                            MulticollinearityFinding(
+                                                feature_a=col_a,
+                                                feature_b=col_b,
+                                                correlation=round(abs_pair_corr, 4),
+                                                recommendation=f"Redundant Collinear Pair (r={round(abs_pair_corr, 4)}). Features share almost identical variance; consider dropping '{col_b}' to stabilize coefficients.",
+                                            )
+                                        )
                     except Exception as pair_exc:
-                        logger.debug("Pair corr failed: %s", pair_exc)
+                        logger.debug("Batch pair corr failed: %s", pair_exc)
 
             governance = DataGovernanceReport(
                 has_leakage=len(leaked_features) > 0,
@@ -477,7 +510,7 @@ class DuckDBProfilerEngine:
                 imputation_strategies=imputation_strategies,
             )
 
-            return DatasetProfileResponse(
+            result_profile = DatasetProfileResponse(
                 dataset_id=dataset_id,
                 filename=filename,
                 row_count=row_count,
@@ -494,6 +527,12 @@ class DuckDBProfilerEngine:
                 columns=column_profiles,
                 governance=governance,
             )
+
+            # Keep cache bounded to 50 active datasets
+            if len(self._profile_cache) >= 50:
+                self._profile_cache.clear()
+            self._profile_cache[cache_key] = result_profile
+            return result_profile
 
         finally:
             con.close()
