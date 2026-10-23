@@ -359,3 +359,67 @@ async def test_dataset_delete_audit_lineage_protection(mock_dataset_user):
 
     app.dependency_overrides.clear()
 
+
+@pytest.mark.asyncio
+async def test_dataset_preview_with_nans_and_sanitization(mock_dataset_user):
+    """Verify GET /datasets/{id}/preview streams rows via DuckDB and converts NaNs to null (RFC 8259)."""
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+    from app.dependencies import get_current_active_user, get_current_user, get_db
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+    )
+    mock_db.commit = AsyncMock()
+    app.dependency_overrides[get_current_user] = lambda: mock_dataset_user
+    app.dependency_overrides[get_current_active_user] = lambda: mock_dataset_user
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    csv_with_nans = (
+        b"id,feature_num,feature_cat,all_nan,target\n"
+        b"1,10.5,alpha,,1\n"
+        b"2,NaN,beta,,0\n"
+        b"3,30.2,,,\n"
+        b"4,,gamma,,1\n"
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Upload CSV
+        up_resp = await client.post(
+            "/api/v1/datasets/upload",
+            files={"file": ("preview_nan_sample.csv", csv_with_nans, "text/csv")},
+        )
+        assert up_resp.status_code == 201
+        ds_id = up_resp.json()["dataset_id"]
+
+        # 2. Call preview endpoint
+        prev_resp = await client.get(f"/api/v1/datasets/{ds_id}/preview?limit=50")
+        assert prev_resp.status_code == 200
+
+        # Assert no raw NaN or Infinity in serialized response text
+        raw_text = prev_resp.text
+        assert "NaN" not in raw_text, "Found raw NaN in preview JSON response"
+        assert "Infinity" not in raw_text, "Found raw Infinity in preview JSON response"
+
+        # Verify JSON parsed properly into python objects
+        body = prev_resp.json()
+        assert "rows" in body
+        assert "columns" in body
+        assert len(body["rows"]) == 4
+        assert body["columns"] == ["id", "feature_num", "feature_cat", "all_nan", "target"]
+
+        # Row 2 feature_num was NaN, should now be None (serialized as JSON null)
+        row_2 = body["rows"][1]
+        assert row_2["feature_num"] is None
+        assert row_2["feature_cat"] == "beta"
+        assert row_2["all_nan"] is None
+
+        # Row 3 target was missing, should be None
+        row_3 = body["rows"][2]
+        assert row_3["target"] is None
+        assert row_3["feature_num"] == 30.2
+
+    app.dependency_overrides.clear()
+

@@ -567,6 +567,15 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   const [previewPageSize, setPreviewPageSize] = useState(15);
   const [previewSearch, setPreviewSearch] = useState('');
 
+  /* ── Local Preview Rows — fetched from backend, independent of dataset.rows ── */
+  // dataset.rows is often empty for large server-side CSVs (>200 MB) since they
+  // are never parsed in the browser. We keep preview data in its own state so
+  // we never route through loadDataset (which resets and re-validates the dataset,
+  // discarding any rows we just fetched).
+  const [previewRows, setPreviewRows] = useState<Row[]>([]);
+  const [previewColumns, setPreviewColumns] = useState<string[]>([]);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
   /* ── Dynamic Training Options from Backend (Single Source of Truth) ─ */
   const [trainingOptions, setTrainingOptions] = useState<TrainingOptions>(CANONICAL_TRAINING_OPTIONS);
 
@@ -613,6 +622,16 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* ── Reset preview rows when the active dataset changes ──────── */
+  useEffect(() => {
+    setPreviewRows([]);
+    setPreviewColumns([]);
+    setIsPreviewLoading(false);
+    setPreviewPage(1);
+    setPreviewSearch('');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset?.datasetId]);
+
   /* ── Profile & Health Engine Trigger ───────────────────────────── */
   useEffect(() => {
     abortRef.current?.abort();
@@ -630,21 +649,31 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
         let prof: DatasetProfile | null = null;
         if (dataset.datasetId) {
           prof = await fetchDatasetProfile(dataset.datasetId, ctrl.signal).catch(() => null);
-          if (!dataset.rows || dataset.rows.length === 0) {
+          // Fetch preview rows into LOCAL state — never call loadDataset here because
+          // loadDataset re-validates the dataset ID against the server, which discards
+          // the rows we just fetched and leaves the preview table empty.
+          if (previewRows.length === 0) {
+            setIsPreviewLoading(true);
             apiClient
               .get<{ rows: Row[]; columns?: string[] }>(`/datasets/${dataset.datasetId}/preview?limit=100`, {
                 signal: ctrl.signal,
               })
               .then((res: { rows?: Row[]; columns?: string[] }) => {
-                if (res?.rows && res.rows.length > 0 && !ctrl.signal.aborted) {
-                  loadDataset({
-                    ...dataset,
-                    rows: res.rows,
-                    columns: res.columns && res.columns.length > 0 ? res.columns : dataset.columns,
-                  });
+                if (!ctrl.signal.aborted) {
+                  setPreviewRows(res?.rows ?? []);
+                  if (res?.columns && res.columns.length > 0) {
+                    setPreviewColumns(res.columns);
+                  } else if (dataset.columns?.length) {
+                    setPreviewColumns(dataset.columns);
+                  }
                 }
               })
-              .catch(() => {});
+              .catch(() => {
+                if (!ctrl.signal.aborted) setPreviewRows([]);
+              })
+              .finally(() => {
+                if (!ctrl.signal.aborted) setIsPreviewLoading(false);
+              });
           }
         }
         if (!prof) prof = computeClientProfile(dataset);
@@ -1177,14 +1206,50 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   ]);
 
   /* ── Filtered & Paginated Preview Rows ──────────────────────────── */
+  // Source of truth: previewRows (fetched from backend). Falls back to dataset.rows
+  // for small client-side datasets that were parsed directly in the browser.
+  const effectivePreviewRows = useMemo(() => {
+    if (previewRows.length > 0) return previewRows;
+    if (dataset?.rows && dataset.rows.length > 0) return dataset.rows;
+    return [];
+  }, [previewRows, dataset?.rows]);
+
+  const displayColumns = useMemo(() => {
+    if (previewColumns.length > 0) return previewColumns;
+    if (allColumns.length > 0) return allColumns;
+    if (effectivePreviewRows.length > 0 && effectivePreviewRows[0]) {
+      return Object.keys(effectivePreviewRows[0]);
+    }
+    return [];
+  }, [previewColumns, allColumns, effectivePreviewRows]);
+
+  // On-demand fetch when user clicks into the Preview tab
+  useEffect(() => {
+    if (activeView === 'preview' && previewRows.length === 0 && dataset?.datasetId && !isPreviewLoading) {
+      setIsPreviewLoading(true);
+      apiClient
+        .get<{ rows: Row[]; columns?: string[] }>(`/datasets/${dataset.datasetId}/preview?limit=100`)
+        .then((res: { rows?: Row[]; columns?: string[] }) => {
+          if (res?.rows && res.rows.length > 0) {
+            setPreviewRows(res.rows);
+            if (res.columns && res.columns.length > 0) {
+              setPreviewColumns(res.columns);
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => setIsPreviewLoading(false));
+    }
+  }, [activeView, previewRows.length, dataset?.datasetId, isPreviewLoading]);
+
   const filteredPreviewRows = useMemo(() => {
-    if (!dataset) return [];
-    if (!previewSearch.trim()) return dataset.rows;
+    if (!previewSearch.trim()) return effectivePreviewRows;
     const q = previewSearch.toLowerCase();
-    return dataset.rows.filter((row) =>
+    return effectivePreviewRows.filter((row) =>
       Object.values(row).some((val) => String(val ?? '').toLowerCase().includes(q)),
     );
-  }, [dataset, previewSearch]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectivePreviewRows, previewSearch]);
 
   const totalPreviewPages = Math.max(1, Math.ceil(filteredPreviewRows.length / previewPageSize));
   const paginatedRows = useMemo(() => {
@@ -1380,60 +1445,69 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                             aria-label="Workspace — 4-panel grid layout"
                             title="Workspace (4-Panel layout)"
                             style={{
-                              display: 'flex',
+                              display: 'inline-flex',
                               alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 24,
+                              gap: 4,
+                              padding: '2px 8px',
                               height: 22,
                               borderRadius: 4,
                               border: 'none',
                               background: BB.primary,
                               color: BB.text,
                               cursor: 'pointer',
+                              fontSize: 10,
+                              fontWeight: 700,
                               transition: 'all 150ms',
                             }}
                           >
-                            <Layers style={{ width: 12, height: 12 }} />
-                          </button>
-                          <button
-                            onClick={() => setActiveView('governance')}
-                            aria-label="Data Governance & Leakage Guardrails"
-                            title="Governance & Leakage Guardrails"
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 24,
-                              height: 22,
-                              borderRadius: 4,
-                              border: 'none',
-                              background: 'transparent',
-                              color: BB.muted,
-                              cursor: 'pointer',
-                              transition: 'all 150ms',
-                            }}
-                          >
-                            <Shield style={{ width: 12, height: 12 }} />
+                            <Layers style={{ width: 11, height: 11 }} />
+                            <span>Workspace</span>
                           </button>
                           <button
                             onClick={() => setActiveView('preview')}
                             aria-label={`Preview Data — ${rowCount} rows`}
                             title={`Preview Data (${rowCount} rows)`}
                             style={{
-                              display: 'flex',
+                              display: 'inline-flex',
                               alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 24,
+                              gap: 4,
+                              padding: '2px 8px',
                               height: 22,
                               borderRadius: 4,
                               border: 'none',
                               background: 'transparent',
                               color: BB.muted,
                               cursor: 'pointer',
+                              fontSize: 10,
+                              fontWeight: 500,
                               transition: 'all 150ms',
                             }}
                           >
-                            <TableIcon style={{ width: 12, height: 12 }} />
+                            <TableIcon style={{ width: 11, height: 11 }} />
+                            <span>Preview Data</span>
+                          </button>
+                          <button
+                            onClick={() => setActiveView('governance')}
+                            aria-label="Data Governance & Leakage Guardrails"
+                            title="Governance & Leakage Guardrails"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '2px 8px',
+                              height: 22,
+                              borderRadius: 4,
+                              border: 'none',
+                              background: 'transparent',
+                              color: BB.muted,
+                              cursor: 'pointer',
+                              fontSize: 10,
+                              fontWeight: 500,
+                              transition: 'all 150ms',
+                            }}
+                          >
+                            <Shield style={{ width: 11, height: 11 }} />
+                            <span>Governance</span>
                           </button>
                           <button
                             onClick={() => { setSplitCol(50); setSplitRow(46); }}
@@ -1443,7 +1517,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              width: 24,
+                              width: 22,
                               height: 22,
                               borderRadius: 4,
                               border: 'none',
@@ -1535,7 +1609,23 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   >
                     <div>
                       <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>ROWS</span>
-                      <strong style={{ color: BB.text, fontFamily: 'var(--font-mono)' }}>{rowCount}</strong>
+                      <button
+                        onClick={() => setActiveView('preview')}
+                        title={`Click to preview data (${rowCount.toLocaleString()} rows)`}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: BB.primaryLight,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: 0,
+                          textDecoration: 'underline',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: 10,
+                        }}
+                      >
+                        {rowCount.toLocaleString()}
+                      </button>
                     </div>
                     <div>
                       <span style={{ color: BB.disabled, fontSize: 9, display: 'block' }}>COLS</span>
@@ -2701,8 +2791,57 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                 </div>
               </div>
 
-              {/* Data Table */}
-              <div style={{ overflowX: 'auto', flex: 1 }}>
+                {/* Data Table */}
+              <div style={{ overflowX: 'auto', flex: 1, position: 'relative' }}>
+                {isPreviewLoading ? (
+                  <div style={{ padding: 48, textAlign: 'center', color: BB.muted, fontSize: 12 }}>
+                    <Loader2 style={{ width: 22, height: 22, animation: 'spin 1s linear infinite', margin: '0 auto 10px', color: BB.primaryLight }} />
+                    <div style={{ marginBottom: 4, fontSize: 13, fontWeight: 600, color: BB.text }}>Loading preview data…</div>
+                    <div style={{ fontSize: 11, color: BB.muted }}>Zero-copy streaming from server via DuckDB (up to 1,000,000 rows supported)</div>
+                  </div>
+                ) : paginatedRows.length === 0 ? (
+                  <div style={{ padding: 48, textAlign: 'center', color: BB.muted, fontSize: 12 }}>
+                    <div style={{ marginBottom: 6, fontSize: 13, fontWeight: 600, color: BB.text }}>No preview rows available</div>
+                    <div style={{ fontSize: 11, color: BB.muted, marginBottom: 12 }}>
+                      {dataset?.datasetId ? 'Could not retrieve sample rows from backend.' : 'Dataset has no preview rows loaded.'}
+                    </div>
+                    {dataset?.datasetId && (
+                      <button
+                        onClick={() => {
+                          setIsPreviewLoading(true);
+                          apiClient
+                            .get<{ rows: Row[]; columns?: string[] }>(`/datasets/${dataset.datasetId}/preview?limit=100`)
+                            .then((res: { rows?: Row[]; columns?: string[] }) => {
+                              if (res?.rows && res.rows.length > 0) {
+                                setPreviewRows(res.rows);
+                                if (res.columns && res.columns.length > 0) {
+                                  setPreviewColumns(res.columns);
+                                }
+                              }
+                            })
+                            .catch(() => {})
+                            .finally(() => setIsPreviewLoading(false));
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 14px',
+                          borderRadius: 6,
+                          border: `1px solid ${BB.border}`,
+                          background: BB.elevated,
+                          color: BB.text,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <RotateCcw style={{ width: 12, height: 12 }} />
+                        <span>Fetch Preview Again</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
                   <thead>
                     <tr style={{ background: BB.surface, borderBottom: `1px solid ${BB.border}` }}>
@@ -2722,7 +2861,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                       >
                         #
                       </th>
-                      {allColumns.map((col) => (
+                      {displayColumns.map((col) => (
                         <th
                           key={col}
                           style={{
@@ -2778,7 +2917,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                         >
                           {(previewPage - 1) * previewPageSize + rIdx + 1}
                         </td>
-                        {allColumns.map((col) => {
+                        {displayColumns.map((col) => {
                           const val = row[col];
                           const isMissing =
                             val === null || val === undefined || val === '' || val === 'N/A' || val === 'NaN';
@@ -2802,6 +2941,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                     ))}
                   </tbody>
                 </table>
+                )}
               </div>
             </div>
           )}

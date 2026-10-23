@@ -263,3 +263,15 @@ class DatasetValidationReport(BaseModel):
     missing_cell_pct: float = 0.0
 
     model_config = {"from_attributes": True}
+
+
+class DatasetPreviewResponse(BaseModel):
+    """Schema representing sample rows retrieved from dataset via DuckDB streaming."""
+
+    dataset_id: str
+    filename: str
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    preview_count: int = 0
+
+    model_config = {"from_attributes": True}

@@ -42,6 +42,7 @@ from app.schemas.dataset import (
     DataGovernanceReport,
     DatasetHealthResponse,
     DatasetListResponse,
+    DatasetPreviewResponse,
     DatasetProfileResponse,
     DatasetRecommendationResponse,
     DatasetResponse,
@@ -825,6 +826,7 @@ async def get_dataset_profile(
 
 @router.get(
     "/{dataset_id}/preview",
+    response_model=DatasetPreviewResponse,
     summary="Get preview sample rows from dataset via streaming DuckDB reader",
 )
 async def get_dataset_preview(
@@ -832,7 +834,7 @@ async def get_dataset_preview(
     current_user: CurrentUser,
     limit: int = 100,
     db: Annotated[Optional[AsyncSession], Depends(get_db)] = None,
-) -> Dict[str, Any]:
+) -> DatasetPreviewResponse:
     """Retrieve top N preview rows for a dataset directly from disk via DuckDB zero-copy streaming."""
     org_id_str = str(current_user.organisation_id)
     org_dir = os.path.join(settings.upload_dir, org_id_str)
@@ -864,18 +866,58 @@ async def get_dataset_preview(
         except Exception:
             pass
 
+    # 4. Fallback search in Database record if available
+    if not matched_file_path and db is not None:
+        try:
+            ds_uuid = uuid.UUID(dataset_id)
+            stmt = select(Dataset).where(
+                Dataset.id == ds_uuid,
+                Dataset.organisation_id == current_user.organisation_id,
+            )
+            res = await db.execute(stmt)
+            ds_record = res.scalar_one_or_none()
+            if ds_record and ds_record.file_path and os.path.isfile(ds_record.file_path):
+                matched_file_path = ds_record.file_path
+        except Exception:
+            pass
+
     if not matched_file_path or not os.path.isfile(matched_file_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Dataset with ID '{dataset_id}' was not found on server.",
         )
 
+    def _sanitize_records_for_json(records: list[dict[Any, Any]]) -> list[dict[str, Any]]:
+        import math
+        import numpy as np
+        import pandas as pd
+        cleaned: list[dict[str, Any]] = []
+        for r in records:
+            clean_row: dict[str, Any] = {}
+            for k, v in r.items():
+                key_str = k if isinstance(k, str) else str(k)
+                if v is None:
+                    clean_row[key_str] = None
+                elif isinstance(v, (bool, np.bool_)):
+                    clean_row[key_str] = bool(v)
+                elif isinstance(v, (float, np.floating)):
+                    clean_row[key_str] = None if (math.isnan(v) or math.isinf(v)) else float(v)
+                elif isinstance(v, (int, np.integer)):
+                    clean_row[key_str] = int(v)
+                elif pd.isna(v):
+                    clean_row[key_str] = None
+                elif hasattr(v, "isoformat"):
+                    clean_row[key_str] = v.isoformat()
+                else:
+                    clean_row[key_str] = str(v)
+            cleaned.append(clean_row)
+        return cleaned
+
     safe_limit = max(1, min(1000, limit))
 
     # Fast path: DuckDB streaming
     try:
         import duckdb
-        import pandas as pd
         con = duckdb.connect(database=":memory:")
         safe_path = matched_file_path.replace("'", "''")
         if matched_file_path.lower().endswith((".parquet", ".pq")):
@@ -885,18 +927,16 @@ async def get_dataset_preview(
         preview_df = con.execute(query).fetchdf()
         con.close()
 
-        # Sanitize NaNs and infinities for strict JSON compatibility
-        preview_df = preview_df.where(pd.notnull(preview_df), None)
-        columns = list(preview_df.columns)
-        rows = preview_df.to_dict(orient="records")
+        columns = [c if isinstance(c, str) else str(c) for c in preview_df.columns]
+        rows = _sanitize_records_for_json(preview_df.to_dict(orient="records"))
 
-        return {
-            "dataset_id": dataset_id,
-            "filename": os.path.basename(matched_file_path),
-            "columns": columns,
-            "rows": rows,
-            "preview_count": len(rows),
-        }
+        return DatasetPreviewResponse(
+            dataset_id=dataset_id,
+            filename=os.path.basename(matched_file_path),
+            columns=columns,
+            rows=rows,
+            preview_count=len(rows),
+        )
     except Exception as duck_err:
         logger.warning("DuckDB preview failed for %s, falling back to pandas: %s", matched_file_path, duck_err)
 
@@ -907,14 +947,15 @@ async def get_dataset_preview(
             preview_df = pd.read_parquet(matched_file_path).head(safe_limit)
         else:
             preview_df = pd.read_csv(matched_file_path, nrows=safe_limit)
-        preview_df = preview_df.where(pd.notnull(preview_df), None)
-        return {
-            "dataset_id": dataset_id,
-            "filename": os.path.basename(matched_file_path),
-            "columns": list(preview_df.columns),
-            "rows": preview_df.to_dict(orient="records"),
-            "preview_count": len(preview_df),
-        }
+        columns = [c if isinstance(c, str) else str(c) for c in preview_df.columns]
+        rows = _sanitize_records_for_json(preview_df.to_dict(orient="records"))
+        return DatasetPreviewResponse(
+            dataset_id=dataset_id,
+            filename=os.path.basename(matched_file_path),
+            columns=columns,
+            rows=rows,
+            preview_count=len(rows),
+        )
     except Exception as read_err:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

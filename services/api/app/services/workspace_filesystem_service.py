@@ -51,7 +51,7 @@ def sanitize_project_id(project_id: Optional[str]) -> str:
     """Sanitize project identifier to prevent path traversal or invalid directory names."""
     if not project_id:
         return "default_project"
-    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "", str(project_id).strip())
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "", project_id.strip())
     return cleaned if cleaned else "default_project"
 
 

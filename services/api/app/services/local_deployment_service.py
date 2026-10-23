@@ -328,6 +328,7 @@ async def create_local_deployment(
     effective_job_id: str = payload.job_id or ""
     job_dataset_id: str = ""
     job_status: str = ""
+    db_metadata: Dict[str, Any] = {}
 
     if payload.job_id:
         logs.append(_log_entry(f"Initiating deployment for training job '{payload.job_id}'...", event="DEPLOYMENT_CREATED"))
@@ -336,6 +337,7 @@ async def create_local_deployment(
             job_status = in_mem.status
             job_dataset_id = in_mem.dataset_id or ""
             job_model_id = in_mem.metadata.get("model_id") if in_mem.metadata else job_model_id
+            db_metadata = in_mem.metadata or {}
 
         if not in_mem or not job_model_id:
             try:
@@ -356,6 +358,7 @@ async def create_local_deployment(
                         job_dataset_id = str(db_job.dataset_id) if db_job.dataset_id else ""
                         meta = db_job.job_metadata or {}
                         job_model_id = meta.get("model_id") or job_model_id
+                        db_metadata = meta
             except HTTPException:
                 raise
             except Exception as exc:
@@ -379,6 +382,10 @@ async def create_local_deployment(
                 job_model_id = reg_model.get("model_id")
             elif get_model_by_id(f"model-{payload.job_id[:8]}"):
                 job_model_id = f"model-{payload.job_id[:8]}"
+            elif db_metadata.get("model_id"):
+                job_model_id = db_metadata.get("model_id")
+            else:
+                job_model_id = f"model-{payload.job_id[:8]}"
 
         if not job_model_id:
             raise HTTPException(
@@ -397,29 +404,67 @@ async def create_local_deployment(
 
     # 2. Model Registry Metadata & Version
     registry_meta = get_model_by_id(job_model_id)
+    if not registry_meta and (db_metadata or payload.job_id):
+        # Auto-register from DB job metadata
+        from app.ml.model_registry import register_model
+        meta_to_reg: Dict[str, Any] = {
+            "model_id": job_model_id,
+            "job_id": payload.job_id if payload.job_id else db_metadata.get("job_id"),
+            "dataset_id": db_metadata.get("dataset_id") or job_dataset_id,
+            "algorithm": db_metadata.get("algorithm", "Unknown"),
+            "target_column": db_metadata.get("target_column", "target"),
+            "feature_columns": db_metadata.get("feature_columns", []),
+            "model_path": db_metadata.get("model_artifact_path") or db_metadata.get("model_path", ""),
+            "metrics": db_metadata.get("metrics", {}),
+            "created_at": db_metadata.get("created_at", ""),
+        }
+        try:
+            register_model(meta_to_reg)
+            registry_meta = get_model_by_id(job_model_id) or meta_to_reg
+        except Exception as exc:
+            logger.warning("Could not auto-register model %s from DB: %s", job_model_id, exc)
+            registry_meta = meta_to_reg
+
     if not registry_meta:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Model '{job_model_id}' not found in registry.",
         )
 
-    feature_columns: List[str] = registry_meta.get("feature_columns", [])
-    target_column: str = registry_meta.get("target_column", "target")
-    model_path: str = registry_meta.get("model_path", "")
-    algorithm: str = registry_meta.get("algorithm", "Unknown")
-    problem_type: str = registry_meta.get("problem_type", "")
-    dataset_id: str = registry_meta.get("dataset_id", "") or job_dataset_id
-    model_version: str = registry_meta.get("model_version") or registry_meta.get("version") or "v1.0.0"
-    artifact_id: str = os.path.basename(model_path) if model_path else f"artifact-{job_model_id}"
+    feature_columns: List[str] = list(registry_meta.get("feature_columns") or [])
+    target_column: str = str(registry_meta.get("target_column") or "target")
+    model_path: str = str(registry_meta.get("model_path") or "")
+    algorithm: str = str(registry_meta.get("algorithm") or "Unknown")
+    problem_type: str = str(registry_meta.get("problem_type") or "")
+    dataset_id: str = str(registry_meta.get("dataset_id") or job_dataset_id)
+    model_version: str = str(registry_meta.get("model_version") or registry_meta.get("version") or "v1.0.0")
 
-    # 3. Verify Binary on Disk
-    if not model_path or not os.path.exists(model_path):
+    # 3. Verify Binary on Disk (with cross-environment resolution)
+    from app.ml.model_registry import resolve_model_binary_path
+    resolved_path = resolve_model_binary_path(
+        model_path,
+        model_id=job_model_id,
+        job_id=payload.job_id or effective_job_id,
+    )
+    if resolved_path and os.path.exists(resolved_path):
+        model_path = resolved_path
+        artifact_id = os.path.basename(model_path)
+        registry_meta["model_path"] = model_path
+    else:
         try:
             from app.ml.artifact_manager import load_artifact
             fb = load_artifact("model", model_id=job_model_id)
-            if fb and os.path.exists(str(fb)):
-                model_path = str(fb)
-                artifact_id = os.path.basename(model_path)
+            if fb:
+                resolved_fb = resolve_model_binary_path(str(fb), model_id=job_model_id, job_id=payload.job_id)
+                if resolved_fb and os.path.exists(resolved_fb):
+                    model_path = resolved_fb
+                    artifact_id = os.path.basename(model_path)
+                    registry_meta["model_path"] = model_path
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Model artifact binary for '{job_model_id}' not found on disk at {model_path}.",
+                    )
             else:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,

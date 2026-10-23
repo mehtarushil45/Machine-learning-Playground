@@ -93,16 +93,112 @@ def _metadata_path(model_id: str) -> str:
     return os.path.join(_model_dir(model_id), "metadata.json")
 
 
+def _find_sidecar_metadata(identifier: str) -> Optional[Dict[str, Any]]:
+    _models_dir = os.path.abspath(os.path.join(_REGISTRY_ROOT, ".."))
+    if not os.path.exists(_models_dir):
+        return None
+    prefix = identifier[6:] if identifier.startswith("model-") else identifier
+    try:
+        for fname in os.listdir(_models_dir):
+            if fname.endswith("_metadata.json"):
+                if fname.startswith(prefix) or prefix in fname:
+                    try:
+                        with open(os.path.join(_models_dir, fname), "r", encoding="utf-8") as fh:
+                            content = json.load(fh)
+                        if (
+                            content.get("model_id") == identifier
+                            or content.get("job_id") == identifier
+                            or fname.startswith(prefix)
+                        ):
+                            return content
+                    except Exception:
+                        continue
+    except Exception as exc:
+        logger.warning("Error reading sidecar metadata in %s: %s", _models_dir, exc)
+    return None
+
+
+def resolve_model_binary_path(
+    path_str: Optional[str],
+    model_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve a model binary (.joblib) path across Docker container and host runtime paths."""
+    if path_str and os.path.exists(path_str):
+        return os.path.abspath(path_str)
+
+    _models_dir = os.path.abspath(os.path.join(_REGISTRY_ROOT, ".."))
+    _uploads_dir = os.path.abspath(os.path.join(_models_dir, ".."))
+
+    if path_str:
+        norm = path_str.replace("\\", "/")
+        if "/uploads/" in norm:
+            rel = norm.split("/uploads/", 1)[1]
+            candidate = os.path.abspath(os.path.join(_uploads_dir, rel))
+            if os.path.exists(candidate):
+                return candidate
+
+        fname = os.path.basename(norm)
+        if fname:
+            candidate = os.path.abspath(os.path.join(_models_dir, fname))
+            if os.path.exists(candidate):
+                return candidate
+
+    prefixes: list[str] = []
+    if job_id:
+        prefixes.append(job_id.strip())
+    if model_id:
+        m_clean = model_id.strip()
+        if m_clean.startswith("model-"):
+            prefixes.append(m_clean[6:])
+        prefixes.append(m_clean)
+
+    if os.path.exists(_models_dir):
+        try:
+            for fname in os.listdir(_models_dir):
+                if fname.endswith(".joblib"):
+                    for p in prefixes:
+                        if p and (fname.startswith(p) or p in fname):
+                            candidate = os.path.abspath(os.path.join(_models_dir, fname))
+                            if os.path.exists(candidate):
+                                return candidate
+        except Exception as exc:
+            logger.warning("Error searching models directory for %s/%s: %s", model_id, job_id, exc)
+
+    return None
+
+
 def _read_metadata(model_id: str) -> Optional[Dict[str, Any]]:
     path = _metadata_path(model_id)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception as exc:
-        logger.error("Failed to read metadata for %s: %s", model_id, exc)
-        return None
+    data: Optional[Dict[str, Any]] = None
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception as exc:
+            logger.error("Failed to read metadata for %s: %s", model_id, exc)
+
+    if not data:
+        sidecar = _find_sidecar_metadata(model_id)
+        if sidecar:
+            try:
+                register_model(sidecar)
+                if os.path.exists(path):
+                    with open(path, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                else:
+                    data = sidecar
+            except Exception as exc:
+                logger.warning("Auto-registration of sidecar failed for %s: %s", model_id, exc)
+                data = sidecar
+
+    if data:
+        raw_path = data.get("model_path")
+        resolved = resolve_model_binary_path(raw_path, model_id=data.get("model_id"), job_id=data.get("job_id"))
+        if resolved and resolved != raw_path:
+            data["model_path"] = resolved
+
+    return data
 
 
 def _write_metadata(model_id: str, data: Dict[str, Any]) -> None:
@@ -245,6 +341,14 @@ def get_model_by_job_id(job_id: str) -> Optional[Dict[str, Any]]:
     for entry in index:
         if entry.get("job_id") == job_id:
             return _read_metadata(entry.get("model_id", "")) or entry
+    sidecar = _find_sidecar_metadata(job_id)
+    if sidecar:
+        try:
+            mid = register_model(sidecar)
+            return _read_metadata(mid) or sidecar
+        except Exception as exc:
+            logger.warning("Failed to auto-register sidecar for job %s: %s", job_id, exc)
+            return sidecar
     return None
 
 

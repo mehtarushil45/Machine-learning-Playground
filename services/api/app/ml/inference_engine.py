@@ -209,9 +209,17 @@ def load_model(
         raise ModelNotFoundError(f"Model metadata for '{resolved_id}' not found in registry.")
 
     model_path = meta.get("model_path")
-    if not model_path or not os.path.exists(model_path):
+    from app.ml.model_registry import resolve_model_binary_path
+    resolved_path = resolve_model_binary_path(model_path, model_id=resolved_id, job_id=meta.get("job_id"))
+    if resolved_path:
+        model_path = resolved_path
+    else:
         # Fallback to artifact manager
         model_path = load_artifact("model", model_id=resolved_id)
+        if model_path:
+            resolved_path = resolve_model_binary_path(model_path, model_id=resolved_id, job_id=meta.get("job_id"))
+            if resolved_path:
+                model_path = resolved_path
 
     if not model_path or not os.path.exists(model_path):
         raise ModelNotFoundError(

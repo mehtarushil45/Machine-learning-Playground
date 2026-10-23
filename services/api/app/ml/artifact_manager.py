@@ -450,18 +450,22 @@ def _resolve_dir(
 
 
 def _locate_model_binary(model_id: Optional[str]) -> Optional[str]:
-    """Find the .joblib binary path via registry metadata."""
+    """Find the .joblib binary path via registry metadata or filesystem search."""
     if model_id is None:
         return None
+    from app.ml.model_registry import resolve_model_binary_path
     meta_path = os.path.join(_REGISTRY_DIR, model_id, "metadata.json")
-    if not os.path.exists(meta_path):
-        return None
-    try:
-        with open(meta_path, "r", encoding="utf-8") as fh:
-            meta = json.load(fh)
-        return meta.get("model_path")
-    except Exception:
-        return None
+    raw_path = None
+    job_id = None
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                meta = json.load(fh)
+            raw_path = meta.get("model_path")
+            job_id = meta.get("job_id")
+        except Exception:
+            pass
+    return resolve_model_binary_path(raw_path, model_id=model_id, job_id=job_id)
 
 
 def _delete_model_binary(model_id: Optional[str]) -> bool:

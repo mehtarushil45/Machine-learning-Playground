@@ -252,7 +252,7 @@ class LocalFileSystemBackend:
     ) -> str:
         """Construct ``<base_dir>/[<organisation_id>/]<dataset_id>_<filename>``."""
         if organisation_id:
-            return os.path.join(self._base_dir, str(organisation_id), f"{dataset_id}_{filename}")
+            return os.path.join(self._base_dir, organisation_id, f"{dataset_id}_{filename}")
         return os.path.join(self._base_dir, f"{dataset_id}_{filename}")
 
     def __repr__(self) -> str:  # pragma: no cover

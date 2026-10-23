@@ -308,7 +308,7 @@ class DatasetProfilerService:
         mem_bytes = data.memory_usage_bytes
         if mem_bytes <= 0:
             mem_bytes = sum(
-                len(str(k)) + len(str(v)) for r in data.rows for k, v in r.items()
+                len(k) + len(str(v)) for r in data.rows for k, v in r.items()
             )
 
         return DatasetProfileResponse(
