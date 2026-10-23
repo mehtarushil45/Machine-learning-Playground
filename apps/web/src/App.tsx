@@ -189,6 +189,7 @@ function AppContent() {
     { title: 'Training & Experiments', category: 'Platform', tab: 'training-results', description: 'Multi-run leaderboard, confusion matrix, ROC/PR & SHAP curves' },
     { title: 'Model Deployments & Serving', category: 'Platform', tab: 'deployments', description: 'Real-time REST endpoints & high-throughput batch CSV scoring' },
     { title: 'Model Registry & Governance', category: 'Deployments', tab: 'deployments', description: 'Production Champion models, lineage tracing & version promotion' },
+    { title: 'Classroom & Safe Exam Hub', category: 'Education', tab: 'classroom', description: 'University lab practical exams with proctored safe exam mode' },
     { title: 'Machine Learning User Guide', category: 'Documentation', tab: 'guide', description: 'Complete plain-English encyclopedia of algorithms, knobs & metrics' },
     { title: 'Random Forest Classifier', category: 'Algorithms', tab: 'guide', description: 'Ensemble of decision trees voting on predictions' },
     { title: 'XGBoost & LightGBM', category: 'Algorithms', tab: 'guide', description: 'High-performance gradient boosting for structured tabular datasets' },
@@ -239,6 +240,7 @@ function AppContent() {
     { id: 'code-studio',      label: 'Pipeline (Code Studio)',    icon: <Code2 className="w-5 h-5" />     },
     { id: 'training-results', label: 'Training & Experiments',    icon: <BarChart2 className="w-5 h-5" /> },
     { id: 'deployments',      label: 'Model Deployments',         icon: <Rocket className="w-5 h-5" />    },
+    { id: 'classroom',        label: 'Classroom (Lab Exam)',      icon: <GraduationCap className="w-5 h-5" /> },
   ];
 
   if (activeTab === 'guide') {
@@ -377,9 +379,20 @@ function AppContent() {
           {navItems.map((item) => {
             const isActive = activeTab === item.id;
             const isHovered = hoveredNav === item.id;
+            const isClassroom = item.id === 'classroom';
 
             return (
               <React.Fragment key={item.id}>
+                {isClassroom && (
+                  <div
+                    style={{
+                      width: 24,
+                      height: 1,
+                      backgroundColor: 'rgba(107,92,166,0.3)',
+                      margin: '4px 0',
+                    }}
+                  />
+                )}
                 <div
                   style={{ position: 'relative', width: '100%', display: 'flex', justifyContent: 'center' }}
                   onMouseEnter={() => setHoveredNav(item.id)}
@@ -396,19 +409,35 @@ function AppContent() {
                       justifyContent: 'center',
                       borderRadius: 8,
                       background: isActive
-                        ? 'rgba(107,92,166,0.18)'
+                        ? isClassroom
+                          ? 'rgba(0,212,255,0.18)'
+                          : 'rgba(107,92,166,0.18)'
                         : isHovered
-                        ? 'rgba(107,92,166,0.10)'
+                        ? isClassroom
+                          ? 'rgba(0,212,255,0.12)'
+                          : 'rgba(107,92,166,0.10)'
+                        : isClassroom
+                        ? 'rgba(0,212,255,0.06)'
                         : 'transparent',
                       border: `1px solid ${
                         isActive
-                          ? BB.primaryLight
+                          ? isClassroom
+                            ? '#00D4FF'
+                            : BB.primaryLight
+                          : isClassroom
+                          ? 'rgba(0,212,255,0.25)'
                           : 'transparent'
                       }`,
                       color: isActive
-                        ? BB.text
+                        ? isClassroom
+                          ? '#00D4FF'
+                          : BB.text
                         : isHovered
-                        ? BB.text
+                        ? isClassroom
+                          ? '#00D4FF'
+                          : BB.text
+                        : isClassroom
+                        ? '#00D4FF'
                         : BB.muted,
                       cursor: 'pointer',
                       transition: 'all 150ms ease',
@@ -425,7 +454,7 @@ function AppContent() {
                           bottom: 8,
                           width: 3,
                           borderRadius: '0 3px 3px 0',
-                          background: BB.maroon,
+                          background: isClassroom ? '#00D4FF' : BB.maroon,
                         }}
                       />
                     )}
