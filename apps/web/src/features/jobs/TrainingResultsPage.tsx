@@ -13,12 +13,10 @@ import {
   Cpu,
   AlertTriangle,
   Sliders,
-  Rocket,
   Trophy,
 } from 'lucide-react';
 import { useProject } from '../../providers/ProjectContext';
 import { fetchJobDetails, subscribeToJobProgressSSE, pollJobUntilDone } from '../../services/jobService';
-import { LocalDeploymentService } from '../../services/localDeploymentService';
 import { ExperimentLeaderboard } from './ExperimentLeaderboard';
 import { ThresholdOptimizer } from './ThresholdOptimizer';
 import { FeatureImportanceCard } from './FeatureImportanceCard';
@@ -227,22 +225,7 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({ onNavigat
   const [job, setJob] = useState<JobEntity | null>(activeJob);
   const [activeView, setActiveView] = useState<'overview' | 'leaderboard'>('overview');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isDeploying, setIsDeploying] = useState(false);
   const fetchedRef = useRef<string | null>(null);
-
-  const handleDeployModel = async () => {
-    if (!job || job.status !== 'COMPLETED') return;
-    setIsDeploying(true);
-    try {
-      const dep = await LocalDeploymentService.create(job.job_id, job.algorithm ? job.algorithm + ' Service' : 'Model Service');
-      onShowToast?.('Model Deployed!', (job.algorithm || 'Model') + ' endpoint is live.', 'success');
-      onNavigate('deployments', dep.deployment_id);
-    } catch (err: any) {
-      onShowToast?.('Deployment Failed', err?.detail || err?.message || 'Could not instantiate endpoint.', 'error');
-    } finally {
-      setIsDeploying(false);
-    }
-  };
 
   useEffect(() => { setJob(activeJob); }, [activeJob?.job_id, activeJob?.status]);
 
@@ -495,16 +478,6 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({ onNavigat
             <RefreshCw style={{ width:13, height:13, animation:isRefreshing?'spin 1s linear infinite':'none' }} />
           </button>
 
-          {/* SINGLE DEPLOY MODEL BUTTON */}
-          {job.status==='COMPLETED' && (
-            <button onClick={handleDeployModel} disabled={isDeploying}
-              style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 14px', borderRadius:'8px 8px 0 8px', fontSize:12, fontWeight:600, cursor:isDeploying?'not-allowed':'pointer', opacity:isDeploying?0.65:1, border:'none', background:T.maroon, color:T.text, fontFamily:T.ui, transition:'all 150ms ease' }}
-              onMouseEnter={(e) => { if(!isDeploying) e.currentTarget.style.background=T.maroonHover; }}
-              onMouseLeave={(e) => { if(!isDeploying) e.currentTarget.style.background=T.maroon; }}
-            >
-              {isDeploying?<><RefreshCw style={{width:12,height:12,animation:'spin 1s linear infinite'}}/> Deploying...</>:<><Rocket style={{width:12,height:12}}/> Deploy Model</>}
-            </button>
-          )}
         </div>
       </div>
 
@@ -538,7 +511,6 @@ export const TrainingResultsPage = memo(function TrainingResultsPage({ onNavigat
           <ExperimentLeaderboard
             currentJob={job} fileJobs={fileJobs} activeExperimentFile={activeExperimentFile}
             onSelectJob={(selected,file) => { setJob(selected); setActiveJob(selected); if(file) setActiveExperimentFile(file); setActiveView('overview'); }}
-            onDeployJob={handleDeployModel}
             onPromoteChampion={(promoted) => { setJob(promoted); setActiveJob(promoted); onShowToast?.('Champion Promoted',(promoted.algorithm?promoted.algorithm.replace(/_/g,' '):'Model')+' is now the active Champion.','success'); }}
             targetColumn={job.target_column||trainingConfig?.target_column}
           />

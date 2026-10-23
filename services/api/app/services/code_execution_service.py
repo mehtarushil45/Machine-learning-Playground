@@ -12,6 +12,7 @@ Runs user-submitted Python scripts in an isolated subprocess with:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import tempfile
@@ -606,7 +607,7 @@ async def _run_execution(
                                 is_cls or "classifier" in algo_name.lower() or "forest" in algo_name.lower()
                             ) else "regression"
 
-                            register_model({
+                            model_meta = {
                                 "model_id": model_id,
                                 "job_id": f"exec-{rec.exec_id[:8]}",
                                 "algorithm": algo_name,
@@ -626,7 +627,26 @@ async def _run_execution(
                                 "status": "ACTIVE",
                                 "owner": "code-studio",
                                 "description": f"Model trained via Code Studio execution ({rec.filename})",
-                            })
+                            }
+                            register_model(model_meta)
+
+                            # Sync to Redis cache for cross-tier resiliency
+                            try:
+                                from app.config import settings
+                                import redis, base64
+                                r_url = getattr(settings, "redis_url", None) or os.getenv("REDIS_URL", "redis://localhost:6379/0")
+                                sync_r = redis.from_url(r_url, decode_responses=True)
+                                raw_meta = json.dumps(model_meta)
+                                sync_r.set(f"mlpg:registry:model:{model_id}", raw_meta, ex=2592000)
+                                sync_r.set(f"mlpg:registry:model:exec-{rec.exec_id[:8]}", raw_meta, ex=2592000)
+                                if os.path.exists(dest_model_path):
+                                    with open(dest_model_path, "rb") as bf:
+                                        b64_bytes = base64.b64encode(bf.read()).decode("ascii")
+                                        sync_r.set(f"mlpg:model:binary:{model_id}", b64_bytes, ex=604800)
+                                        sync_r.set(f"mlpg:model:binary:exec-{rec.exec_id[:8]}", b64_bytes, ex=604800)
+                            except Exception as sync_exc:
+                                logger.warning("Failed to sync code execution model to Redis: %s", sync_exc)
+
                             rec.registered_model_id = model_id
                             await rec._queue.put(f"[ML Playground] Model registered in Model Registry: {model_id}")
                             break

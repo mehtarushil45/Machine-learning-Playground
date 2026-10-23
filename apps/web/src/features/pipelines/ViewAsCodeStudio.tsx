@@ -1725,7 +1725,7 @@ export function ViewAsCodeStudio({
       const targetModelId = execModelId || (execId ? `model-exec-${execId.slice(0, 8)}` : null);
       const dep = await LocalDeploymentService.create({
         modelId: targetModelId || undefined,
-        jobId: !targetModelId ? (activeJob?.job_id || undefined) : undefined,
+        jobId: execId || (activeJob?.job_id || undefined),
         name: `${currentFile.replace(/\.py$/, '')} Service`,
       });
       onShowToast?.(

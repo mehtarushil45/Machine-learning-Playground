@@ -118,6 +118,17 @@ def _find_sidecar_metadata(identifier: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _get_redis_sync():
+    """Get a synchronous Redis connection for cross-tier registry synchronization."""
+    try:
+        import redis
+        from app.config import settings
+        r_url = getattr(settings, "redis_url", None) or os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        return redis.from_url(r_url, decode_responses=True, socket_timeout=2.0)
+    except Exception:
+        return None
+
+
 def resolve_model_binary_path(
     path_str: Optional[str],
     model_id: Optional[str] = None,
@@ -153,10 +164,22 @@ def resolve_model_binary_path(
             prefixes.append(m_clean[6:])
         prefixes.append(m_clean)
 
+    if model_id:
+        m_clean = model_id.strip()
+        reg_file = os.path.join(_REGISTRY_ROOT, m_clean, "model.joblib")
+        if os.path.exists(reg_file):
+            return os.path.abspath(reg_file)
+
+    if job_id:
+        j_clean = job_id.strip()
+        reg_file = os.path.join(_REGISTRY_ROOT, f"model-exec-{j_clean[:8]}", "model.joblib")
+        if os.path.exists(reg_file):
+            return os.path.abspath(reg_file)
+
     if os.path.exists(_models_dir):
         try:
             for fname in os.listdir(_models_dir):
-                if fname.endswith(".joblib"):
+                if fname.endswith((".joblib", ".pkl")):
                     for p in prefixes:
                         if p and (fname.startswith(p) or p in fname):
                             candidate = os.path.abspath(os.path.join(_models_dir, fname))
@@ -164,6 +187,31 @@ def resolve_model_binary_path(
                                 return candidate
         except Exception as exc:
             logger.warning("Error searching models directory for %s/%s: %s", model_id, job_id, exc)
+
+    # Redis binary cache fallback
+    r = _get_redis_sync()
+    if r:
+        try:
+            import base64
+            keys_to_try = []
+            if model_id:
+                keys_to_try.extend([f"mlpg:model:binary:{model_id}", f"mlpg:model:binary:{model_id.replace('model-', '')}"])
+            if job_id:
+                keys_to_try.extend([f"mlpg:model:binary:{job_id}", f"mlpg:model:binary:exec-{job_id[:8]}", f"mlpg:model:binary:{job_id[:8]}"])
+
+            for rk in keys_to_try:
+                b64_val = r.get(rk)
+                if b64_val:
+                    m_name = model_id if model_id else (f"model-exec-{job_id[:8]}" if job_id else "unknown_model")
+                    target_dir = os.path.join(_REGISTRY_ROOT, m_name)
+                    os.makedirs(target_dir, exist_ok=True)
+                    out_path = os.path.join(target_dir, "model.joblib")
+                    with open(out_path, "wb") as bf:
+                        bf.write(base64.b64decode(b64_val))
+                    logger.info("Restored model binary from Redis key %s to %s", rk, out_path)
+                    return os.path.abspath(out_path)
+        except Exception as r_err:
+            logger.debug("Redis binary resolution failed: %s", r_err)
 
     return None
 
@@ -192,9 +240,56 @@ def _read_metadata(model_id: str) -> Optional[Dict[str, Any]]:
                 logger.warning("Auto-registration of sidecar failed for %s: %s", model_id, exc)
                 data = sidecar
 
+    # Redis metadata and execution record self-healing fallback
+    if not data:
+        r = _get_redis_sync()
+        if r:
+            try:
+                cached_json = r.get(f"mlpg:registry:model:{model_id}")
+                if not cached_json and model_id.startswith("model-"):
+                    cached_json = r.get(f"mlpg:registry:model:{model_id[6:]}")
+                if cached_json:
+                    try:
+                        parsed = json.loads(cached_json)
+                        register_model(parsed)
+                        data = parsed
+                    except Exception:
+                        pass
+
+                if not data and (model_id.startswith("model-exec-") or "exec-" in model_id):
+                    prefix = model_id.replace("model-exec-", "").replace("exec-", "")[:8]
+                    rec_raw = r.get(f"mlpg:exec:record:{prefix}") or r.get(f"mlpg:exec:model:{model_id}")
+                    if not rec_raw:
+                        match_keys = r.keys(f"mlpg:exec:record:*{prefix}*")
+                        if match_keys:
+                            rec_raw = r.get(match_keys[0])
+
+                    if rec_raw:
+                        rec_data = json.loads(rec_raw)
+                        meta_dict = {
+                            "model_id": model_id,
+                            "job_id": f"exec-{prefix}",
+                            "algorithm": "Code Studio Pipeline",
+                            "model_path": os.path.join(_model_dir(model_id), "model.joblib"),
+                            "dataset_id": rec_data.get("dataset_id") or "dataset.csv",
+                            "problem_type": "classification",
+                            "feature_columns": [],
+                            "status": "ACTIVE",
+                            "owner": "code-studio",
+                            "description": f"Model from Code Studio execution ({rec_data.get('filename', 'train.py')})",
+                        }
+                        if rec_data.get("model_metadata") and isinstance(rec_data["model_metadata"], dict):
+                            meta_dict.update(rec_data["model_metadata"])
+                        register_model(meta_dict)
+                        data = meta_dict
+            except Exception as redis_err:
+                logger.warning("Error fetching metadata from Redis for %s: %s", model_id, redis_err)
+
     if data:
-        raw_path = data.get("model_path")
-        resolved = resolve_model_binary_path(raw_path, model_id=data.get("model_id"), job_id=data.get("job_id"))
+        raw_path = str(data["model_path"]) if data.get("model_path") is not None else None
+        m_id_val = str(data["model_id"]) if data.get("model_id") is not None else None
+        j_id_val = str(data["job_id"]) if data.get("job_id") is not None else None
+        resolved = resolve_model_binary_path(raw_path, model_id=m_id_val, job_id=j_id_val)
         if resolved and resolved != raw_path:
             data["model_path"] = resolved
 

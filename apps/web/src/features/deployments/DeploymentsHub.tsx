@@ -82,7 +82,7 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
   useEffect(() => {
     onShowToastRef.current = onShowToast;
   });
-  const { activeJob, selectedTarget } = useProject();
+  const { activeJob } = useProject();
   const [deployments, setDeployments] = useState<LocalDeploymentResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
@@ -209,23 +209,6 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
     }
   };
 
-  const handleDeployModel = async (model: RegisteredModel) => {
-    setRegistryActionLoading((prev) => ({ ...prev, [model.model_id]: true }));
-    try {
-      const dep = await LocalDeploymentService.create({
-        jobId: model.job_id || undefined,
-        modelId: model.model_id,
-        name: `${model.algorithm} Service`,
-      });
-      onShowToast?.('Serving Endpoint Created!', `${model.algorithm} is live and ready for inference.`, 'success');
-      await fetchDeployments();
-      setActiveDeploymentId(dep.deployment_id);
-    } catch (err: any) {
-      onShowToast?.('Deployment Failed', err?.detail || err?.message, 'error');
-    } finally {
-      setRegistryActionLoading((prev) => ({ ...prev, [model.model_id]: false }));
-    }
-  };
 
   const handleOpenLineage = async (model: RegisteredModel) => {
     setLineageModalModel(model);
@@ -676,86 +659,6 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
 
       {hubTab === 'endpoints' ? (
         <>
-          {/* ── Active Project Model Ready to Deploy Banner ── */}
-          {activeJob?.status === 'COMPLETED' && !deployments.some((d) => d.job_id === activeJob.job_id) && (
-            <div
-              style={{
-                marginBottom: 20,
-                padding: '14px 20px',
-                background: 'linear-gradient(135deg, rgba(0, 245, 160, 0.12) 0%, rgba(0, 212, 255, 0.08) 100%)',
-                border: '1px solid rgba(0, 245, 160, 0.35)',
-                borderRadius: 10,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 16,
-                flexWrap: 'wrap',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 8,
-                    background: 'rgba(0, 245, 160, 0.2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#00F5A0',
-                  }}
-                >
-                  <Rocket size={18} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: '#FFFFFF' }}>
-                    Active Trained Model Ready to Deploy
-                  </div>
-                  <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>
-                    Algorithm: <strong style={{ color: '#00F5A0' }}>{activeJob.algorithm}</strong> • Target Column: <strong style={{ color: '#FCD34D' }}>{activeJob.target_column || selectedTarget}</strong> • Features: {activeJob.feature_columns?.length || 0}
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={async () => {
-                  try {
-                    const dep = await LocalDeploymentService.create(
-                      activeJob.job_id,
-                      `${activeJob.algorithm || 'Model'} Service`
-                    );
-                    onShowToast?.(
-                      'Serving Endpoint Created!',
-                      `${activeJob.algorithm} endpoint is live for ${activeJob.target_column || selectedTarget}.`,
-                      'success'
-                    );
-                    await fetchDeployments();
-                    setActiveDeploymentId(dep.deployment_id);
-                  } catch (err: any) {
-                    onShowToast?.('Deployment Failed', err?.detail || err?.message, 'error');
-                  }
-                }}
-                style={{
-                  padding: '8px 18px',
-                  borderRadius: 8,
-                  background: 'linear-gradient(135deg, #00F5A0 0%, #00D4FF 100%)',
-                  color: '#050B14',
-                  fontWeight: 800,
-                  fontSize: 12,
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  boxShadow: '0 0 16px rgba(0, 245, 160, 0.35)',
-                  transition: 'all 150ms ease',
-                }}
-              >
-                <Rocket size={14} />
-                <span>Deploy Model to Serving Endpoint</span>
-              </button>
-            </div>
-          )}
 
           {/* ── Metrics Bar ── */}
           <div
@@ -1720,29 +1623,6 @@ export const DeploymentsHub: React.FC<DeploymentsHubProps> = ({
                           </button>
                         )}
 
-                        {/* Deploy Serving Endpoint */}
-                        {isAct && !activeDep && (
-                          <button
-                            onClick={() => handleDeployModel(model)}
-                            disabled={isBusy}
-                            style={{
-                              padding: '7px 13px',
-                              borderRadius: 8,
-                              background: 'rgba(0, 245, 160, 0.12)',
-                              border: '1px solid rgba(0, 245, 160, 0.35)',
-                              color: '#00F5A0',
-                              fontSize: 12,
-                              fontWeight: 700,
-                              cursor: isBusy ? 'wait' : 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 6,
-                            }}
-                          >
-                            {isBusy ? <Loader2 size={13} className="animate-spin" /> : <Rocket size={13} />}
-                            Deploy Endpoint
-                          </button>
-                        )}
 
                         {/* If already active endpoint deployed, open studio */}
                         {activeDep && (

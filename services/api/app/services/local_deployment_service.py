@@ -15,6 +15,7 @@ Architecture Separation of Concerns:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -346,35 +347,79 @@ async def create_local_deployment(
                 async with AsyncSessionLocal() as _db:
                     try:
                         job_uuid = uuid.UUID(payload.job_id)
+                        res = await _db.execute(select(Job).where(Job.id == job_uuid, Job.is_deleted == False))
+                        db_job = res.scalar_one_or_none()
+                        if db_job:
+                            job_status = db_job.status
+                            job_dataset_id = str(db_job.dataset_id) if db_job.dataset_id else ""
+                            meta = db_job.job_metadata or {}
+                            job_model_id = meta.get("model_id") or job_model_id
+                            db_metadata = meta
                     except ValueError:
-                        raise HTTPException(
-                            status_code=status.HTTP_404_NOT_FOUND,
-                            detail=f"Job '{payload.job_id}' not found.",
-                        )
-                    res = await _db.execute(select(Job).where(Job.id == job_uuid, Job.is_deleted == False))
-                    db_job = res.scalar_one_or_none()
-                    if db_job:
-                        job_status = db_job.status
-                        job_dataset_id = str(db_job.dataset_id) if db_job.dataset_id else ""
-                        meta = db_job.job_metadata or {}
-                        job_model_id = meta.get("model_id") or job_model_id
-                        db_metadata = meta
-            except HTTPException:
-                raise
+                        pass
             except Exception as exc:
                 logger.warning("DB job lookup failed: %s", exc)
 
+        # Check Redis execution records and in-memory execution service for Code Studio runs
         if not job_status:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Training job '{payload.job_id}' not found.",
-            )
+            try:
+                import redis
+                from app.config import settings
+                r_url = getattr(settings, "redis_url", None) or os.getenv("REDIS_URL", "redis://localhost:6379/0")
+                r = redis.from_url(r_url, decode_responses=True, socket_timeout=2.0)
+                prefix = payload.job_id.replace("model-exec-", "").replace("exec-", "")[:8]
+                rec_raw = r.get(f"mlpg:exec:record:{payload.job_id}") or r.get(f"mlpg:exec:record:{prefix}")
+                if not rec_raw:
+                    match_keys = r.keys(f"mlpg:exec:record:*{prefix}*")
+                    if match_keys:
+                        rec_raw = r.get(match_keys[0])
 
-        if job_status != _JOB_COMPLETED_STATUS:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Job '{payload.job_id}' has status '{job_status}'. Only COMPLETED jobs can be deployed.",
-            )
+                if rec_raw:
+                    rec = json.loads(rec_raw)
+                    st = rec.get("status")
+                    if st in ("completed", "COMPLETED", 0):
+                        job_status = _JOB_COMPLETED_STATUS
+                    else:
+                        job_status = str(st or "").upper()
+                    job_dataset_id = rec.get("dataset_id") or ""
+                    job_model_id = rec.get("registered_model_id") or job_model_id or f"model-exec-{prefix}"
+                    db_metadata = rec.get("model_metadata") or {}
+            except Exception as r_exc:
+                logger.debug("Redis execution record lookup failed for %s: %s", payload.job_id, r_exc)
+
+        # Check in-memory CodeExecutionService store
+        if not job_status:
+            try:
+                from app.services.code_execution_service import _EXECUTIONS
+                exec_rec = _EXECUTIONS.get(payload.job_id)
+                if exec_rec:
+                    st = exec_rec.status
+                    job_status = _JOB_COMPLETED_STATUS if st in ("completed", "COMPLETED") else str(st).upper()
+                    job_dataset_id = exec_rec.dataset_id or ""
+                    job_model_id = getattr(exec_rec, "registered_model_id", None) or job_model_id or f"model-exec-{payload.job_id[:8]}"
+            except Exception:
+                pass
+
+        if not job_status:
+            if payload.model_id:
+                # If a specific registered model_id was provided, fall back to model deployment
+                logs.append(_log_entry(f"Job '{payload.job_id}' not found in job tables; proceeding with model '{payload.model_id}'", event="JOB_FALLBACK"))
+                effective_job_id = payload.job_id
+                job_model_id = payload.model_id
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Training job '{payload.job_id}' not found.",
+                )
+        elif job_status != _JOB_COMPLETED_STATUS:
+            if payload.model_id:
+                logs.append(_log_entry(f"Job status '{job_status}'; proceeding with registered model '{payload.model_id}'", event="JOB_FALLBACK"))
+                job_model_id = payload.model_id
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Job '{payload.job_id}' has status '{job_status}'. Only COMPLETED jobs can be deployed.",
+                )
 
         if not job_model_id:
             reg_model = get_model_by_job_id(payload.job_id)
@@ -424,6 +469,62 @@ async def create_local_deployment(
         except Exception as exc:
             logger.warning("Could not auto-register model %s from DB: %s", job_model_id, exc)
             registry_meta = meta_to_reg
+
+    if not registry_meta:
+        # Cross-tier self-healing: Query Redis for model metadata or execution record
+        try:
+            import redis
+            from app.config import settings
+            r_url = getattr(settings, "redis_url", None) or os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            r = redis.from_url(r_url, decode_responses=True, socket_timeout=2.0)
+
+            # 1. Direct model key in Redis
+            if job_model_id:
+                cached_meta = r.get(f"mlpg:registry:model:{job_model_id}")
+                if not cached_meta and job_model_id.startswith("model-"):
+                    cached_meta = r.get(f"mlpg:registry:model:{job_model_id[6:]}")
+
+                if cached_meta:
+                    meta_dict = json.loads(cached_meta)
+                    from app.ml.model_registry import register_model
+                    register_model(meta_dict)
+                    registry_meta = get_model_by_id(job_model_id) or meta_dict
+
+            # 2. Check execution records in Redis
+            target_str = job_model_id or payload.job_id or ""
+            if not registry_meta and target_str and ("model-exec-" in target_str or "exec-" in target_str or payload.job_id):
+                prefix = target_str.replace("model-exec-", "").replace("exec-", "")[:8]
+                rec_raw = r.get(f"mlpg:exec:record:{prefix}")
+                if not rec_raw and job_model_id:
+                    rec_raw = r.get(f"mlpg:exec:model:{job_model_id}")
+                if not rec_raw:
+                    match_keys = r.keys(f"mlpg:exec:record:*{prefix}*")
+                    if match_keys:
+                        rec_raw = r.get(match_keys[0])
+
+                if rec_raw:
+                    rec_data = json.loads(rec_raw)
+                    target_model_key = job_model_id or f"model-exec-{prefix}"
+                    from app.ml.model_registry import register_model, _model_dir
+                    auto_meta = {
+                        "model_id": target_model_key,
+                        "job_id": f"exec-{prefix}",
+                        "algorithm": "Code Studio Pipeline",
+                        "model_path": os.path.join(_model_dir(target_model_key), "model.joblib"),
+                        "dataset_id": rec_data.get("dataset_id") or "dataset.csv",
+                        "problem_type": "classification",
+                        "feature_columns": [],
+                        "status": "ACTIVE",
+                        "owner": "code-studio",
+                        "description": f"Auto-registered from execution ({rec_data.get('filename', 'train.py')})",
+                    }
+                    if rec_data.get("model_metadata") and isinstance(rec_data["model_metadata"], dict):
+                        auto_meta.update(rec_data["model_metadata"])
+                    register_model(auto_meta)
+                    job_model_id = target_model_key
+                    registry_meta = get_model_by_id(target_model_key) or auto_meta
+        except Exception as redis_exc:
+            logger.warning("Redis fallback lookup failed for %s: %s", job_model_id, redis_exc)
 
     if not registry_meta:
         raise HTTPException(

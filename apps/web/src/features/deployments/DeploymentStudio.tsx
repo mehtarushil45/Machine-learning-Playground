@@ -460,7 +460,6 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
   // Deployment lifecycle state
   const [deployment, setDeployment] = useState<LocalDeploymentResponse | null>(null);
   const [deployLoading, setDeployLoading] = useState(false);
-  const [deployError, setDeployError] = useState<string | null>(null);
 
   // Prediction form state
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
@@ -490,7 +489,6 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
   const [showApiTab, setShowApiTab] = useState(false);
 
   const jobId = activeJob?.job_id;
-  const isCompleted = activeJob?.status === 'COMPLETED';
 
   // Inject CSS keyframe for pulse animation
   useEffect(() => {
@@ -614,7 +612,6 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
   const isFailed = deployment?.status === 'FAILED';
   const isStarting = deployment?.status === 'STARTING' || deployment?.status === 'DEPLOYING';
 
-  const canDeploy = isCompleted && !deployment;
   const canPredict = isRunning;
   const canStart = isStopped || isFailed;
   const canStop = isRunning || isStarting;
@@ -622,28 +619,6 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
   const canRedeploy = true;
 
   /* ── Handlers ── */
-  const handleDeploy = async () => {
-    if (!jobId) return;
-    setDeployLoading(true);
-    setDeployError(null);
-    try {
-      const dep = await LocalDeploymentService.create(jobId, friendlyAlgorithmName);
-      setDeployment(dep);
-      loadHistory(dep.deployment_id);
-      if (dep.status === 'RUNNING' || dep.status === 'READY') {
-        onShowToast?.('Endpoint Live!', `${friendlyAlgorithmName} is active and ready for inference.`, 'success');
-      } else if (dep.status === 'FAILED') {
-        onShowToast?.('Deployment Issue', dep.error_message || 'Could not load model.', 'error');
-      }
-      onDeploymentChange?.();
-    } catch (err: any) {
-      const msg = err?.detail || err?.message || 'Deployment failed';
-      setDeployError(msg);
-      onShowToast?.('Deployment Failed', msg, 'error');
-    } finally {
-      setDeployLoading(false);
-    }
-  };
 
   const handleStart = async () => {
     if (!deployment) return;
@@ -1232,66 +1207,14 @@ export const DeploymentStudio: React.FC<DeploymentStudioProps> = ({
                 </div>
               </div>
             ) : (
-              /* Deploy Button (When no deployment created yet) */
+              /* Info Box (When no deployment selected) */
               <div style={CARD_STYLE}>
                 <div style={SECTION_LABEL}>
-                  <Rocket size={12} style={{ color: '#00F5A0' }} /> Launch Real-Time Endpoint
+                  <Rocket size={12} style={{ color: '#00F5A0' }} /> Serving Endpoint Details
                 </div>
-                <p style={{ fontSize: 13, color: '#64748B', lineHeight: 1.5, marginBottom: 16 }}>
-                  Deploys this model artifact to an in-memory cached endpoint capable of executing predictions
-                  in under 5 milliseconds.
+                <p style={{ fontSize: 13, color: '#94A3B8', lineHeight: 1.5, margin: '8px 0 0 0' }}>
+                  Select an active serving endpoint from the endpoints list to inspect real-time inference latency, run predictions, execute batch CSV scoring, or analyze data drift.
                 </p>
-
-                {deployError && (
-                  <div
-                    style={{
-                      padding: '10px 14px',
-                      borderRadius: 8,
-                      background: 'rgba(239,68,68,0.08)',
-                      border: '1px solid rgba(239,68,68,0.25)',
-                      fontSize: 12,
-                      color: '#FF4D6D',
-                      marginBottom: 14,
-                    }}
-                  >
-                    {deployError}
-                  </div>
-                )}
-
-                <button
-                  onClick={handleDeploy}
-                  disabled={!canDeploy || deployLoading}
-                  style={{
-                    width: '100%',
-                    padding: '12px 18px',
-                    borderRadius: 10,
-                    border: 'none',
-                    background:
-                      canDeploy && !deployLoading
-                        ? 'linear-gradient(135deg, #00D4FF, #00F5A0)'
-                        : '#152540',
-                    color: canDeploy && !deployLoading ? '#08111E' : '#475569',
-                    fontWeight: 800,
-                    fontSize: 14,
-                    cursor: canDeploy ? 'pointer' : 'not-allowed',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    boxShadow: canDeploy && !deployLoading ? '0 0 20px rgba(0,245,160,0.2)' : 'none',
-                    transition: 'all 200ms ease',
-                  }}
-                >
-                  {deployLoading ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" /> Initializing Endpoint…
-                    </>
-                  ) : (
-                    <>
-                      <Rocket size={16} /> Deploy Model to Local Endpoint
-                    </>
-                  )}
-                </button>
               </div>
             )}
 

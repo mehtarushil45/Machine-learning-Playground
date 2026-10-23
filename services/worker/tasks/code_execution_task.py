@@ -27,7 +27,7 @@ from services.worker.celery_app import celery_app
 
 logger = logging.getLogger("apex_ml.code_execution_task")
 
-_DEFAULT_TIMEOUT_SECONDS = 90
+_DEFAULT_TIMEOUT_SECONDS = 180
 MAX_STREAM_LINES = 5000
 _SENSITIVE_PREFIXES = (
     "DATABASE", "REDIS", "POSTGRES", "AWS", "SECRET", "JWT",
@@ -85,6 +85,14 @@ def _register_sandbox_model(sandbox: str, artifacts: List[str], exec_id: str, da
                 dest_model_path = os.path.join(dest_dir, "model.joblib")
                 shutil.copy2(art_src, dest_model_path)
 
+                dest_models_dir = os.path.abspath(os.path.join(_REGISTRY_ROOT, ".."))
+                os.makedirs(dest_models_dir, exist_ok=True)
+                for alias in (f"{model_id}.joblib", f"exec-{exec_id[:8]}.joblib", f"{exec_id}.joblib"):
+                    try:
+                        shutil.copy2(art_src, os.path.join(dest_models_dir, alias))
+                    except Exception:
+                        pass
+
                 algo_name = "Code Studio Pipeline"
                 feat_cols: List[str] = []
                 cat_cols: List[str] = []
@@ -112,7 +120,7 @@ def _register_sandbox_model(sandbox: str, artifacts: List[str], exec_id: str, da
                 except Exception:
                     pass
 
-                register_model({
+                model_meta = {
                     "model_id": model_id,
                     "job_id": f"exec-{exec_id[:8]}",
                     "algorithm": algo_name,
@@ -131,7 +139,25 @@ def _register_sandbox_model(sandbox: str, artifacts: List[str], exec_id: str, da
                     "status": "ACTIVE",
                     "owner": "code-studio",
                     "description": f"Model trained via Code Studio execution ({filename})",
-                })
+                }
+                register_model(model_meta)
+
+                # Cross-tier cache sync to Redis to prevent host/container split-brain
+                try:
+                    r = _get_redis_client()
+                    if r:
+                        import base64
+                        raw_meta = json.dumps(model_meta)
+                        r.set(f"mlpg:registry:model:{model_id}", raw_meta, ex=2592000)
+                        r.set(f"mlpg:registry:model:exec-{exec_id[:8]}", raw_meta, ex=2592000)
+                        if os.path.exists(dest_model_path):
+                            with open(dest_model_path, "rb") as bf:
+                                b64_bytes = base64.b64encode(bf.read()).decode("ascii")
+                                r.set(f"mlpg:model:binary:{model_id}", b64_bytes, ex=604800)
+                                r.set(f"mlpg:model:binary:exec-{exec_id[:8]}", b64_bytes, ex=604800)
+                except Exception as sync_exc:
+                    logger.warning("Failed to sync worker model to Redis: %s", sync_exc)
+
                 return model_id
             except Exception as reg_exc:
                 logger.warning("Failed to auto-register worker sandbox model: %s", reg_exc)
@@ -492,7 +518,11 @@ def execute_code_sandbox(
 
         if redis_client:
             try:
-                redis_client.set(f"mlpg:exec:record:{exec_id}", json.dumps(final_record), ex=86400)
+                rec_json = json.dumps(final_record)
+                redis_client.set(f"mlpg:exec:record:{exec_id}", rec_json, ex=86400)
+                redis_client.set(f"mlpg:exec:record:{exec_id[:8]}", rec_json, ex=86400)
+                if model_id:
+                    redis_client.set(f"mlpg:exec:model:{model_id}", rec_json, ex=86400)
             except Exception:
                 pass
 

@@ -17,7 +17,7 @@ interface ExperimentLeaderboardProps {
   fileJobs?: Record<string, JobEntity>;
   activeExperimentFile?: string;
   onSelectJob: (job: JobEntity, fileName?: string) => void;
-  onDeployJob: (job: JobEntity) => void;
+  onDeployJob?: (job: JobEntity) => void;
   onPromoteChampion?: (job: JobEntity) => void;
   targetColumn?: string;
 }
@@ -693,7 +693,7 @@ export const ExperimentLeaderboard: React.FC<ExperimentLeaderboardProps> = ({
                           <Crown size={10} /> Champion
                         </span>
                       )}
-                      {job.status === 'COMPLETED' && (
+                      {onDeployJob && job.status === 'COMPLETED' && (
                         <button
                           onClick={() => onDeployJob(job)}
                           style={{

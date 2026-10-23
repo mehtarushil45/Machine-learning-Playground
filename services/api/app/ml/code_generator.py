@@ -264,7 +264,6 @@ def generate_python_code(
         CodeGenerationResponse containing the Python code, step explanations, syntax validation flag, and import list.
     """
     imports: List[str] = [
-        "import numpy as np",
         "import pandas as pd",
         "import joblib",
         "from sklearn.model_selection import train_test_split",
@@ -336,7 +335,7 @@ if target_col not in df.columns:
         df[target_col] = 0
 
 # Drop any records where target is missing or contains null string representations
-df[target_col] = df[target_col].replace(["", " ", "NA", "N/A", "null", "None", "NaN", "?"], np.nan)
+df[target_col] = df[target_col].replace(["", " ", "NA", "N/A", "null", "None", "NaN", "?"], None)
 df = df.dropna(subset=[target_col])
 {target_clean_logic}
 
@@ -420,8 +419,9 @@ for col in feature_cols:
 numeric_features = [
     col for col in feature_cols if col in df.columns and pd.api.types.is_numeric_dtype(df[col])
 ]
+# Filter categorical features to <= 50 unique values (prevents dimension explosion from IDs/dates)
 categorical_features = [
-    col for col in feature_cols if col in df.columns and col not in numeric_features
+    col for col in feature_cols if col in df.columns and col not in numeric_features and df[col].nunique() <= 50
 ]
 
 # Ensure categorical columns are uniformly strings with missing values filled
@@ -507,6 +507,15 @@ X_train, X_test, y_train, y_test = train_test_split(
             params_items.append(f"{k}='{v}'")
         else:
             params_items.append(f"{k}={v}")
+
+    if "GradientBoosting" in algo_class_name:
+        if "n_estimators" not in algo_params_dict:
+            params_items.append("n_estimators=50")
+        if "max_depth" not in algo_params_dict:
+            params_items.append("max_depth=3")
+    elif "RandomForest" in algo_class_name:
+        if "n_estimators" not in algo_params_dict:
+            params_items.append("n_estimators=50")
 
     no_random_state_algos = {
         "KNeighborsClassifier", "KNeighborsRegressor",
