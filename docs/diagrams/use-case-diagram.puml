@@ -1,91 +1,80 @@
 @startuml
+' Current-state ML Playground use-case diagram based on main-branch UI and API routes.
 title ML Playground — Use Case Diagram
 left to right direction
 skinparam backgroundColor white
 skinparam shadowing false
 skinparam linetype ortho
-skinparam packageStyle rectangle
 skinparam defaultFontName Arial
 skinparam defaultFontSize 13
-skinparam actorStyle awesome
+skinparam actorStyle stickman
 skinparam usecase {
-  BackgroundColor #F7F5FB
+  BackgroundColor #F8F6FC
   BorderColor #4B3B7C
-  ArrowColor #4B3B7C
 }
 skinparam rectangle {
   BorderColor #4B3B7C
   BackgroundColor #FFFFFF
 }
 skinparam actor {
-  BorderColor #3F315F
-  FontColor #211A34
+  BorderColor #392C59
+  FontColor #312547
 }
 
 actor "Platform User" as User
+actor "Google OAuth Provider" as Google
+actor "External REST API Client" as ApiClient
 actor "Classroom Instructor" as Instructor
 actor "Classroom Student" as Student
-actor "External Prediction Client" as Client
 
 rectangle "ML Playground" {
-  (Register Account) as UC_Register
-  (Sign In / Sign Out) as UC_Auth
-  (Manage Datasets) as UC_Dataset
-  (Upload CSV Dataset) as UC_Upload
-  (View Dataset Profile and Quality) as UC_Profile
-  (Get Algorithm Recommendations) as UC_Recommend
-  (Configure and Launch Training) as UC_Train
-  (Monitor / Cancel Training Job) as UC_Job
-  (View Training Results and Compare Experiments) as UC_Results
-  (Edit Pipeline / Python Experiment Code) as UC_Code
-  (Manage Model Deployments) as UC_Deploy
-  (Manage Model Registry and Versions) as UC_Registry
-  (Run Model Predictions) as UC_Predict
-  (Read User Guide) as UC_Guide
+  (Register, sign in and sign out) as UC_Account
+  (Sign in with Google) as UC_Google
+  (Upload CSV or load a ready-made example) as UC_Upload
+  (Inspect dataset profile and data quality) as UC_Profile
+  (Select features / target and get algorithm recommendations) as UC_ConfigureData
+  (Configure and launch a training job) as UC_Train
+  (Monitor or cancel training jobs) as UC_MonitorTraining
+  (Review results, metrics, explainability and experiment comparisons) as UC_Results
+  (Edit and execute Python pipeline code) as UC_Code
   (Use AI Copilot) as UC_Copilot
+  (Read the ML Playground user guide) as UC_Guide
+  (Manage model deployments) as UC_Deploy
+  (Manage model registry and model versions) as UC_Registry
+  (Monitor deployment status and drift) as UC_Drift
+  (Request predictions through the REST API) as UC_Predict
 
-  (Create Classroom and Assignments) as UC_CreateClass
-  (Manage Classroom Roster) as UC_Roster
-  (Review Submissions and Grades) as UC_Grade
-  (Join Classroom) as UC_Join
-  (Complete Lab Assignment / Exam) as UC_Exam
-  (Submit Lab Work) as UC_Submit
-
-  UC_Dataset ..> UC_Upload : <<include>>
-  UC_Dataset ..> UC_Profile : <<include>>
-  UC_Train ..> UC_Recommend : <<extend>>
-  UC_Results ..> UC_Job : <<include>>
-  UC_Deploy ..> UC_Registry : <<extend>>
-  UC_Exam ..> UC_Submit : <<include>>
+  (Create classrooms and assignments) as UC_CreateClassroom
+  (Manage classroom roster and invitations) as UC_Roster
+  (Review submissions, grade work and export grades) as UC_Grade
+  (Join a classroom or resume an exam) as UC_Join
+  (Complete and submit lab work / exam) as UC_Submit
 }
 
-User --> UC_Register
-User --> UC_Auth
-User --> UC_Dataset
-User --> UC_Recommend
-User --> UC_Train
-User --> UC_Job
-User --> UC_Results
-User --> UC_Code
-User --> UC_Deploy
-User --> UC_Registry
-User --> UC_Predict
-User --> UC_Guide
-User --> UC_Copilot
-
-Instructor --> UC_CreateClass
-Instructor --> UC_Roster
-Instructor --> UC_Grade
-Instructor --> UC_Join
-Student --> UC_Join
-Student --> UC_Exam
-Student --> UC_Submit
-
-Client --> UC_Predict
+' Solid, undirected associations: actor-to-use-case relationships.
+User -- UC_Account
+User -- UC_Google
+User -- UC_Upload
+User -- UC_Profile
+User -- UC_ConfigureData
+User -- UC_Train
+User -- UC_MonitorTraining
+User -- UC_Results
+User -- UC_Code
+User -- UC_Copilot
+User -- UC_Guide
+User -- UC_Deploy
+User -- UC_Registry
+User -- UC_Drift
+Google -- UC_Google
+ApiClient -- UC_Predict
+Instructor -- UC_CreateClassroom
+Instructor -- UC_Roster
+Instructor -- UC_Grade
+Student -- UC_Join
+Student -- UC_Submit
 
 note bottom of UC_Predict
-  Covers the API prediction endpoints
-  and deployment-specific prediction route.
+  Represents the API prediction capability exposed by the backend.
 end note
-
 @enduml
