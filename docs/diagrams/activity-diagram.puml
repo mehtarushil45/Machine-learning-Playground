@@ -1,7 +1,6 @@
 @startuml
 title ML Playground — Activity Diagram
-caption Current-state core workflow: dataset ingestion to model-training results
-top to bottom direction
+caption Dataset ingestion to asynchronous training results
 skinparam backgroundColor white
 skinparam shadowing false
 skinparam defaultFontName Arial
@@ -9,107 +8,79 @@ skinparam defaultFontSize 13
 skinparam activityStyle roundedBox
 skinparam ArrowColor #766B8A
 skinparam activity {
-  BackgroundColor #F8F6FC
+  BackgroundColor #FFFFFF
   BorderColor #4B3B7C
   FontColor #241D35
   DiamondBackgroundColor #FFF7E8
-  DiamondBorderColor #A8751A
+  DiamondBorderColor #B07C27
   StartColor #4B3B7C
-  EndColor #6E1423
+  EndColor #211A34
   BarColor #4B3B7C
-}
-skinparam partition {
-  BorderColor #D8D1E5
-  BackgroundColor #FCFBFE
-  FontColor #392C59
 }
 
 start
 |Platform User|
 :Upload a CSV or choose a ready-made example;
+
 |Web App|
 :Validate CSV and parse dataset;
-while (Dataset invalid?) is (yes)
+while (CSV invalid?) is (yes)
   :Display validation error;
   |Platform User|
-  :Choose a different CSV or example;
+  :Choose another file or example;
   |Web App|
   :Validate CSV and parse dataset;
 endwhile (no)
-
-:Initialize active project with dataset;
-:Compute or retrieve dataset profile and health report;
-:Compute or retrieve algorithm recommendations;
+:Initialize active dataset project;
+:Compute or retrieve dataset profile and quality report;
+:Generate algorithm recommendations;
 
 |Platform User|
-:Review profile and data-quality findings;
+:Review profile and quality findings;
 :Select target and input features;
-:Configure algorithm, scaler, imputer,
-train/test split, random seed and cross-validation;
+:Configure algorithm, preprocessing and train/test split;
 
 |Web App|
 :Validate training configuration;
-while (Configuration invalid?) is (yes)
-  :Display inline validation errors;
+while (Settings invalid?) is (yes)
+  :Show inline validation errors;
   |Platform User|
   :Correct target, features or settings;
   |Web App|
   :Validate training configuration;
 endwhile (no)
+:Submit training job request;
 
-:Submit POST /api/v1/jobs/train;
 |FastAPI API|
 :Validate request and create owner-scoped job record;
-:Queue asynchronous Celery training task;
+:Queue Celery task and return job ID;
 
 fork
+  |Web App|
+  :Monitor job status via SSE or polling;
+  while (Terminal status received?) is (no)
+    :Read latest job status and progress;
+  endwhile (yes)
+fork again
   |Celery Worker|
   :Mark job RUNNING;
   :Load and validate training dataset;
-  :Detect ML task, build preprocessing pipeline
-and split data;
-  :Run hyperparameter tuning and cross-validation
-when configured; fit final estimator;
+  :Detect task type, build preprocessing pipeline and split data;
+  :Tune and cross-validate when configured; fit final estimator;
   :Compute evaluation metrics and feature importance;
-  :Generate report; save model artifact;
-register model and save experiment;
+  :Generate report, save model artifact, register model and save experiment;
   if (Training pipeline succeeds?) then (yes)
-    :Persist COMPLETED status, metrics
-and model/artifact references;
+    :Persist COMPLETED status, metrics and artifact references;
   else (no)
     :Persist FAILED status and error details;
   endif
-fork again
-  |Web App|
-  :Open training view with job ID;
-  repeat
-    :Receive job progress via SSE or polling;
-    if (User requests cancellation?) then (yes)
-      |Platform User|
-      :Click Cancel;
-      |Web App|
-      :Send POST /api/v1/jobs/{job_id}/cancel;
-      |FastAPI API|
-      :Enforce job ownership and request cancellation;
-      |Web App|
-    endif
-  repeat while (Job remains active?) is (yes) not (no)
 end fork
 
 |Web App|
-if (Final job status?) then (COMPLETED)
-  :Display metrics, model results
-and feature importance;
-  |Platform User|
-  :Review model performance;
-  stop
-elseif (FAILED)
-  |Web App|
-  :Display failure status and error details;
-  stop
-else (CANCELLED)
-  |Web App|
-  :Display cancellation status;
-  stop
+if (Job status is COMPLETED?) then (yes)
+  :Display metrics, model results and feature importance;
+else (no)
+  :Display failure or cancellation status;
 endif
+stop
 @enduml
