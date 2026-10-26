@@ -295,7 +295,7 @@ describe('Classroom Entry & Management Flow (Parts B - G)', () => {
       expect(screen.getByText('SUBMITTED')).toBeInTheDocument();
       expect(screen.getByText('92.5 / 100')).toBeInTheDocument();
       expect(screen.getByText('Export CSV')).toBeInTheDocument();
-      expect(screen.getByText('Projector View')).toBeInTheDocument();
+      expect(screen.queryByText('Projector View')).not.toBeInTheDocument();
       expect(screen.queryByText(/Reset Code/i)).not.toBeInTheDocument();
     });
   });

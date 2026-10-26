@@ -1,18 +1,17 @@
 import React, { useState } from 'react';
-import { X, Plus, Copy, Check, Presentation, ShieldCheck } from 'lucide-react';
+import { X, Plus, Copy, Check, ShieldCheck } from 'lucide-react';
 import { ClassroomService, type ClassroomCreateEnhanced } from '../../services/api';
 
 interface CreateClassroomModalProps {
   onClose: () => void;
   onCreated: (classroom: any) => void;
-  onOpenProjector: (code: string, name: string, courseId?: string) => void;
+  onOpenProjector?: (code: string, name: string, courseId?: string) => void;
   onShowToast?: (title: string, description?: string, type?: 'success' | 'info' | 'error') => void;
 }
 
 export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
   onClose,
   onCreated,
-  onOpenProjector,
   onShowToast,
 }) => {
   const [name, setName] = useState('');
@@ -164,20 +163,6 @@ export const CreateClassroomModal: React.FC<CreateClassroomModalProps> = ({
                 {copiedLink ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4 text-[#00F5A0]" />}
                 <span>{copiedLink ? 'Link Copied!' : 'Copy Invite Link'}</span>
               </button>
-
-              {onOpenProjector && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenProjector(createdResult.join_code, createdResult.name, createdResult.course_id);
-                    onClose();
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#241B42] hover:bg-[#2E2254] text-xs font-bold text-[#F5F1EC] border border-[rgba(107,92,166,0.3)] transition-all"
-                >
-                  <Presentation className="w-4 h-4 text-[#00D4FF]" />
-                  <span>Projector Mode</span>
-                </button>
-              )}
 
             </div>
 

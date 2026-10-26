@@ -18,7 +18,6 @@ import { AuthContext } from '../../providers/AuthContext';
 import { CreateClassroomModal } from './CreateClassroomModal';
 import { JoinClassroomModal } from './JoinClassroomModal';
 import { StudentDetailsModal } from './StudentDetailsModal';
-import { ProjectorViewModal } from './ProjectorViewModal';
 
 interface ClassroomEntryViewProps {
   onOpenClassroom: (classroom: ClassroomSummary, role: 'owner' | 'student') => void;
@@ -47,12 +46,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
   const [prefilledJoinCode, setPrefilledJoinCode] = useState('');
   const [detailsClassroomId, setDetailsClassroomId] = useState<string | null>(null);
 
-  // Projector view from entry
-  const [projectorData, setProjectorData] = useState<{
-    code: string;
-    name: string;
-    courseId?: string | null;
-  } | null>(null);
+
 
   // Active section tab: 'all' | 'owned' | 'joined'
   const [activeTab, setActiveTab] = useState<'all' | 'owned' | 'joined'>('all');
@@ -413,9 +407,6 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
           onCreated={() => {
             fetchMyClassrooms();
           }}
-          onOpenProjector={(code, name, courseId) => {
-            setProjectorData({ code, name, courseId });
-          }}
           onShowToast={onShowToast}
         />
       )}
@@ -443,15 +434,7 @@ export const ClassroomEntryView: React.FC<ClassroomEntryViewProps> = ({
         />
       )}
 
-      {/* Projector View Modal */}
-      {projectorData && (
-        <ProjectorViewModal
-          joinCode={projectorData.code}
-          classroomName={projectorData.name}
-          courseId={projectorData.courseId}
-          onClose={() => setProjectorData(null)}
-        />
-      )}
+
 
     </div>
   );

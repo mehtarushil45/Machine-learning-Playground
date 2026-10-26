@@ -590,9 +590,9 @@ function AppContent() {
             zIndex: 1000,
           }}
         >
-          {/* Header left: dataset + experiment context pill (shown when project initialized) */}
+          {/* Header left: dataset + experiment context pill (shown when project initialized and not on classroom tab) */}
           <div style={{ width: 220, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            {isProjectInitialized && dataset ? (
+            {isProjectInitialized && dataset && activeTab !== 'classroom' ? (
               <>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6,

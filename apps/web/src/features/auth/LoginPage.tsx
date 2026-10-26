@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User, Lock, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Lock, Eye, EyeOff, Loader2, AlertCircle, CheckCircle2, Shield, FileText, X } from 'lucide-react';
 import { useAuthContext } from '../../providers/AuthContext';
 
 export interface LoginPageProps {
@@ -21,6 +21,9 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  // Legal Modals state (Privacy Policy & Terms of Service)
+  const [legalModal, setLegalModal] = useState<'privacy' | 'terms' | null>(null);
 
   // OAuth Account Chooser Modal state
   const [oauthModalProvider, setOauthModalProvider] = useState<'google' | 'microsoft' | null>(null);
@@ -1296,12 +1299,44 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
             userSelect: 'none',
           }}
         >
-          <span style={{ cursor: 'pointer' }} onMouseEnter={(e) => (e.currentTarget.style.color = '#FFFFFF')} onMouseLeave={(e) => (e.currentTarget.style.color = '#94A3B8')}>
+          <button
+            type="button"
+            onClick={() => setLegalModal('privacy')}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              fontSize: 'inherit',
+              color: '#94A3B8',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: '3px',
+              transition: 'color 0.15s ease',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#FFFFFF')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#94A3B8')}
+          >
             Privacy Policy
-          </span>
-          <span style={{ cursor: 'pointer' }} onMouseEnter={(e) => (e.currentTarget.style.color = '#FFFFFF')} onMouseLeave={(e) => (e.currentTarget.style.color = '#94A3B8')}>
+          </button>
+          <button
+            type="button"
+            onClick={() => setLegalModal('terms')}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              fontSize: 'inherit',
+              color: '#94A3B8',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: '3px',
+              transition: 'color 0.15s ease',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = '#FFFFFF')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = '#94A3B8')}
+          >
             Terms of Service
-          </span>
+          </button>
           <span>© 2026 ML Platform Inc.</span>
         </footer>
       </div>
@@ -1736,6 +1771,276 @@ export function LoginPage({ onSuccess, onNavigate, defaultMode = 'login' }: Logi
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Legal Policy Modal (Privacy Policy & Terms of Service) ── */}
+      {legalModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={legalModal === 'privacy' ? 'Privacy Policy' : 'Terms of Service'}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 110,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(5, 7, 15, 0.82)',
+            backdropFilter: 'blur(10px)',
+            padding: 20,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setLegalModal(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 620,
+              maxHeight: '85vh',
+              background: '#0B0F19',
+              borderRadius: 18,
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(99, 102, 241, 0.2)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              animation: 'fadeIn 0.2s ease-out',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '20px 24px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'linear-gradient(180deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    background: legalModal === 'privacy' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(14, 165, 233, 0.15)',
+                    border: `1px solid ${legalModal === 'privacy' ? 'rgba(99, 102, 241, 0.3)' : 'rgba(14, 165, 233, 0.3)'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: legalModal === 'privacy' ? '#818CF8' : '#38BDF8',
+                  }}
+                >
+                  {legalModal === 'privacy' ? <Shield style={{ width: 20, height: 20 }} /> : <FileText style={{ width: 20, height: 20 }} />}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#F8FAFC' }}>
+                    {legalModal === 'privacy' ? 'Privacy Policy' : 'Terms of Service'}
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 12, color: '#94A3B8' }}>
+                    {legalModal === 'privacy'
+                      ? 'Machine Learning Playground & Lab Data Governance'
+                      : 'Platform Compute, Classroom Integrity & Acceptable Use'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLegalModal(null)}
+                title="Close"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  color: '#94A3B8',
+                  cursor: 'pointer',
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#FFFFFF';
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.12)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = '#94A3B8';
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.06)';
+                }}
+              >
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div
+              style={{
+                padding: '22px 24px',
+                overflowY: 'auto',
+                fontSize: 13.5,
+                lineHeight: 1.65,
+                color: '#CBD5E1',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 18,
+              }}
+            >
+              {legalModal === 'privacy' ? (
+                <>
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      1. Workspace Data Isolation & Ownership
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      All uploaded datasets (CSV, tabular, image archives), model artifacts (Scikit-Learn, PyTorch, XGBoost checkpoints),
+                      and experiment runs belong exclusively to your account. Training artifacts stored in object storage (MinIO/S3)
+                      are isolated by workspace ID and are never exposed across tenants.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      2. Code Execution & Algorithm Confidentiality
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      Python kernels and automated ML workers execute isolated runs in secure sandbox environments.
+                      Your model code, hyperparameters, and proprietary pipeline logic are strictly confidential and will never
+                      be used to train foundation models or shared with third parties.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      3. Supervised Exam & Classroom Integrity
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      When accessing Supervised Classroom or Lab Exam environments, client-side integrity measures (such as window blur,
+                      fullscreen lock enforcement, and Monaco IDE audit logs) are captured solely for instructor evaluation. No intrusive desktop
+                      surveillance or audio monitoring is performed.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      4. Authentication & Security
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      We issue stateless, cryptographically signed HMAC-SHA256 JWT tokens with strict expiration. OAuth integrations
+                      (Google and Microsoft) request only basic profile identity (name, email) and never store external passwords.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      5. Data Retention & Deletion Rights
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      You maintain full control over your machine learning workspace. You can purge local workspace caches, delete
+                      trained models, and remove submitted datasets at any time via your account or platform administrator.
+                    </p>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      1. Authorized Compute & Resource Allocation
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      Compute kernels, training workers, and AutoML optimization algorithms are made available for machine learning education,
+                      research, and prototyping. Running abusive workloads, cryptocurrency miners, denial-of-service tests, or malicious scripts
+                      will result in immediate termination of access.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      2. Academic Integrity & Exam Conduct
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      Students participating in classroom lab assignments and timed practical exams must adhere to institutional codes of conduct.
+                      Attempting to manipulate Safe Exam Browser hooks, bypass automated benchmark rubrics, or forge submission receipts
+                      violates academic standards.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      3. Fair-Use Throttling & Rate Limits
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      To guarantee shared availability across university cohorts and research teams, hyperparameter tuning sweeps and batch
+                      inference pipelines are subject to fair-use rate limits.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      4. Service Reliability & Backups
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      While the platform strives for high availability across training nodes, users should maintain backups of critical model weights
+                      and dataset files. ML Playground is not liable for volatile in-memory states lost during unexpected worker restarts.
+                    </p>
+                  </section>
+
+                  <section>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>
+                      5. Policy Modifications
+                    </h4>
+                    <p style={{ margin: 0 }}>
+                      We may periodically update these terms to reflect new algorithmic features, distributed backends, or institutional requirements.
+                      Continued usage constitutes acceptance of revised terms.
+                    </p>
+                  </section>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '16px 24px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'rgba(15, 23, 42, 0.5)',
+              }}
+            >
+              <span style={{ fontSize: 11.5, color: '#64748B' }}>
+                Effective Date: October 2026 • Version 2.4
+              </span>
+              <button
+                type="button"
+                onClick={() => setLegalModal(null)}
+                style={{
+                  background: 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '8px 18px',
+                  color: '#FFFFFF',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(99, 102, 241, 0.35)',
+                  transition: 'transform 0.1s ease, filter 0.15s ease',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.filter = 'brightness(1.1)')}
+                onMouseLeave={(e) => (e.currentTarget.style.filter = 'brightness(1.0)')}
+              >
+                Understood
+              </button>
+            </div>
           </div>
         </div>
       )}

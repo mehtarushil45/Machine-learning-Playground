@@ -524,7 +524,7 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
 
   /* ── Analysis State ─────────────────────────────────────────────── */
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
-  const [health, setHealth] = useState<DatasetHealthReport | null>(null);
+  const [, setHealth] = useState<DatasetHealthReport | null>(null);
   const [recommendations, setRecommendations] = useState<DatasetRecommendations | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
@@ -818,8 +818,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
   }, [setSelectedFeatures]);
 
   /* ── Calculations & Data Derived ────────────────────────────────── */
-
-  const issueCount = (health?.issues || []).filter((i) => i.severity !== 'info').length;
 
   const isTargetNumeric = useMemo(() => {
     if (!dataset || !selectedTarget) return false;
@@ -1693,57 +1691,6 @@ export const DatasetProfilerPage = memo(function DatasetProfilerPage({
                   {/* Type Composition Meter */}
                   {profile?.columns && profile.columns.length > 0 && (
                     <TypeCompositionMeter columns={profile.columns} />
-                  )}
-
-                  {/* Next Best Actions */}
-                  {health?.recommendations && health.recommendations.length > 0 && (
-                    <div>
-                      <div
-                        style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          color: BB.muted,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.08em',
-                          marginBottom: 4,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                        }}
-                      >
-                        <span>Next best actions</span>
-                        {issueCount > 0 && (
-                          <span
-                            style={{
-                              fontSize: 8,
-                              padding: '1px 5px',
-                              borderRadius: 10,
-                              background: 'rgba(178,58,78,0.2)',
-                              color: BB.maroonLight,
-                            }}
-                          >
-                            {issueCount} issues
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {health.recommendations.slice(0, 2).map((rec, i) => (
-                          <div
-                            key={i}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: 6,
-                              fontSize: 10,
-                              lineHeight: 1.35,
-                            }}
-                          >
-                            <span style={{ color: BB.primaryLight, flexShrink: 0 }}>→</span>
-                            <span style={{ color: BB.muted }}>{rec}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
                   )}
                 </div>
 

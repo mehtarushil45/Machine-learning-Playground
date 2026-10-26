@@ -8,7 +8,6 @@ import {
   X,
   Trash2,
   Clock,
-  Presentation,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
@@ -19,7 +18,6 @@ import {
   type RosterPaginationResponse,
 } from '../../services/api';
 import { ParticipantInspectionModal } from './ParticipantInspectionModal';
-import { ProjectorViewModal } from './ProjectorViewModal';
 
 interface ClassroomRosterTabProps {
   classroom: {
@@ -62,7 +60,6 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
 
   // Modals
   const [inspectUserId, setInspectUserId] = useState<string | null>(null);
-  const [showProjector, setShowProjector] = useState(false);
 
   const fetchRoster = async () => {
     setIsLoading(true);
@@ -222,14 +219,6 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
 
         {/* Code Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowProjector(true)}
-            data-testid="open-projector-btn"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-linear-to-r from-[#00D4FF] to-[#00F5A0] text-xs font-bold text-[#0B0912] shadow transition-all hover:opacity-90"
-          >
-            <Presentation className="w-4 h-4" />
-            <span>Projector View</span>
-          </button>
 
           <button
             onClick={handleToggleCode}
@@ -489,15 +478,7 @@ export const ClassroomRosterTab: React.FC<ClassroomRosterTabProps> = ({
         />
       )}
 
-      {/* Projector View Modal */}
-      {showProjector && (
-        <ProjectorViewModal
-          joinCode={currentCode}
-          classroomName={classroom.name}
-          courseId={classroom.course_id}
-          onClose={() => setShowProjector(false)}
-        />
-      )}
+
     </div>
   );
 };

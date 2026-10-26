@@ -137,7 +137,7 @@ export const ClassroomHub: React.FC<ClassroomHubProps> = ({ onShowToast, initial
 
   // Primary View Mode: 'entry' | 'instructor' | 'student' | 'lobby' | 'classroom'
   const [viewMode, setViewMode] = useState<'entry' | 'instructor' | 'student' | 'lobby' | 'classroom'>(
-    initialView || 'student'
+    initialView || 'entry'
   );
   const [activeClassroom, setActiveClassroom] = useState<ClassroomSummary | null>(null);
   const [detailsClassroomId, setDetailsClassroomId] = useState<string | null>(null);

@@ -92,7 +92,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
   };
 
   it('renders lab workspace, code studio controls, and exam selector', async () => {
-    render(<ClassroomHub />);
+    render(<ClassroomHub initialView="student" />);
 
     await waitForExamLoaded();
     expect(screen.getByText('lab_exam.py')).toBeInTheDocument();
@@ -103,7 +103,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
   });
 
   it('allows switching between exams in the selector', async () => {
-    render(<ClassroomHub />);
+    render(<ClassroomHub initialView="student" />);
 
     await waitForExamLoaded();
 
@@ -133,7 +133,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
       logs: [],
     });
 
-    render(<ClassroomHub />);
+    render(<ClassroomHub initialView="student" />);
     await waitForExamLoaded();
 
     // Click deploy
@@ -213,7 +213,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
       summary: 'Automated evaluation completed: Score 95.0/100.',
     });
 
-    render(<ClassroomHub />);
+    render(<ClassroomHub initialView="student" />);
     await waitForExamLoaded();
 
     // Deploy
@@ -242,7 +242,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
       message: 'Exam submission locked successfully.',
     });
 
-    render(<ClassroomHub />);
+    render(<ClassroomHub initialView="student" />);
     await waitForExamLoaded();
 
     // Click Submit Exam in toolbar
@@ -271,7 +271,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
       row_count: 2,
     });
 
-    render(<ClassroomHub />);
+    render(<ClassroomHub initialView="student" />);
     await waitForExamLoaded();
 
     // Verify Preview Data button is present
@@ -310,7 +310,7 @@ describe('University Lab Exam ClassroomHub', { timeout: 20000 }, () => {
       probabilities: { '0': 0.15, '1': 0.85 },
     });
 
-    render(<ClassroomHub />);
+    render(<ClassroomHub initialView="student" />);
     await waitForExamLoaded();
 
     // Deploy model
