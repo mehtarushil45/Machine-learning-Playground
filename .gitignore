@@ -120,3 +120,8 @@ terraform.tfstate
 terraform.tfstate.*
 .terraform/
 .cora/
+
+# ── Software Engineering Documentation (local only, not for version control) ──
+software engineering.md
+software engineering.pdf
+software_engineering.html
